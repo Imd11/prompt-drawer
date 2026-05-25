@@ -1,0 +1,15 @@
+<!doctype html>
+<html>
+<head><style>
+body { margin: 0; background: transparent; }
+button { width: 32px; height: 32px; background: #4a90d9; border: none; border-radius: 6px; cursor: pointer; font-size: 16px; color: white; }
+button:hover { background: #3a7fc8; }
+</style></head>
+<body><button id="btn">P</button>
+<script type="module">
+document.getElementById('btn').onclick = () => {
+  if (window.opener) window.opener.postMessage('open-popover', '*');
+};
+</script>
+</body>
+</html>
