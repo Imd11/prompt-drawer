@@ -1,7 +1,9 @@
 use tauri::Manager;
 
 mod platform;
-pub use platform::{accessibility_status, frontmost_app, AccessibilityStatus, FrontmostApp};
+pub use platform::{accessibility_status, frontmost_app, AccessibilityStatus, FrontmostApp, CandidateInput};
+mod overlay_position;
+pub use overlay_position::{prompt_button_position, OverlayPoint};
 
 #[tauri::command]
 fn accessibility_status_cmd() -> AccessibilityStatus {
@@ -13,6 +15,12 @@ fn frontmost_app_cmd() -> Option<FrontmostApp> {
     frontmost_app()
 }
 
+#[tauri::command]
+fn current_input_target() -> Option<platform::InputTarget> {
+    // TODO: Implement real input detection
+    None
+}
+
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     tauri::Builder::default()
@@ -20,7 +28,7 @@ pub fn run() {
         .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_fs::init())
         .plugin(tauri_plugin_shell::init())
-        .invoke_handler(tauri::generate_handler![accessibility_status_cmd, frontmost_app_cmd])
+        .invoke_handler(tauri::generate_handler![accessibility_status_cmd, frontmost_app_cmd, current_input_target])
         .setup(|app| {
             let window = app.get_webview_window("main").unwrap();
             window.set_title("Prompt Picker").unwrap();

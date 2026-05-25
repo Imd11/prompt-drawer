@@ -1,8 +1,16 @@
 pub mod macos;
 
 pub use macos::{accessibility_status, frontmost_app, AccessibilityStatus, FrontmostApp};
+use serde::Serialize;
 
-#[derive(Clone, Debug, PartialEq)]
+#[derive(Clone, Debug, Serialize)]
+pub struct InputTarget {
+    pub frame: CandidateInput,
+    pub button_position: (f64, f64),
+    pub app: Option<FrontmostApp>,
+}
+
+#[derive(Clone, Debug, Serialize, PartialEq)]
 pub struct CandidateInput {
     pub x: f64,
     pub y: f64,
@@ -21,7 +29,6 @@ pub fn choose_main_input(candidates: &[CandidateInput]) -> Option<CandidateInput
     if valid.is_empty() {
         return None;
     }
-    // Sort by area descending
     let mut sorted = valid.to_vec();
     sorted.sort_by(|a, b| b.area().partial_cmp(&a.area()).unwrap());
     Some((*sorted[0]).clone())

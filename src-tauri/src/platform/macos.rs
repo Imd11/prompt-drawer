@@ -2,7 +2,7 @@
 
 use serde::Serialize;
 
-#[derive(Debug, Serialize)]
+#[derive(Clone, Debug, Serialize)]
 pub struct FrontmostApp {
     pub name: String,
     pub bundle_id: String,
