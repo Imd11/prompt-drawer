@@ -1,11 +1,18 @@
 import { describe, expect, it, vi } from "vitest";
-import { render, screen, fireEvent } from "@testing-library/react";
+import { render, screen, fireEvent, waitFor, act } from "@testing-library/react";
 import { App } from "../App";
 import type { PromptItem } from "../shared/promptTypes";
 
 // Mock Tauri
 vi.mock("@tauri-apps/api/core", () => ({
   invoke: () => Promise.resolve()
+}));
+
+// Mock fs plugin
+vi.mock("@tauri-apps/plugin-fs", () => ({
+  readTextFile: vi.fn(),
+  writeTextFile: vi.fn(),
+  BaseDirectory: { AppData: "AppData" }
 }));
 
 const mockPrompts: PromptItem[] = [
@@ -20,14 +27,35 @@ const mockPrompts: PromptItem[] = [
 ];
 
 describe("app", () => {
-  it("shows prompt list in popover mode by default", () => {
-    render(<App prompts={mockPrompts} />);
-    expect(screen.getByText("Test Prompt")).toBeTruthy();
+  it("shows prompt list in popover mode by default", async () => {
+    const { readTextFile } = await import("@tauri-apps/plugin-fs");
+    (readTextFile as ReturnType<typeof vi.fn>).mockResolvedValueOnce(JSON.stringify({ version: 1, prompts: mockPrompts }));
+
+    await act(async () => {
+      render(<App />);
+    });
+
+    await waitFor(() => {
+      expect(screen.getByText("Test Prompt")).toBeTruthy();
+    });
   });
 
-  it("shows prompt manager when selecting Manage Prompts", () => {
-    render(<App prompts={mockPrompts} />);
-    fireEvent.click(screen.getByText("Manage Prompts"));
+  it("shows prompt manager when selecting Manage Prompts", async () => {
+    const { readTextFile } = await import("@tauri-apps/plugin-fs");
+    (readTextFile as ReturnType<typeof vi.fn>).mockResolvedValueOnce(JSON.stringify({ version: 1, prompts: mockPrompts }));
+
+    await act(async () => {
+      render(<App />);
+    });
+
+    await waitFor(() => {
+      expect(screen.getByText("Test Prompt")).toBeTruthy();
+    });
+
+    await act(async () => {
+      fireEvent.click(screen.getByText("Manage Prompts"));
+    });
+
     expect(screen.getByText("Manage Prompts")).toBeTruthy();
   });
 });
