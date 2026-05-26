@@ -8,9 +8,10 @@ pub fn show_prompt_button(x: f64, y: f64, app: tauri::AppHandle) -> Result<(), S
     if let Some(window) = app.get_webview_window(BUTTON_WINDOW_LABEL) {
         window.set_position(tauri::Position::Physical(tauri::PhysicalPosition { x: x as i32, y: y as i32 })).map_err(|e| e.to_string())?;
         window.show().map_err(|e| e.to_string())?;
+        crate::macos_panels::configure_non_activating_panel(&window)?;
         Ok(())
     } else {
-        WebviewWindowBuilder::new(&app, BUTTON_WINDOW_LABEL, WebviewUrl::App("overlay.html".into()))
+        let window = WebviewWindowBuilder::new(&app, BUTTON_WINDOW_LABEL, WebviewUrl::App("overlay.html".into()))
             .title("Prompt Button")
             .inner_size(32.0, 32.0)
             .resizable(false)
@@ -20,6 +21,7 @@ pub fn show_prompt_button(x: f64, y: f64, app: tauri::AppHandle) -> Result<(), S
             .position(x, y)
             .build()
             .map_err(|e| e.to_string())?;
+        crate::macos_panels::configure_non_activating_panel(&window)?;
         Ok(())
     }
 }
@@ -37,9 +39,10 @@ pub fn show_prompt_popover(x: f64, y: f64, app: tauri::AppHandle) -> Result<(), 
     if let Some(window) = app.get_webview_window(POPOVER_WINDOW_LABEL) {
         window.set_position(tauri::Position::Physical(tauri::PhysicalPosition { x: x as i32, y: y as i32 })).map_err(|e| e.to_string())?;
         window.show().map_err(|e| e.to_string())?;
+        crate::macos_panels::configure_non_activating_panel(&window)?;
         Ok(())
     } else {
-        WebviewWindowBuilder::new(&app, POPOVER_WINDOW_LABEL, WebviewUrl::App("index.html".into()))
+        let window = WebviewWindowBuilder::new(&app, POPOVER_WINDOW_LABEL, WebviewUrl::App("index.html".into()))
             .title("Prompt Picker")
             .inner_size(320.0, 400.0)
             .resizable(true)
@@ -49,6 +52,7 @@ pub fn show_prompt_popover(x: f64, y: f64, app: tauri::AppHandle) -> Result<(), 
             .position(x, y)
             .build()
             .map_err(|e| e.to_string())?;
+        crate::macos_panels::configure_non_activating_panel(&window)?;
         Ok(())
     }
 }

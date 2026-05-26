@@ -6,6 +6,8 @@ mod overlay_position;
 pub use overlay_position::{prompt_button_position, OverlayPoint};
 mod windows;
 pub use windows::*;
+mod macos_panels;
+pub use macos_panels::configure_non_activating_panel;
 
 #[tauri::command]
 fn accessibility_status_cmd() -> AccessibilityStatus {
