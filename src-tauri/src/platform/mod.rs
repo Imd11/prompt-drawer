@@ -1,6 +1,6 @@
 pub mod macos;
 
-pub use macos::{accessibility_status, frontmost_app, AccessibilityStatus, FrontmostApp};
+pub use macos::{accessibility_status, frontmost_app, AccessibilityStatus, FrontmostApp, paste_prompt_to_app};
 use serde::Serialize;
 
 #[derive(Clone, Debug, Serialize)]

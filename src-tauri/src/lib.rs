@@ -29,6 +29,11 @@ fn paste_prompt(body: String) -> Result<(), String> {
     platform::macos::paste_prompt(&body)
 }
 
+#[tauri::command]
+fn paste_prompt_to_app(body: String, bundle_id: String) -> Result<(), String> {
+    platform::macos::paste_prompt_to_app(&body, &bundle_id)
+}
+
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     tauri::Builder::default()
@@ -41,6 +46,7 @@ pub fn run() {
             frontmost_app_cmd,
             current_input_target,
             paste_prompt,
+            paste_prompt_to_app,
             show_prompt_button,
             hide_prompt_button,
             show_prompt_popover,

@@ -32,6 +32,7 @@ export function App({ settings = { version: 1, blacklistedApps: [], overlayPlace
   }, []);
 
   const [activeSettings, setActiveSettings] = useState<Settings>(settings);
+  const [lastTargetApp, setLastTargetApp] = useState<{ name: string; bundle_id: string } | null>(null);
 
   useInputTargetPolling(
     activeSettings.blacklistedApps.map((app) => app.bundleId),
@@ -40,7 +41,11 @@ export function App({ settings = { version: 1, blacklistedApps: [], overlayPlace
 
   const handleSelect = async (prompt: PromptItem) => {
     try {
-      await invoke("paste_prompt", { body: prompt.body });
+      if (lastTargetApp?.bundle_id) {
+        await invoke("paste_prompt_to_app", { body: prompt.body, bundle_id: lastTargetApp.bundle_id });
+      } else {
+        await invoke("paste_prompt", { body: prompt.body });
+      }
     } catch (e) {
       console.error("Failed to paste prompt:", e);
     }

@@ -19,6 +19,9 @@ export function useInputTargetPolling(
 ) {
   const [target, setTarget] = useState<InputTarget | null>(null);
   const [showAttached, setShowAttached] = useState(false);
+  const lastTargetAppRef = useRef<FrontmostApp | null>(null);
+  const lastButtonPositionRef = useRef<[number, number] | null>(null);
+  const lastTargetAtRef = useRef(0);
   const pollingRef = useRef<boolean>(true);
 
   useEffect(() => {
@@ -40,11 +43,26 @@ export function useInputTargetPolling(
         if (inputTarget && app) {
           setTarget(inputTarget);
           setShowAttached(true);
+          lastTargetAppRef.current = inputTarget.app;
           const [x, y] = inputTarget.button_position;
           const offset = overlayPlacement.buttonOffset;
           const displayX = offset ? x + offset.x : x;
           const displayY = offset ? y + offset.y : y;
+          lastButtonPositionRef.current = [displayX, displayY];
+          lastTargetAtRef.current = Date.now();
           await showPromptButton(displayX, displayY);
+        } else if (app && app.name === "Prompt Picker" && lastTargetAtRef.current > 0 && lastButtonPositionRef.current) {
+          // Grace period during overlay self-interaction
+          const recentlyHadTarget = Date.now() - lastTargetAtRef.current < 3000;
+          if (recentlyHadTarget) {
+            const [x, y] = lastButtonPositionRef.current;
+            await showPromptButton(x, y);
+            setTimeout(poll, 500 + Math.random() * 500);
+            return;
+          }
+          setTarget(null);
+          setShowAttached(false);
+          await hidePromptButton();
         } else {
           setTarget(null);
           setShowAttached(false);
@@ -73,5 +91,5 @@ export function useInputTargetPolling(
     }
   };
 
-  return { showAttached, openPopover };
+  return { showAttached, openPopover, lastTargetApp: lastTargetAppRef.current };
 }

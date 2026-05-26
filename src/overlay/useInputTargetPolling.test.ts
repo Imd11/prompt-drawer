@@ -91,4 +91,25 @@ describe("useInputTargetPolling", () => {
     expect(hidePromptButton).toHaveBeenCalled();
     expect(showPromptButton).not.toHaveBeenCalled();
   });
+
+  it("keeps the last button position during brief overlay self-interaction", async () => {
+    vi.mocked(getFrontmostApp)
+      .mockResolvedValueOnce({ name: "Codex", bundle_id: "com.openai.codex" })
+      .mockResolvedValueOnce({ name: "Prompt Picker", bundle_id: "local.promptpicker.dev" });
+    vi.mocked(getCurrentInputTarget).mockResolvedValue({
+      frame: { x: 300, y: 748, width: 600, height: 128 },
+      window_frame: { x: 0, y: 0, width: 1200, height: 900 },
+      button_position: [776, 700],
+      app: { name: "Codex", bundle_id: "com.openai.codex" }
+    });
+
+    renderHook(() => useInputTargetPolling([], { buttonOffset: null }));
+
+    await act(async () => {
+      await new Promise((r) => setTimeout(r, 1200));
+    });
+
+    expect(hidePromptButton).not.toHaveBeenCalled();
+    expect(showPromptButton).toHaveBeenCalledWith(776, 700);
+  });
 });
