@@ -3,6 +3,35 @@ use tauri::{Manager, WebviewUrl, WebviewWindowBuilder};
 pub const BUTTON_WINDOW_LABEL: &str = "prompt-button";
 pub const POPOVER_WINDOW_LABEL: &str = "prompt-popover";
 
+#[derive(serde::Serialize)]
+pub struct PromptButtonPosition {
+    pub x: f64,
+    pub y: f64,
+}
+
+#[tauri::command]
+pub fn prompt_button_position_cmd(app: tauri::AppHandle) -> Result<Option<PromptButtonPosition>, String> {
+    let Some(window) = app.get_webview_window(BUTTON_WINDOW_LABEL) else {
+        return Ok(None);
+    };
+    let position = window.outer_position().map_err(|e| e.to_string())?;
+    let scale = window.scale_factor().unwrap_or(1.0);
+    Ok(Some(PromptButtonPosition {
+        x: position.x as f64 / scale,
+        y: position.y as f64 / scale,
+    }))
+}
+
+#[tauri::command]
+pub fn move_prompt_button_to(x: f64, y: f64, app: tauri::AppHandle) -> Result<(), String> {
+    if let Some(window) = app.get_webview_window(BUTTON_WINDOW_LABEL) {
+        window
+            .set_position(tauri::Position::Logical(tauri::LogicalPosition { x, y }))
+            .map_err(|e| e.to_string())?;
+    }
+    Ok(())
+}
+
 #[tauri::command]
 pub fn show_prompt_button(x: f64, y: f64, app: tauri::AppHandle) -> Result<(), String> {
     if let Some(window) = app.get_webview_window(BUTTON_WINDOW_LABEL) {

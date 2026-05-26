@@ -44,7 +44,9 @@ pub fn run() {
             show_prompt_button,
             hide_prompt_button,
             show_prompt_popover,
-            hide_prompt_popover
+            hide_prompt_popover,
+            prompt_button_position_cmd,
+            move_prompt_button_to
         ])
         .setup(|app| {
             let window = app.get_webview_window("main").unwrap();

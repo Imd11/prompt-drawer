@@ -9,6 +9,11 @@ export interface AccessibilityStatus {
   trusted: boolean;
 }
 
+export interface PromptButtonPosition {
+  x: number;
+  y: number;
+}
+
 export async function getAccessibilityStatus(): Promise<AccessibilityStatus> {
   return invoke<AccessibilityStatus>("accessibility_status_cmd");
 }
@@ -39,4 +44,12 @@ export async function showPromptPopover(x: number, y: number): Promise<void> {
 
 export async function hidePromptPopover(): Promise<void> {
   return invoke("hide_prompt_popover");
+}
+
+export async function getPromptButtonPosition(): Promise<PromptButtonPosition | null> {
+  return invoke<PromptButtonPosition | null>("prompt_button_position_cmd");
+}
+
+export async function movePromptButtonTo(x: number, y: number): Promise<void> {
+  return invoke("move_prompt_button_to", { x, y });
 }
