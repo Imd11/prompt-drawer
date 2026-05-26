@@ -53,3 +53,7 @@ export async function getPromptButtonPosition(): Promise<PromptButtonPosition | 
 export async function movePromptButtonTo(x: number, y: number): Promise<void> {
   return invoke("move_prompt_button_to", { x, y });
 }
+
+export async function showPromptPopoverFromButton(): Promise<void> {
+  return invoke("show_prompt_popover_from_button");
+}

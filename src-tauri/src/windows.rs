@@ -93,3 +93,42 @@ pub fn hide_prompt_popover(app: tauri::AppHandle) -> Result<(), String> {
     }
     Ok(())
 }
+
+#[tauri::command]
+pub fn show_prompt_popover_from_button(app: tauri::AppHandle) -> Result<(), String> {
+    const POPOVER_WIDTH: f64 = 320.0;
+    const POPOVER_HEIGHT: f64 = 360.0;
+    const POPOVER_GAP: f64 = 8.0;
+
+    let position = app
+        .get_webview_window(BUTTON_WINDOW_LABEL)
+        .and_then(|window| {
+            let position = window.outer_position().ok()?;
+            let scale = window.scale_factor().unwrap_or(1.0);
+            Some((
+                position.x as f64 / scale + 32.0 + POPOVER_GAP,
+                position.y as f64 / scale,
+            ))
+        })
+        .unwrap_or((100.0, 100.0));
+
+    if let Some(window) = app.get_webview_window(POPOVER_WINDOW_LABEL) {
+        window.set_position(tauri::Position::Physical(tauri::PhysicalPosition { x: position.0 as i32, y: position.1 as i32 })).map_err(|e| e.to_string())?;
+        window.show().map_err(|e| e.to_string())?;
+        crate::macos_panels::configure_non_activating_panel(&window)?;
+        Ok(())
+    } else {
+        let window = WebviewWindowBuilder::new(&app, POPOVER_WINDOW_LABEL, WebviewUrl::App("index.html".into()))
+            .title("Prompt Picker")
+            .inner_size(POPOVER_WIDTH, POPOVER_HEIGHT)
+            .resizable(true)
+            .decorations(false)
+            .always_on_top(true)
+            .skip_taskbar(true)
+            .position(position.0, position.1)
+            .build()
+            .map_err(|e| e.to_string())?;
+        crate::macos_panels::configure_non_activating_panel(&window)?;
+        Ok(())
+    }
+}

@@ -7,9 +7,66 @@ button:hover { background: #3a7fc8; }
 </style></head>
 <body><button id="btn">P</button>
 <script type="module">
-document.getElementById('btn').onclick = () => {
-  if (window.opener) window.opener.postMessage('open-popover', '*');
-};
+const btn = document.getElementById('btn');
+const tauri = window.__TAURI__;
+let start = null;
+let dragging = false;
+let lastMove = null;
+let animationFrame = 0;
+
+function distance(a, b) {
+  return Math.hypot(a.screenX - b.screenX, a.screenY - b.screenY);
+}
+
+async function flushMove() {
+  animationFrame = 0;
+  if (!lastMove || !start) return;
+  await tauri.core.invoke('move_prompt_button_to', {
+    x: start.windowX + lastMove.screenX - start.screenX,
+    y: start.windowY + lastMove.screenY - start.screenY
+  });
+}
+
+btn.addEventListener('pointerdown', async (event) => {
+  const position = await tauri.core.invoke('prompt_button_position_cmd');
+  if (!position) return;
+  start = {
+    screenX: event.screenX,
+    screenY: event.screenY,
+    windowX: position.x,
+    windowY: position.y
+  };
+  dragging = false;
+  lastMove = null;
+  btn.setPointerCapture(event.pointerId);
+});
+
+btn.addEventListener('pointermove', (event) => {
+  if (!start) return;
+  const current = { screenX: event.screenX, screenY: event.screenY };
+  if (!dragging && distance(start, current) < 4) return;
+  dragging = true;
+  lastMove = current;
+  if (!animationFrame) {
+    animationFrame = requestAnimationFrame(flushMove);
+  }
+});
+
+btn.addEventListener('pointerup', async (event) => {
+  if (!start) return;
+  btn.releasePointerCapture(event.pointerId);
+  if (dragging) {
+    const position = await tauri.core.invoke('prompt_button_position_cmd');
+    if (tauri.event?.emit && position) {
+      await tauri.event.emit('prompt-button-drag-ended', position);
+    }
+  } else {
+    await tauri.core.invoke('show_prompt_popover_from_button');
+  }
+  start = null;
+  dragging = false;
+  lastMove = null;
+});
 </script>
 </body>
 </html>
