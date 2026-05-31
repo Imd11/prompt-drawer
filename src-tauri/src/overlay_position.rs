@@ -74,7 +74,10 @@ mod tests {
             width: 400.0,
             height: 100.0,
         };
-        let offset = OverlayOffset { x: 9999.0, y: 9999.0 };
+        let offset = OverlayOffset {
+            x: 9999.0,
+            y: 9999.0,
+        };
 
         let pos = prompt_button_position(&input, &window, 112.0, 40.0, Some(offset));
 

@@ -46,20 +46,16 @@ fn show_popover_mode(x: f64, y: f64, mode: &str, app: &tauri::AppHandle) -> Resu
     }
 
     let url = format!("index.html?mode={}", mode);
-    let window = WebviewWindowBuilder::new(
-        app,
-        POPOVER_WINDOW_LABEL,
-        WebviewUrl::App(url.into()),
-    )
-    .title("Prompt Picker")
-    .inner_size(POPOVER_WIDTH, POPOVER_HEIGHT)
-    .resizable(false)
-    .decorations(false)
-    .always_on_top(true)
-    .skip_taskbar(true)
-    .position(x, y)
-    .build()
-    .map_err(|e| e.to_string())?;
+    let window = WebviewWindowBuilder::new(app, POPOVER_WINDOW_LABEL, WebviewUrl::App(url.into()))
+        .title("Prompt Picker")
+        .inner_size(POPOVER_WIDTH, POPOVER_HEIGHT)
+        .resizable(false)
+        .decorations(false)
+        .always_on_top(true)
+        .skip_taskbar(true)
+        .position(x, y)
+        .build()
+        .map_err(|e| e.to_string())?;
     crate::macos_panels::configure_non_activating_panel(&window)?;
     Ok(())
 }

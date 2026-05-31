@@ -333,8 +333,7 @@ mod tests {
             name: "Codex".to_string(),
             bundle_id: "com.openai.codex".to_string(),
         };
-        let target =
-            parse_focused_input_output("10,20|1200,800|700,680|500,96", &app).unwrap();
+        let target = parse_focused_input_output("10,20|1200,800|700,680|500,96", &app).unwrap();
 
         assert_eq!(target.window_frame.x, 10.0);
         assert_eq!(target.window_frame.width, 1200.0);

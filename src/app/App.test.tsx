@@ -258,7 +258,7 @@ describe("app", () => {
       if (path.includes("settings")) return JSON.stringify({ version: 1, blacklistedApps: [], overlayPlacement: { buttonOffset: null }, floatingButton: { visible: true } });
       throw new Error("missing file");
     });
-    (writeTextFile as ReturnType<typeof vi.fn>).mockImplementation(async (path: string, value: string) => {});
+    (writeTextFile as ReturnType<typeof vi.fn>).mockImplementation(async (_path: string, _value: string) => {});
 
     await act(async () => { render(<App />); });
 
