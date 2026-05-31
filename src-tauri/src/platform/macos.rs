@@ -1,7 +1,6 @@
 #![cfg(target_os = "macos")]
 
 use serde::Serialize;
-use std::io::Write;
 use std::process::Command;
 
 #[derive(Clone, Debug, Serialize)]
@@ -23,36 +22,17 @@ pub fn accessibility_status() -> AccessibilityStatus {
     }
 }
 
-fn is_accessibility_trusted() -> bool {
-    // Use sysctl to check if we have assistive access
-    let output = Command::new("sysctl")
-        .args(["-n", "ai举证"]) // intentionally wrong to fall through
-        .output();
-
-    // Try the modern way: defaults read
-    let output = Command::new("defaults")
-        .args(["read", "com.apple.security Accessibility"])
-        .output();
-
-    if let Ok(out) = output {
-        let s = String::from_utf8_lossy(&out.stdout);
-        if s.contains("1") {
-            return true;
-        }
+// SAFETY: AXIsProcessTrusted is a macOS public API, safe to call from the main thread
+unsafe fn ax_is_process_trusted() -> bool {
+    #[link(name = "ApplicationServices", kind = "framework")]
+    extern "C" {
+        fn AXIsProcessTrusted() -> bool;
     }
+    AXIsProcessTrusted()
+}
 
-    // AXIsProcessTrusted is the canonical check
+fn is_accessibility_trusted() -> bool {
     unsafe { ax_is_process_trusted() }
-}
-
-// Raw FFI for AXIsProcessTrusted
-#[link(name = "ApplicationServices", kind = "framework")]
-extern "C" {
-    fn AXIsProcessTrusted() -> bool;
-}
-
-fn ax_is_process_trusted() -> bool {
-    unsafe { AXIsProcessTrusted() }
 }
 
 // ── Frontmost App ─────────────────────────────────────────────────────────────
@@ -67,26 +47,28 @@ struct FrontmostAppInfo {
 }
 
 fn frontmost_app_info() -> Option<FrontmostAppInfo> {
-    // Get frontmost app via lsappinfo
-    let output = Command::new("lsappinfo")
-        .args(["front"])
-        .output()
-        .ok()?;
+    let output = Command::new("lsappinfo").args(["front"]).output().ok()?;
 
     let stdout = String::from_utf8_lossy(&output.stdout);
     let trimmed = stdout.trim();
 
-    // Parse "LSAppServiceFrontmost_Process = ..." or "pid:123"
     let pid = if let Some(start) = trimmed.find("pid:") {
-        trimmed[start + 4..].split_whitespace().next()?.parse().ok()?
+        trimmed[start + 4..]
+            .split_whitespace()
+            .next()?
+            .parse()
+            .ok()?
     } else if let Some(eq) = trimmed.find(" = ") {
         let val = &trimmed[eq + 3..];
-        val.split_whitespace().next()?.trim_matches('"').parse().ok()?
+        val.split_whitespace()
+            .next()?
+            .trim_matches('"')
+            .parse()
+            .ok()?
     } else {
         return None;
     };
 
-    // Get app name and bundle id via lsappinfo
     let info_output = Command::new("lsappinfo")
         .args(["info", "-app", &format!("{}", pid)])
         .output()
@@ -109,7 +91,6 @@ fn frontmost_app_info() -> Option<FrontmostAppInfo> {
 }
 
 fn extract_lsappinfo_field(s: &str, key: &str) -> Option<String> {
-    // Format: "key = \"value\"" or "key:value"
     for line in s.lines() {
         let line = line.trim();
         if line.starts_with(key) {
@@ -150,19 +131,14 @@ pub struct CandidateInput {
 pub fn current_input_target() -> Option<InputTarget> {
     let app_info = frontmost_app_info()?;
 
-    // Exclude Prompt Picker itself
-    if app_info.app.bundle_id == "local.promptpicker.dev"
-        || app_info.app.name == "Prompt Picker"
-    {
+    if app_info.app.bundle_id == "local.promptpicker.dev" || app_info.app.name == "Prompt Picker" {
         return None;
     }
 
-    // Use accessibility API to get focused element of frontmost app
     get_focused_input_element(app_info.pid, app_info.app.clone())
 }
 
 fn get_focused_input_element(pid: u32, app: FrontmostApp) -> Option<InputTarget> {
-    // Build osascript that returns "wx,wy|ww,wh|ex,ey|ew,eh"
     let script = format!(
         r#"on run
 tell application "System Events"
@@ -197,7 +173,6 @@ end run"#,
     let stdout = String::from_utf8_lossy(&output.stdout);
     let trimmed = stdout.trim();
 
-    // Parse "X|Y|W,H|X2|Y2|W2,H2"
     let parts: Vec<&str> = trimmed.split('|').collect();
     if parts.len() < 5 {
         return None;
@@ -222,7 +197,6 @@ end run"#,
         height: elem_size.1,
     };
 
-    // Button position: bottom-right of input element
     let button_x = elem_pos.0 + elem_size.0;
     let button_y = elem_pos.1 + elem_size.1;
 
@@ -248,7 +222,6 @@ fn parse_xy(s: &str) -> Option<(f64, f64)> {
 
 pub fn paste_prompt(body: &str) -> Result<(), String> {
     copy_to_clipboard(body)?;
-
     Command::new("osascript")
         .args([
             "-e",
@@ -256,45 +229,39 @@ pub fn paste_prompt(body: &str) -> Result<(), String> {
         ])
         .output()
         .map_err(|e| e.to_string())?;
-
     Ok(())
 }
 
 pub fn paste_prompt_to_app(body: &str, bundle_id: &str) -> Result<(), String> {
     copy_to_clipboard(body)?;
-
     let script = format!(
         r#"tell application id "{}" to activate
 delay 0.05
 tell application "System Events" to keystroke "v" using command down"#,
         bundle_id
     );
-
     let output = Command::new("osascript")
         .arg("-e")
         .arg(&script)
         .output()
         .map_err(|e| e.to_string())?;
-
     if !output.status.success() {
         return Err(String::from_utf8_lossy(&output.stderr).trim().to_string());
     }
-
     Ok(())
 }
 
 fn copy_to_clipboard(body: &str) -> Result<(), String> {
+    use std::io::Write;
     let mut child = Command::new("pbcopy")
         .stdin(std::process::Stdio::piped())
         .spawn()
         .map_err(|e| e.to_string())?;
-
     if let Some(mut stdin) = child.stdin.take() {
         stdin
             .write_all(body.as_bytes())
             .map_err(|e| e.to_string())?;
     }
-
     child.wait().map_err(|e| e.to_string())?;
     Ok(())
 }

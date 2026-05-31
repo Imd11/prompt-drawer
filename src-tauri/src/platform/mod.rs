@@ -1,12 +1,15 @@
 pub mod macos;
 
 pub use macos::{
-    accessibility_status, frontmost_app, paste_prompt_to_app, AccessibilityStatus, CandidateInput,
-    FrontmostApp, InputTarget,
+    accessibility_status, frontmost_app, AccessibilityStatus, CandidateInput, FrontmostApp,
+    InputTarget,
 };
 
 pub fn choose_main_input(candidates: &[CandidateInput]) -> Option<CandidateInput> {
-    let valid: Vec<_> = candidates.iter().filter(|c| c.width > 0.0 && c.height > 0.0).collect();
+    let valid: Vec<_> = candidates
+        .iter()
+        .filter(|c| c.width > 0.0 && c.height > 0.0)
+        .collect();
     if valid.is_empty() {
         return None;
     }
