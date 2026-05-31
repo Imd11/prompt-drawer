@@ -29,7 +29,7 @@ fn frontmost_app_cmd() -> Option<FrontmostApp> {
 
 #[tauri::command]
 fn current_input_target() -> Option<platform::InputTarget> {
-    None
+    platform::macos::current_input_target()
 }
 
 #[tauri::command]
@@ -70,7 +70,8 @@ pub fn run() {
             hide_prompt_popover,
             show_prompt_popover_from_button,
             prompt_button_position_cmd,
-            move_prompt_button_to
+            move_prompt_button_to,
+            open_main_window
         ])
         .setup(|app| {
             let window = app.get_webview_window("main").unwrap();
