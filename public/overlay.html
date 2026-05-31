@@ -19,6 +19,7 @@ let dragging = false;
 let lastMove = null;
 let animationFrame = 0;
 let contextMenuOpened = false;
+let pointerSequence = 0;
 
 function distance(a, b) {
   return Math.hypot(a.screenX - b.screenX, a.screenY - b.screenY);
@@ -26,26 +27,46 @@ function distance(a, b) {
 
 async function flushMove() {
   animationFrame = 0;
-  if (!lastMove || !start) return;
+  if (!lastMove || !start || !start.positionReady) return;
   await tauri.core.invoke('move_prompt_button_to', {
     x: start.windowX + lastMove.screenX - start.screenX,
     y: start.windowY + lastMove.screenY - start.screenY
   });
 }
 
-btn.addEventListener('pointerdown', async (event) => {
-  const position = await tauri.core.invoke('prompt_button_position_cmd');
-  if (!position) return;
+btn.addEventListener('pointerdown', (event) => {
+  const sequence = ++pointerSequence;
   start = {
     screenX: event.screenX,
     screenY: event.screenY,
-    windowX: position.x,
-    windowY: position.y
+    windowX: 0,
+    windowY: 0,
+    positionReady: false,
+    pointerId: event.pointerId,
+    sequence,
+    positionPromise: null
   };
   dragging = false;
   lastMove = null;
   contextMenuOpened = false;
-  btn.setPointerCapture(event.pointerId);
+  try {
+    btn.setPointerCapture(event.pointerId);
+  } catch {}
+
+  start.positionPromise = tauri.core.invoke('prompt_button_position_cmd');
+  start.positionPromise.then((position) => {
+    if (!position || !start || start.sequence !== sequence) return;
+    start.windowX = position.x;
+    start.windowY = position.y;
+    start.positionReady = true;
+    if (dragging && lastMove && !animationFrame) {
+      animationFrame = requestAnimationFrame(flushMove);
+    }
+  }).catch(() => {
+    if (start?.sequence === sequence) {
+      start = null;
+    }
+  });
 });
 
 btn.addEventListener('pointermove', (event) => {
@@ -68,8 +89,14 @@ btn.addEventListener('pointerup', async (event) => {
     return;
   }
   if (!start) return;
-  btn.releasePointerCapture(event.pointerId);
+  try {
+    btn.releasePointerCapture(event.pointerId);
+  } catch {}
   if (dragging) {
+    if (!start.positionReady && start.positionPromise) {
+      await start.positionPromise.catch(() => null);
+    }
+    await flushMove();
     const position = await tauri.core.invoke('prompt_button_position_cmd');
     if (tauri.event?.emit && position) {
       await tauri.event.emit('prompt-button-drag-ended', position);
