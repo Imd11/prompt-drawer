@@ -9,7 +9,13 @@ import { createSettingsStore } from "./shared/settingsStore";
 import { createPromptStore } from "./shared/promptStore";
 import { createTauriPromptStorage } from "./storage/tauriPromptStorage";
 import { createTauriSettingsStorage } from "./storage/tauriSettingsStorage";
-import { getAccessibilityStatus, hidePromptButton, hidePromptPopover, openMainWindow, pastePrompt } from "./platform/platformApi";
+import {
+  getAccessibilityStatus,
+  hidePromptButton,
+  hidePromptPopover,
+  openMainWindow,
+  pastePrompt,
+} from "./platform/platformApi";
 import { useInputTargetPolling } from "./overlay/useInputTargetPolling";
 import { PromptQuickList } from "./ui/PromptQuickList";
 import { PromptManager } from "./ui/PromptManager";
@@ -125,7 +131,7 @@ export function App({
   // ── Manager ─────────────────────────────────────────────────────────
   if (mode === "manager") {
     return (
-      <div className="app-container">
+      <div className="app-window app-window-main">
         <PromptManager
           prompts={prompts}
           onCreate={async (input) => {
@@ -176,9 +182,11 @@ export function App({
             }
           }}
         />
-        <button className="back-btn" onClick={handleBackToPopover}>
-          ← Back
-        </button>
+        <div className="page-footer">
+          <button className="button button-secondary" onClick={handleBackToPopover}>
+            Back
+          </button>
+        </div>
       </div>
     );
   }
@@ -186,14 +194,16 @@ export function App({
   // ── Settings ────────────────────────────────────────────────────────
   if (mode === "settings") {
     return (
-      <div className="app-container">
+      <div className="app-window app-window-main">
         <SettingsPanel
           settings={activeSettings}
           onRemove={removeBlacklistedApp}
         />
-        <button className="back-btn" onClick={handleBackToPopover}>
-          ← Back
-        </button>
+        <div className="page-footer">
+          <button className="button button-secondary" onClick={handleBackToPopover}>
+            Back
+          </button>
+        </div>
       </div>
     );
   }
@@ -201,8 +211,9 @@ export function App({
   // ── Button controls mode ────────────────────────────────────────────
   if (mode === "button-controls") {
     return (
-      <div className="app-container button-controls">
+      <div className="button-controls">
         <button
+          className="button button-danger"
           onClick={async () => {
             await settingsStoreRef.current.setFloatingButtonVisible(false);
             setActiveSettings(await settingsStoreRef.current.get());
@@ -213,6 +224,7 @@ export function App({
           Hide Button
         </button>
         <button
+          className="button button-secondary"
           onClick={async () => {
             await openMainWindow();
             await hidePromptPopover();
@@ -226,7 +238,7 @@ export function App({
 
   // ── Default: popover quick-list ─────────────────────────────────────
   return (
-    <div className="app-container">
+    <div className="popover-window">
       <PromptQuickList prompts={prompts} onSelect={handleSelect} />
     </div>
   );
@@ -248,21 +260,52 @@ function MainWindow({
   onHideFloatingButton: () => void;
 }) {
   return (
-    <div className="app-container">
-      <div className="floating-button-status">
-        <h2>Prompt Picker</h2>
-        <p>Status: {floatingButtonVisible ? "Visible" : "Hidden"}</p>
-        <div className="main-actions">
-          {floatingButtonVisible ? (
-            <button onClick={onHideFloatingButton}>Hide Floating Button</button>
-          ) : (
-            <button onClick={onShowFloatingButton}>Show Floating Button</button>
-          )}
+    <div className="app-window app-window-main home-view">
+      <header className="app-header">
+        <div>
+          <h1>Prompt Picker</h1>
+          <p>Manage reusable prompts and insert them from the floating picker.</p>
         </div>
-      </div>
-      <div className="main-actions">
-        <button onClick={onManage}>Manage Prompts</button>
-        <button onClick={onSettings}>Settings</button>
+        <span className={floatingButtonVisible ? "status-pill is-on" : "status-pill"}>
+          Status: {floatingButtonVisible ? "Visible" : "Hidden"}
+        </span>
+      </header>
+
+      <div className="home-grid">
+        <section className="panel">
+          <div className="panel-icon">P</div>
+          <div>
+            <h2>Floating Button</h2>
+            <p>
+              Keep the lightweight prompt button available above other apps.
+            </p>
+          </div>
+          {floatingButtonVisible ? (
+            <button className="button button-secondary" onClick={onHideFloatingButton}>
+              Hide Floating Button
+            </button>
+          ) : (
+            <button className="button button-primary" onClick={onShowFloatingButton}>
+              Show Floating Button
+            </button>
+          )}
+        </section>
+
+        <section className="panel">
+          <h2>Library</h2>
+          <p>Create, edit, import, and reorder the prompts shown in the picker.</p>
+          <button className="button button-primary" onClick={onManage}>
+            Manage Prompts
+          </button>
+        </section>
+
+        <section className="panel">
+          <h2>Settings</h2>
+          <p>Review apps where the floating picker should stay out of the way.</p>
+          <button className="button button-secondary" onClick={onSettings}>
+            Settings
+          </button>
+        </section>
       </div>
     </div>
   );

@@ -13,8 +13,10 @@
     "windows": [
       {
         "title": "Prompt Picker",
-        "width": 400,
-        "height": 300,
+        "width": 760,
+        "height": 560,
+        "minWidth": 640,
+        "minHeight": 460,
         "resizable": true,
         "fullscreen": false
       }
