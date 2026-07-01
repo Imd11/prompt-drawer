@@ -26,7 +26,9 @@ fn frontmost_app_cmd() -> Option<FrontmostApp> {
 }
 
 #[tauri::command]
-fn current_input_target(state: tauri::State<LastInputTargetState>) -> Option<platform::InputTarget> {
+fn current_input_target(
+    state: tauri::State<LastInputTargetState>,
+) -> Option<platform::InputTarget> {
     let target = platform::macos::current_input_target()?;
     record_last_input_target_if_valid(state.inner(), &target);
     Some(target)
@@ -41,6 +43,25 @@ fn paste_prompt(body: String) -> Result<(), String> {
 fn paste_prompt_to_app(body: String, bundle_id: String) -> Result<(), String> {
     platform::macos::paste_prompt_to_app(&body, &bundle_id)
 }
+
+#[tauri::command]
+fn paste_prompt_to_last_target(
+    body: String,
+    state: tauri::State<LastInputTargetState>,
+) -> Result<(), String> {
+    paste_prompt_to_last_target_impl(&body, state.inner())
+}
+
+fn paste_prompt_to_last_target_impl(
+    body: &str,
+    state: &LastInputTargetState,
+) -> Result<(), String> {
+    let Some(target) = state.get() else {
+        return Err("Click into a text field first, then choose a prompt.".to_string());
+    };
+    platform::macos::paste_prompt_to_app(body, &target.app.bundle_id)
+}
+
 #[tauri::command]
 fn open_main_window(app: tauri::AppHandle) -> Result<(), String> {
     if let Some(window) = app.get_webview_window("main") {
@@ -72,10 +93,7 @@ impl LastInputTargetState {
     }
 }
 
-fn record_last_input_target_if_valid(
-    state: &LastInputTargetState,
-    target: &platform::InputTarget,
-) {
+fn record_last_input_target_if_valid(state: &LastInputTargetState, target: &platform::InputTarget) {
     let Some(app) = target.app.clone() else {
         return;
     };
@@ -105,6 +123,7 @@ pub fn run() {
             current_input_target,
             paste_prompt,
             paste_prompt_to_app,
+            paste_prompt_to_last_target,
             show_prompt_button,
             hide_prompt_button,
             show_prompt_popover,
@@ -130,7 +149,7 @@ pub fn run() {
         })
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
-    }
+}
 
 #[cfg(test)]
 mod last_input_target_tests {
@@ -206,5 +225,16 @@ mod last_input_target_tests {
         record_last_input_target_if_valid(&state, &target);
 
         assert!(state.get().is_none());
+    }
+
+    #[test]
+    fn missing_last_target_returns_clear_error() {
+        let state = LastInputTargetState::default();
+        let result = paste_prompt_to_last_target_impl("hello", &state);
+
+        assert_eq!(
+            result.unwrap_err(),
+            "Click into a text field first, then choose a prompt."
+        );
     }
 }

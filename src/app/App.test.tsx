@@ -78,6 +78,58 @@ describe("app", () => {
     expect(screen.queryByText("Export")).toBeNull();
   });
 
+  it("pastes selected prompt into the backend last input target", async () => {
+    const { invoke } = await import("@tauri-apps/api/core");
+    vi.mocked(invoke).mockResolvedValue(undefined);
+    const { readTextFile } = await import("@tauri-apps/plugin-fs");
+    (readTextFile as ReturnType<typeof vi.fn>).mockResolvedValueOnce(
+      JSON.stringify({ version: 1, prompts: mockPrompts })
+    );
+
+    await act(async () => {
+      render(<App />);
+    });
+
+    fireEvent.click(await screen.findByText("Test Prompt"));
+
+    await waitFor(() => {
+      expect(vi.mocked(invoke)).toHaveBeenCalledWith(
+        "paste_prompt_to_last_target",
+        { body: "Test body" }
+      );
+    });
+  });
+
+  it("does not fall back to blind paste when no input target is recorded", async () => {
+    const { invoke } = await import("@tauri-apps/api/core");
+    vi.mocked(invoke).mockImplementation(async (command) => {
+      if (command === "paste_prompt_to_last_target") {
+        throw new Error("Click into a text field first, then choose a prompt.");
+      }
+      return undefined;
+    });
+    window.alert = vi.fn();
+    const { readTextFile } = await import("@tauri-apps/plugin-fs");
+    (readTextFile as ReturnType<typeof vi.fn>).mockResolvedValueOnce(
+      JSON.stringify({ version: 1, prompts: mockPrompts })
+    );
+
+    await act(async () => {
+      render(<App />);
+    });
+
+    fireEvent.click(await screen.findByText("Test Prompt"));
+
+    await waitFor(() => {
+      expect(window.alert).toHaveBeenCalledWith(
+        "Click into a text field first, then choose a prompt."
+      );
+    });
+    expect(vi.mocked(invoke)).not.toHaveBeenCalledWith("paste_prompt", {
+      body: "Test body",
+    });
+  });
+
   it("opens prompt manager from the main app window", async () => {
     currentWindowLabel = "main";
     const { readTextFile } = await import("@tauri-apps/plugin-fs");

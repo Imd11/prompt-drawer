@@ -158,12 +158,7 @@ pub fn paste_prompt(body: &str) -> Result<(), String> {
 
 pub fn paste_prompt_to_app(body: &str, bundle_id: &str) -> Result<(), String> {
     copy_to_clipboard(body)?;
-    let script = format!(
-        r#"tell application id "{}" to activate
-delay 0.05
-tell application "System Events" to keystroke "v" using command down"#,
-        bundle_id
-    );
+    let script = paste_to_app_script(bundle_id);
     let output = Command::new("osascript")
         .arg("-e")
         .arg(&script)
@@ -173,6 +168,15 @@ tell application "System Events" to keystroke "v" using command down"#,
         return Err(String::from_utf8_lossy(&output.stderr).trim().to_string());
     }
     Ok(())
+}
+
+fn paste_to_app_script(bundle_id: &str) -> String {
+    format!(
+        r#"tell application id "{}" to activate
+delay 0.1
+tell application "System Events" to keystroke "v" using command down"#,
+        bundle_id
+    )
 }
 
 fn copy_to_clipboard(body: &str) -> Result<(), String> {
@@ -382,5 +386,13 @@ mod tests {
         };
         assert!(parse_focused_input_output("10,20|1200,800|700,680", &app).is_none());
         assert!(parse_focused_input_output("10,20|1200,800|700,680|500,96|extra", &app).is_none());
+    }
+
+    #[test]
+    fn paste_to_app_script_activates_target_bundle_before_paste() {
+        let script = paste_to_app_script("com.apple.Notes");
+
+        assert!(script.contains("tell application id \"com.apple.Notes\" to activate"));
+        assert!(script.contains("keystroke \"v\" using command down"));
     }
 }

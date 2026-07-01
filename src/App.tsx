@@ -14,7 +14,7 @@ import {
   hidePromptButton,
   hidePromptPopover,
   openMainWindow,
-  pastePrompt,
+  pastePromptToLastTarget,
 } from "./platform/platformApi";
 import { useInputTargetPolling } from "./overlay/useInputTargetPolling";
 import { PromptQuickList } from "./ui/PromptQuickList";
@@ -76,11 +76,12 @@ export function App({
         );
         return;
       }
-      await pastePrompt(prompt.body);
+      await pastePromptToLastTarget(prompt.body);
       await hidePromptPopover();
     } catch (e) {
       console.error("Failed to paste prompt:", e);
-      alert("Failed to paste prompt. Please try again.");
+      const message = e instanceof Error ? e.message : String(e);
+      alert(message || "Failed to paste prompt. Please try again.");
     }
   };
 

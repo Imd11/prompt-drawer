@@ -9,7 +9,7 @@
 	<key>CFBundleExecutable</key>
 	<string>prompt-picker</string>
 	<key>CFBundleIdentifier</key>
-	<string>local.promptpicker.app</string>
+	<string>local.promptpicker.dev</string>
 	<key>CFBundleInfoDictionaryVersion</key>
 	<string>6.0</string>
 	<key>CFBundleName</key>
