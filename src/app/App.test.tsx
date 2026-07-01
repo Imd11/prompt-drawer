@@ -168,6 +168,37 @@ describe("app", () => {
     });
   });
 
+  it("does not move the floating button when selecting a prompt from the popover", async () => {
+    const { invoke } = await import("@tauri-apps/api/core");
+    vi.mocked(invoke).mockClear();
+    vi.mocked(invoke).mockResolvedValue(undefined);
+    currentWindowLabel = "prompt-popover";
+    window.history.pushState({}, "", "/?mode=popover");
+    const { readTextFile } = await import("@tauri-apps/plugin-fs");
+    (readTextFile as ReturnType<typeof vi.fn>).mockResolvedValueOnce(
+      JSON.stringify({ version: 1, prompts: mockPrompts })
+    );
+
+    await act(async () => {
+      render(<App />);
+    });
+
+    fireEvent.click(await screen.findByText("Test Prompt"));
+
+    await waitFor(() => {
+      expect(vi.mocked(invoke)).toHaveBeenCalledWith(
+        "paste_prompt_to_last_target",
+        { body: "Test body" }
+      );
+    });
+
+    expect(vi.mocked(invoke)).not.toHaveBeenCalledWith(
+      "show_prompt_button",
+      expect.anything()
+    );
+    expect(inputTargetPollingMock).not.toHaveBeenCalled();
+  });
+
   it("does not fall back to blind paste when no input target is recorded", async () => {
     const { invoke } = await import("@tauri-apps/api/core");
     vi.mocked(invoke).mockImplementation(async (command) => {
