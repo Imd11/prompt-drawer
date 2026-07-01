@@ -1,6 +1,6 @@
 #[cfg(target_os = "macos")]
 use objc2_app_kit::{
-    NSApplication, NSColor, NSFloatingWindowLevel, NSWindow, NSWindowCollectionBehavior,
+    NSApplication, NSColor, NSScreenSaverWindowLevel, NSWindow, NSWindowCollectionBehavior,
     NSWindowStyleMask,
 };
 #[cfg(target_os = "macos")]
@@ -44,16 +44,19 @@ pub fn configure_non_activating_panel(window: &tauri::WebviewWindow) -> Result<(
             | NSWindowStyleMask::NonactivatingPanel
             | NSWindowStyleMask::UtilityWindow;
         ns_window.setStyleMask(mask);
-        ns_window.setLevel(NSFloatingWindowLevel);
+        ns_window.setLevel(NSScreenSaverWindowLevel);
         ns_window.setCanHide(false);
         ns_window.setHidesOnDeactivate(false);
         ns_window.setIgnoresMouseEvents(false);
         ns_window.setCollectionBehavior(
             NSWindowCollectionBehavior::CanJoinAllSpaces
+                | NSWindowCollectionBehavior::CanJoinAllApplications
                 | NSWindowCollectionBehavior::FullScreenAuxiliary
                 | NSWindowCollectionBehavior::Stationary
+                | NSWindowCollectionBehavior::Transient
                 | NSWindowCollectionBehavior::IgnoresCycle,
         );
+        ns_window.orderFrontRegardless();
     }
 
     Ok(())
