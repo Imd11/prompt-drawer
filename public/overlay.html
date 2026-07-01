@@ -1,19 +1,80 @@
 <!doctype html>
 <html>
 <head><style>
-body { margin: 0; background: transparent; }
-button { display: flex; align-items: center; gap: 6px; width: 112px; height: 40px; background: #4a90d9; border: none; border-radius: 8px; cursor: pointer; color: white; font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; font-size: 14px; font-weight: 500; padding: 0 12px; box-shadow: 0 2px 8px rgba(0,0,0,0.3); }
-button:hover { background: #3a7fc8; }
-button:active { background: #2d6ab0; }
-.icon { font-size: 16px; font-weight: 700; }
+html,
+body {
+  width: 100%;
+  height: 100%;
+  margin: 0;
+  background: transparent;
+  overflow: hidden;
+}
+
+body {
+  display: grid;
+  place-items: center;
+}
+
+.calico-entry {
+  width: 132px;
+  height: 132px;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  cursor: grab;
+  display: grid;
+  place-items: center;
+  -webkit-user-select: none;
+  user-select: none;
+}
+
+.calico-entry:active {
+  cursor: grabbing;
+}
+
+.calico-entry:focus-visible {
+  outline: 2px solid rgba(74, 144, 217, 0.9);
+  outline-offset: -10px;
+  border-radius: 20px;
+}
+
+.calico-sprite {
+  width: 126px;
+  height: 126px;
+  object-fit: contain;
+  pointer-events: none;
+  filter: drop-shadow(0 8px 12px rgba(0, 0, 0, 0.24));
+  transform-origin: 50% 72%;
+  transition: transform 140ms ease, filter 140ms ease;
+}
+
+.calico-entry:hover .calico-sprite {
+  transform: translateY(-2px) scale(1.04);
+  filter: drop-shadow(0 10px 16px rgba(0, 0, 0, 0.28));
+}
+
+.calico-entry.is-pressing .calico-sprite {
+  transform: translateY(1px) scale(0.98);
+}
+
+.calico-entry.is-dragging .calico-sprite {
+  transform: rotate(-2deg) scale(1.03);
+}
 </style></head>
 <body>
-<button id="btn" title="Open Prompt Picker" aria-label="Open Prompt Picker">
-  <span class="icon">P</span><span>Prompts</span>
+<button id="btn" class="calico-entry" title="Open Prompt Picker" aria-label="Open Prompt Picker">
+  <img id="calicoSprite" class="calico-sprite" src="/calico/calico-idle.apng" alt="" draggable="false" />
 </button>
 <script type="module">
 const btn = document.getElementById('btn');
+const sprite = document.getElementById('calicoSprite');
 const tauri = window.__TAURI__;
+const sprites = {
+  idle: '/calico/calico-idle.apng',
+  poke: '/calico/calico-react-poke.apng',
+  drag: '/calico/calico-react-drag.apng',
+  thinking: '/calico/calico-thinking.apng'
+};
 let start = null;
 let dragging = false;
 let lastMove = null;
@@ -21,6 +82,18 @@ let animationFrame = 0;
 let contextMenuOpened = false;
 let pointerSequence = 0;
 let dragStartedEmitted = false;
+let spriteResetTimer = 0;
+
+function setSprite(state, resetMs = 0) {
+  if (!sprite || !sprites[state]) return;
+  window.clearTimeout(spriteResetTimer);
+  if (!sprite.src.endsWith(sprites[state])) {
+    sprite.src = sprites[state];
+  }
+  if (resetMs > 0) {
+    spriteResetTimer = window.setTimeout(() => setSprite('idle'), resetMs);
+  }
+}
 
 function distance(a, b) {
   return Math.hypot(a.screenX - b.screenX, a.screenY - b.screenY);
@@ -54,6 +127,8 @@ async function openButtonControls(event) {
   start = null;
   dragging = false;
   lastMove = null;
+  btn.classList.remove('is-pressing', 'is-dragging');
+  setSprite('idle');
   await invoke('show_prompt_button_controls_from_button');
 }
 
@@ -87,6 +162,8 @@ btn.addEventListener('pointerdown', (event) => {
   lastMove = null;
   contextMenuOpened = false;
   dragStartedEmitted = false;
+  btn.classList.add('is-pressing');
+  setSprite('poke', 1200);
   try {
     btn.setPointerCapture(event.pointerId);
   } catch {}
@@ -114,6 +191,9 @@ btn.addEventListener('pointermove', (event) => {
     emit('prompt-button-drag-started').catch(() => {});
   }
   dragging = true;
+  btn.classList.remove('is-pressing');
+  btn.classList.add('is-dragging');
+  setSprite('drag');
   lastMove = current;
   if (!animationFrame) {
     animationFrame = requestAnimationFrame(flushMove);
@@ -126,13 +206,16 @@ btn.addEventListener('pointerup', async (event) => {
     start = null;
     dragging = false;
     lastMove = null;
+    btn.classList.remove('is-pressing', 'is-dragging');
+    setSprite('idle');
     return;
   }
   if (!start) return;
+  const wasDragging = dragging;
   try {
     btn.releasePointerCapture(event.pointerId);
   } catch {}
-  if (dragging) {
+  if (wasDragging) {
     if (!start.positionReady && start.positionPromise) {
       await start.positionPromise.catch(() => null);
     }
@@ -142,12 +225,17 @@ btn.addEventListener('pointerup', async (event) => {
       await emit('prompt-button-drag-ended', position);
     }
   } else {
+    setSprite('thinking', 900);
     await invoke('show_prompt_popover_from_button');
   }
   start = null;
   dragging = false;
   lastMove = null;
   dragStartedEmitted = false;
+  btn.classList.remove('is-pressing', 'is-dragging');
+  if (wasDragging) {
+    setSprite('idle');
+  }
 });
 
 btn.addEventListener('contextmenu', async (event) => {

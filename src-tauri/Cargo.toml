@@ -25,5 +25,6 @@ serde_json = "1"
 
 [target.'cfg(target_os = "macos")'.dependencies]
 objc2 = "0.6.4"
-objc2-app-kit = { version = "0.3.2", features = ["NSWindow", "NSPanel", "NSColor"] }
-objc2-foundation = { version = "0.3.2", features = ["NSGeometry", "NSObject"] }
+objc2-app-kit = { version = "0.3.2", features = ["NSApplication", "NSWindow", "NSPanel", "NSColor"] }
+objc2-foundation = { version = "0.3.2", features = ["NSGeometry", "NSObject", "NSString", "NSValue"] }
+objc2-web-kit = { version = "0.3.2", features = ["WKWebView", "objc2-app-kit"] }

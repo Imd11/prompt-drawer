@@ -13,7 +13,7 @@ pub use windows::{
     show_prompt_popover_from_button,
 };
 mod macos_panels;
-pub use macos_panels::configure_non_activating_panel;
+pub use macos_panels::{activate_main_window, configure_non_activating_panel};
 
 #[tauri::command]
 fn accessibility_status_cmd() -> AccessibilityStatus {
@@ -66,6 +66,7 @@ fn paste_prompt_to_last_target_impl(
 fn open_main_window(app: tauri::AppHandle) -> Result<(), String> {
     if let Some(window) = app.get_webview_window("main") {
         window.show().map_err(|e| e.to_string())?;
+        activate_main_window(&window)?;
         window.set_focus().map_err(|e| e.to_string())?;
     }
     Ok(())

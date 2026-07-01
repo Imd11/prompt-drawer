@@ -19,6 +19,7 @@
         "minWidth": 640,
         "minHeight": 460,
         "resizable": true,
+        "acceptFirstMouse": true,
         "fullscreen": false
       }
     ],

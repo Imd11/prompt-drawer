@@ -326,7 +326,9 @@ function MainWindow({
 
       <div className="home-grid">
         <section className="panel">
-          <div className="panel-icon">P</div>
+          <div className="panel-icon panel-icon-calico">
+            <img src="/calico/calico-idle.apng" alt="" />
+          </div>
           <div>
             <h2>Floating Button</h2>
             <p>

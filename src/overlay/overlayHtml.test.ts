@@ -25,4 +25,27 @@ describe("overlay button html", () => {
     expect(html).not.toContain('id="menu"');
     expect(html).not.toContain("hide_prompt_button");
   });
+
+  it("renders the floating entry as an animated Calico character", () => {
+    const html = readFileSync("public/overlay.html", "utf8");
+
+    expect(html).toContain("calico-entry");
+    expect(html).toContain("calico-idle.apng");
+    expect(html).toContain("calico-react-poke.apng");
+    expect(html).toContain("calico-react-drag.apng");
+    expect(html).toContain('aria-label="Open Prompt Picker"');
+    expect(html).not.toContain("<span>Prompts</span>");
+  });
+
+  it("keeps existing drag and click commands for the Calico entry", () => {
+    const html = readFileSync("public/overlay.html", "utf8");
+
+    expect(html).toContain("prompt_button_position_cmd");
+    expect(html).toContain("move_prompt_button_to");
+    expect(html).toContain("show_prompt_popover_from_button");
+    expect(html).toContain("prompt-button-drag-started");
+    expect(html).toContain("prompt-button-drag-ended");
+    expect(html).toContain("setPointerCapture");
+    expect(html).toContain("releasePointerCapture");
+  });
 });
