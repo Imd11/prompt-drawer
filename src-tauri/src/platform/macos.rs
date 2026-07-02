@@ -420,47 +420,7 @@ pub fn copy_prompt_to_clipboard(body: &str) -> Result<(), String> {
 
 #[allow(dead_code)]
 pub fn paste_prompt_and_submit_to_app_native(body: &str, bundle_id: &str) -> AutosendOutcome {
-    if let Err(error) = copy_to_clipboard(body) {
-        return AutosendOutcome::copy_failed(error);
-    }
-
-    if !is_accessibility_trusted_with_prompt() {
-        return AutosendOutcome::missing_accessibility_permission();
-    }
-
-    if let Err(error) = activate_app_by_bundle_id(bundle_id) {
-        return AutosendOutcome::target_focus_failed(format_autosend_error(
-            "activate-target",
-            &error,
-        ));
-    }
-
-    if !wait_for_frontmost_bundle_id(bundle_id, Duration::from_millis(1200)) {
-        return AutosendOutcome::target_focus_failed(format!(
-            "Target app did not become frontmost: {}",
-            bundle_id
-        ));
-    }
-
-    std::thread::sleep(Duration::from_millis(120));
-
-    if let Err(error) = post_paste_shortcut() {
-        return AutosendOutcome::paste_event_failed(format_autosend_error(
-            "native-paste",
-            &error,
-        ));
-    }
-
-    std::thread::sleep(Duration::from_millis(180));
-
-    if let Err(error) = post_return_key() {
-        return AutosendOutcome::return_event_failed(format_autosend_error(
-            "native-return",
-            &error,
-        ));
-    }
-
-    AutosendOutcome::sent()
+    paste_prompt_and_submit_to_app_clipboard(body, bundle_id, None)
 }
 
 pub fn paste_prompt_to_app(body: &str, bundle_id: &str) -> Result<(), String> {
@@ -510,17 +470,46 @@ pub fn paste_prompt_and_submit_to_app_clipboard(
         return AutosendOutcome::missing_accessibility_permission();
     }
 
-    let script = click_point
-        .map(|(x, y)| paste_and_submit_to_app_at_point_script(bundle_id, x, y))
-        .unwrap_or_else(|| paste_and_submit_to_app_script(bundle_id));
-
-    match run_system_events_script(&script) {
-        Ok(()) => AutosendOutcome::sent(),
-        Err(error) => AutosendOutcome::paste_event_failed(format_autosend_error(
-            "clipboard-paste-and-submit",
+    if let Err(error) = activate_app_by_bundle_id(bundle_id) {
+        return AutosendOutcome::target_focus_failed(format_autosend_error(
+            "activate-target",
             &error,
-        )),
+        ));
     }
+
+    if !wait_for_frontmost_bundle_id(bundle_id, Duration::from_millis(1_500)) {
+        return AutosendOutcome::target_focus_failed(format!(
+            "Target app did not become frontmost: {}",
+            bundle_id
+        ));
+    }
+
+    std::thread::sleep(Duration::from_millis(160));
+
+    if let Some((x, y)) = click_point {
+        if let Err(error) = click_target_point(x, y) {
+            return AutosendOutcome::target_focus_failed(format_autosend_error(
+                "click-input-target",
+                &error,
+            ));
+        }
+        std::thread::sleep(Duration::from_millis(120));
+    }
+
+    if let Err(error) = post_paste_shortcut() {
+        return AutosendOutcome::paste_event_failed(format_autosend_error("native-paste", &error));
+    }
+
+    std::thread::sleep(Duration::from_millis(220));
+
+    if let Err(error) = post_return_key() {
+        return AutosendOutcome::return_event_failed(format_autosend_error(
+            "native-return",
+            &error,
+        ));
+    }
+
+    AutosendOutcome::sent()
 }
 
 #[allow(dead_code)]
@@ -689,6 +678,19 @@ fn run_system_events_script(script: &str) -> Result<(), String> {
     } else {
         Err(String::from_utf8_lossy(&output.stderr).to_string())
     }
+}
+
+fn click_target_point(x: f64, y: f64) -> Result<(), String> {
+    run_system_events_script(&click_target_point_script(x, y))
+}
+
+fn click_target_point_script(x: f64, y: f64) -> String {
+    format!(
+        r#"tell application "System Events"
+    click at {{{:.0}, {:.0}}}
+end tell"#,
+        x, y
+    )
 }
 
 fn should_direct_type(body: &str) -> bool {
@@ -1121,6 +1123,16 @@ mod tests {
     }
 
     #[test]
+    fn click_target_point_script_only_clicks_recorded_point() {
+        let script = click_target_point_script(640.0, 720.0);
+
+        assert!(script.contains("tell application \"System Events\""));
+        assert!(script.contains("click at {640, 720}"));
+        assert!(!script.contains("keystroke"));
+        assert!(!script.contains("key code 36"));
+    }
+
+    #[test]
     fn parses_lsappinfo_front_asn_output() {
         assert_eq!(
             parse_front_asn("ASN:0x0-0x46046:\n").as_deref(),
@@ -1135,7 +1147,8 @@ mod tests {
 
     #[test]
     fn parses_visible_process_list_asns_in_order() {
-        let raw = r#"ASN:0x0-0x3b03b-"Codex": ASN:0x0-0x10010-"Finder": ASN:0x0-0x1398397-"WeChat":"#;
+        let raw =
+            r#"ASN:0x0-0x3b03b-"Codex": ASN:0x0-0x10010-"Finder": ASN:0x0-0x1398397-"WeChat":"#;
 
         assert_eq!(
             parse_visible_process_asns(raw),

@@ -61,6 +61,10 @@ fn begin_prompt_pick_session(
     session_state: tauri::State<PromptPickSessionState>,
     recent_state: tauri::State<LastInputTargetState>,
 ) -> Option<FrontmostApp> {
+    if let Some(input_target) = platform::macos::current_input_target() {
+        record_last_input_target_if_valid(recent_state.inner(), &input_target);
+    }
+
     let target = prompt_pick_session_target(
         frontmost_app(),
         platform::macos::visible_apps(),
@@ -283,7 +287,11 @@ where
     for (index, body) in clean_bodies.iter().enumerate() {
         let outcome = app_sender(body, &target.app.bundle_id, target.click_point);
         if !outcome.sent {
-            return Ok(AutosendSequenceOutcome::from_failure(outcome, index, index + 1));
+            return Ok(AutosendSequenceOutcome::from_failure(
+                outcome,
+                index,
+                index + 1,
+            ));
         }
         if index + 1 < clean_bodies.len() {
             sleeper(delay_ms);
@@ -371,17 +379,11 @@ pub struct PromptPickSessionState(std::sync::Mutex<Option<PromptPickSessionTarge
 
 impl PromptPickSessionState {
     pub fn set(&self, target: PromptPickSessionTarget) {
-        *self
-            .0
-            .lock()
-            .expect("prompt pick session lock poisoned") = Some(target);
+        *self.0.lock().expect("prompt pick session lock poisoned") = Some(target);
     }
 
     pub fn clear(&self) {
-        *self
-            .0
-            .lock()
-            .expect("prompt pick session lock poisoned") = None;
+        *self.0.lock().expect("prompt pick session lock poisoned") = None;
     }
 
     pub fn get(&self) -> Option<PromptPickSessionTarget> {
@@ -623,7 +625,10 @@ fn default_settings_value() -> serde_json::Value {
 }
 
 fn settings_path(app: &tauri::AppHandle) -> Option<std::path::PathBuf> {
-    app.path().app_data_dir().ok().map(|dir| dir.join("settings.json"))
+    app.path()
+        .app_data_dir()
+        .ok()
+        .map(|dir| dir.join("settings.json"))
 }
 
 fn read_settings_value(app: &tauri::AppHandle) -> serde_json::Value {
@@ -636,7 +641,10 @@ fn read_settings_value(app: &tauri::AppHandle) -> serde_json::Value {
     serde_json::from_str(&contents).unwrap_or_else(|_| default_settings_value())
 }
 
-fn write_settings_value(app: &tauri::AppHandle, settings: &serde_json::Value) -> Result<(), String> {
+fn write_settings_value(
+    app: &tauri::AppHandle,
+    settings: &serde_json::Value,
+) -> Result<(), String> {
     let Some(path) = settings_path(app) else {
         return Err("Could not resolve settings path.".to_string());
     };
@@ -647,10 +655,7 @@ fn write_settings_value(app: &tauri::AppHandle, settings: &serde_json::Value) ->
     std::fs::write(path, contents).map_err(|e| e.to_string())
 }
 
-fn set_saved_floating_button_visible(
-    app: &tauri::AppHandle,
-    visible: bool,
-) -> Result<(), String> {
+fn set_saved_floating_button_visible(app: &tauri::AppHandle, visible: bool) -> Result<(), String> {
     let mut settings = read_settings_value(app);
     if !settings.is_object() {
         settings = default_settings_value();
