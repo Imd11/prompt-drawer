@@ -476,6 +476,24 @@ mod last_input_target_tests {
     }
 
     #[test]
+    fn last_target_for_wechat_does_not_need_click_point() {
+        let state = LastInputTargetState::default();
+        state.set(LastInputTarget {
+            app: FrontmostApp {
+                name: "WeChat".to_string(),
+                bundle_id: "com.tencent.xinWeChat".to_string(),
+            },
+            observed_at_ms: 123,
+            click_point: None,
+        });
+
+        assert_eq!(
+            last_target_bundle_id(&state).unwrap(),
+            "com.tencent.xinWeChat"
+        );
+    }
+
+    #[test]
     fn accepts_codex_target_for_autosend() {
         let state = LastInputTargetState::default();
         state.set(LastInputTarget {

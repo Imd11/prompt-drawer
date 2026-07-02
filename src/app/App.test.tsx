@@ -320,6 +320,40 @@ describe("app", () => {
     });
   });
 
+  it("shows an actionable permission message when backend autosend reports accessibility failure", async () => {
+    const { invoke } = await import("@tauri-apps/api/core");
+    const { message } = await import("@tauri-apps/plugin-dialog");
+    vi.mocked(invoke).mockClear();
+    vi.mocked(message).mockClear();
+    vi.mocked(invoke).mockImplementation(async (command: string) => {
+      if (command === "paste_prompt_and_submit_to_last_target") {
+        throw new Error(
+          "Accessibility permission required for autosend. Enable Prompt Picker in System Settings > Privacy & Security > Accessibility, then try again."
+        );
+      }
+      return undefined;
+    });
+    const { readTextFile } = await import("@tauri-apps/plugin-fs");
+    (readTextFile as ReturnType<typeof vi.fn>).mockResolvedValueOnce(
+      JSON.stringify({ version: 1, prompts: mockPrompts })
+    );
+
+    await act(async () => {
+      render(<App />);
+    });
+
+    fireEvent.click(await screen.findByText("Test Prompt"));
+
+    await waitFor(() => {
+      expect(vi.mocked(message)).toHaveBeenCalledWith(
+        expect.stringContaining(
+          "System Settings > Privacy & Security > Accessibility"
+        ),
+        { title: "Prompt Picker", kind: "error" }
+      );
+    });
+  });
+
   it("opens prompt manager from the main app window", async () => {
     currentWindowLabel = "main";
     const { readTextFile } = await import("@tauri-apps/plugin-fs");
