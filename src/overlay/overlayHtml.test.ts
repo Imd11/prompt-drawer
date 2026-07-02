@@ -85,4 +85,24 @@ describe("overlay button html", () => {
     expect(html).toContain("Open Accessibility Permission Help");
     expect(html).not.toContain("payload.kind || 'copied'");
   });
+
+  it("switches Calico into a paper-plane ready state before opening prompts", () => {
+    const html = readFileSync("public/overlay.html", "utf8");
+
+    expect(html).toContain("throwReady");
+    expect(html).toContain("calico-plane");
+    expect(html).toContain("setSprite('throwReady'");
+    expect(html.indexOf("setSprite('throwReady'")).toBeLessThan(
+      html.indexOf("begin_prompt_pick_session")
+    );
+  });
+
+  it("listens for paper-plane throw events and starts the flight animation", () => {
+    const html = readFileSync("public/overlay.html", "utf8");
+
+    expect(html).toContain("prompt-throw-send");
+    expect(html).toContain("playPaperPlaneThrow");
+    expect(html).toContain("show_paper_plane_flight_from_button");
+    expect(html).toContain("setSprite('throwSend'");
+  });
 });
