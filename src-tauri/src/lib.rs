@@ -15,8 +15,6 @@ pub use windows::{
 mod macos_panels;
 pub use macos_panels::{activate_main_window, configure_non_activating_panel};
 
-const CODEX_BUNDLE_ID: &str = "com.openai.codex";
-
 #[tauri::command]
 fn accessibility_status_cmd() -> AccessibilityStatus {
     accessibility_status()
@@ -31,9 +29,16 @@ fn frontmost_app_cmd() -> Option<FrontmostApp> {
 fn current_input_target(
     state: tauri::State<LastInputTargetState>,
 ) -> Option<platform::InputTarget> {
-    let target = platform::macos::current_input_target()?;
-    record_last_input_target_if_valid(state.inner(), &target);
-    Some(target)
+    if let Some(target) = platform::macos::current_input_target() {
+        record_last_input_target_if_valid(state.inner(), &target);
+        return Some(target);
+    }
+
+    if let Some(app) = frontmost_app() {
+        record_last_app_if_valid(state.inner(), app);
+    }
+
+    None
 }
 
 #[tauri::command]
@@ -76,19 +81,14 @@ fn paste_prompt_and_submit_to_last_target_impl(
     body: &str,
     state: &LastInputTargetState,
 ) -> Result<(), String> {
-    let bundle_id = codex_last_target_bundle_id(state)?;
+    let bundle_id = last_target_bundle_id(state)?;
     platform::macos::paste_prompt_and_submit_to_app(body, &bundle_id)
 }
 
-fn codex_last_target_bundle_id(state: &LastInputTargetState) -> Result<String, String> {
+fn last_target_bundle_id(state: &LastInputTargetState) -> Result<String, String> {
     let Some(target) = state.get() else {
-        return Err("Click into the Codex input box first, then choose a prompt.".to_string());
+        return Err("Click into a text field first, then choose a prompt.".to_string());
     };
-    if target.app.bundle_id != CODEX_BUNDLE_ID {
-        return Err(
-            "Autosend is only enabled for Codex. Click into the Codex input box first.".to_string(),
-        );
-    }
     Ok(target.app.bundle_id)
 }
 
@@ -128,16 +128,28 @@ fn record_last_input_target_if_valid(state: &LastInputTargetState, target: &plat
     let Some(app) = target.app.clone() else {
         return;
     };
-    if app.bundle_id == "local.promptpicker.dev" || app.name == "Prompt Picker" {
+    record_last_app_if_valid(state, app);
+}
+
+fn record_last_app_if_valid(state: &LastInputTargetState, app: FrontmostApp) {
+    if is_prompt_picker_app(&app) {
         return;
     }
     state.set(LastInputTarget {
         app,
-        observed_at_ms: std::time::SystemTime::now()
-            .duration_since(std::time::UNIX_EPOCH)
-            .unwrap_or_default()
-            .as_millis(),
+        observed_at_ms: now_ms(),
     });
+}
+
+fn is_prompt_picker_app(app: &FrontmostApp) -> bool {
+    app.bundle_id == "local.promptpicker.dev" || app.name == "Prompt Picker"
+}
+
+fn now_ms() -> u128 {
+    std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .unwrap_or_default()
+        .as_millis()
 }
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
@@ -274,18 +286,18 @@ mod last_input_target_tests {
     }
 
     #[test]
-    fn missing_codex_last_target_returns_clear_autosend_error() {
+    fn missing_last_target_returns_clear_autosend_error() {
         let state = LastInputTargetState::default();
-        let result = codex_last_target_bundle_id(&state);
+        let result = last_target_bundle_id(&state);
 
         assert_eq!(
             result.unwrap_err(),
-            "Click into the Codex input box first, then choose a prompt."
+            "Click into a text field first, then choose a prompt."
         );
     }
 
     #[test]
-    fn rejects_non_codex_target_for_autosend() {
+    fn accepts_non_codex_target_for_autosend() {
         let state = LastInputTargetState::default();
         state.set(LastInputTarget {
             app: FrontmostApp {
@@ -295,11 +307,9 @@ mod last_input_target_tests {
             observed_at_ms: 123,
         });
 
-        let result = codex_last_target_bundle_id(&state);
-
         assert_eq!(
-            result.unwrap_err(),
-            "Autosend is only enabled for Codex. Click into the Codex input box first."
+            last_target_bundle_id(&state).unwrap(),
+            "com.tencent.xinWeChat"
         );
     }
 
@@ -314,9 +324,34 @@ mod last_input_target_tests {
             observed_at_ms: 123,
         });
 
-        assert_eq!(
-            codex_last_target_bundle_id(&state).unwrap(),
-            "com.openai.codex"
+        assert_eq!(last_target_bundle_id(&state).unwrap(), "com.openai.codex");
+    }
+
+    #[test]
+    fn records_frontmost_app_as_last_target_fallback() {
+        let state = LastInputTargetState::default();
+        record_last_app_if_valid(
+            &state,
+            FrontmostApp {
+                name: "WeChat".to_string(),
+                bundle_id: "com.tencent.xinWeChat".to_string(),
+            },
         );
+
+        assert_eq!(state.get().unwrap().app.bundle_id, "com.tencent.xinWeChat");
+    }
+
+    #[test]
+    fn skips_prompt_picker_as_frontmost_app_fallback() {
+        let state = LastInputTargetState::default();
+        record_last_app_if_valid(
+            &state,
+            FrontmostApp {
+                name: "Prompt Picker".to_string(),
+                bundle_id: "local.promptpicker.dev".to_string(),
+            },
+        );
+
+        assert!(state.get().is_none());
     }
 }
