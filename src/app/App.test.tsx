@@ -206,11 +206,11 @@ describe("app", () => {
     });
   });
 
-  it("emits a copied status when autosend copies but keyboard automation fails", async () => {
+  it("emits a failed status when autosend copies but keyboard automation fails", async () => {
     const { invoke } = await import("@tauri-apps/api/core");
     vi.mocked(invoke).mockImplementation(async (command: string) => {
       if (command === "paste_prompt_and_submit_to_last_target") {
-        return { copied: true, sent: false, error: "System Events denied" };
+        return { copied: true, sent: false, error: "Native paste event failed" };
       }
       return undefined;
     });
@@ -227,10 +227,14 @@ describe("app", () => {
 
     await waitFor(() => {
       expect(emitMock).toHaveBeenCalledWith("prompt-autosend-status", {
-        kind: "copied",
-        message: "已复制，可手动 Cmd+V",
+        kind: "failed",
+        message: "未能自动发送，请检查权限",
       });
     });
+    expect(emitMock).not.toHaveBeenCalledWith(
+      "prompt-autosend-status",
+      expect.objectContaining({ message: "已复制，可手动 Cmd+V" })
+    );
   });
 
   it("hides the prompt popover before autosending the selected prompt", async () => {

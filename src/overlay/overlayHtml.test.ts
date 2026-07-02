@@ -67,4 +67,10 @@ describe("overlay button html", () => {
     expect(html).toContain("hideStatusBubble");
     expect(html).toContain("statusBubble.textContent");
   });
+
+  it("does not use manual paste as the default failure copy", () => {
+    const html = readFileSync("public/overlay.html", "utf8");
+
+    expect(html).not.toContain("可手动 Cmd+V");
+  });
 });

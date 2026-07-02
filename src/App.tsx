@@ -122,7 +122,7 @@ export function App({
       if (outcome.sent) {
         await emitAutosendStatus("sent", "已发送");
       } else if (outcome.copied) {
-        await emitAutosendStatus("copied", "已复制，可手动 Cmd+V");
+        await emitAutosendStatus("failed", "未能自动发送，请检查权限");
       } else {
         await emitAutosendStatus("failed", "未能复制，请重试");
       }

@@ -172,7 +172,7 @@ function hideStatusBubble() {
 function showStatusBubble(payload) {
   if (!statusBubble || !payload) return;
   const kind = payload.kind || 'copied';
-  const message = payload.message || '已复制';
+  const message = payload.message || '未能自动发送';
   window.clearTimeout(statusTimer);
   statusBubble.textContent = message;
   statusBubble.className = `calico-status-bubble is-visible is-${kind}`;
