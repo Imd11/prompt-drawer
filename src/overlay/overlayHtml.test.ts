@@ -57,4 +57,14 @@ describe("overlay button html", () => {
       html.indexOf("show_prompt_popover_from_button")
     );
   });
+
+  it("listens for prompt autosend status and renders a Calico status bubble", () => {
+    const html = readFileSync("public/overlay.html", "utf8");
+
+    expect(html).toContain("prompt-autosend-status");
+    expect(html).toContain("calico-status-bubble");
+    expect(html).toContain("showStatusBubble");
+    expect(html).toContain("hideStatusBubble");
+    expect(html).toContain("statusBubble.textContent");
+  });
 });

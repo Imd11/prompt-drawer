@@ -14,8 +14,18 @@ export interface PromptButtonPosition {
   y: number;
 }
 
+export interface AutosendOutcome {
+  copied: boolean;
+  sent: boolean;
+  error: string | null;
+}
+
 export async function getAccessibilityStatus(): Promise<AccessibilityStatus> {
   return invoke<AccessibilityStatus>("accessibility_status_cmd");
+}
+
+export async function openAccessibilitySettings(): Promise<void> {
+  return invoke("open_accessibility_settings");
 }
 
 export async function getFrontmostApp(): Promise<FrontmostApp | null> {
@@ -30,8 +40,10 @@ export async function pastePromptToLastTarget(body: string): Promise<void> {
   return invoke("paste_prompt_to_last_target", { body });
 }
 
-export async function pastePromptAndSubmitToLastTarget(body: string): Promise<void> {
-  return invoke("paste_prompt_and_submit_to_last_target", { body });
+export async function pastePromptAndSubmitToLastTarget(
+  body: string
+): Promise<AutosendOutcome> {
+  return invoke<AutosendOutcome>("paste_prompt_and_submit_to_last_target", { body });
 }
 
 export async function getCurrentInputTarget(): Promise<unknown> {

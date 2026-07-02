@@ -138,6 +138,22 @@ button {
   border-color: #b8e3c3;
 }
 
+.status-row {
+  display: flex;
+  flex: 0 0 auto;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  gap: 8px;
+}
+
+.status-action {
+  cursor: pointer;
+}
+
+.status-action:hover {
+  background: #f7f9fc;
+}
+
 .button {
   display: inline-flex;
   align-items: center;

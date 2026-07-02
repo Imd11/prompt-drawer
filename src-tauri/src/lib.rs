@@ -6,7 +6,8 @@ use tauri::{
 
 mod platform;
 pub use platform::{
-    accessibility_status, frontmost_app, AccessibilityStatus, CandidateInput, FrontmostApp,
+    accessibility_status, frontmost_app, AccessibilityStatus, AutosendOutcome, CandidateInput,
+    FrontmostApp,
 };
 mod overlay_position;
 pub use overlay_position::{prompt_button_position, OverlayPoint};
@@ -22,6 +23,11 @@ pub use macos_panels::{activate_main_window, configure_non_activating_panel};
 #[tauri::command]
 fn accessibility_status_cmd() -> AccessibilityStatus {
     accessibility_status()
+}
+
+#[tauri::command]
+fn open_accessibility_settings() -> Result<(), String> {
+    platform::macos::open_accessibility_settings()
 }
 
 #[tauri::command]
@@ -77,14 +83,14 @@ fn paste_prompt_to_last_target_impl(
 fn paste_prompt_and_submit_to_last_target(
     body: String,
     state: tauri::State<LastInputTargetState>,
-) -> Result<(), String> {
+) -> Result<AutosendOutcome, String> {
     paste_prompt_and_submit_to_last_target_impl(&body, state.inner())
 }
 
 fn paste_prompt_and_submit_to_last_target_impl(
     body: &str,
     state: &LastInputTargetState,
-) -> Result<(), String> {
+) -> Result<AutosendOutcome, String> {
     paste_prompt_and_submit_to_last_target_with_sender(
         body,
         state,
@@ -96,9 +102,9 @@ fn paste_prompt_and_submit_to_last_target_with_sender<F>(
     body: &str,
     _state: &LastInputTargetState,
     sender: F,
-) -> Result<(), String>
+) -> Result<AutosendOutcome, String>
 where
-    F: FnOnce(&str) -> Result<(), String>,
+    F: FnOnce(&str) -> Result<AutosendOutcome, String>,
 {
     sender(body)
 }
@@ -296,6 +302,7 @@ pub fn run() {
         .plugin(tauri_plugin_shell::init())
         .invoke_handler(tauri::generate_handler![
             accessibility_status_cmd,
+            open_accessibility_settings,
             frontmost_app_cmd,
             current_input_target,
             paste_prompt,
@@ -463,10 +470,12 @@ mod last_input_target_tests {
         let state = LastInputTargetState::default();
         let result = paste_prompt_and_submit_to_last_target_with_sender("hello", &state, |body| {
             assert_eq!(body, "hello");
-            Ok(())
+            Ok(AutosendOutcome::sent())
         });
 
-        assert!(result.is_ok());
+        let outcome = result.unwrap();
+        assert!(outcome.copied);
+        assert!(outcome.sent);
     }
 
     #[test]
@@ -477,6 +486,22 @@ mod last_input_target_tests {
         });
 
         assert_eq!(result.unwrap_err(), "foreground keyboard failed");
+    }
+
+    #[test]
+    fn autosend_returns_foreground_outcome_without_last_target() {
+        let state = LastInputTargetState::default();
+        let result = paste_prompt_and_submit_to_last_target_with_sender("hello", &state, |body| {
+            assert_eq!(body, "hello");
+            Ok(AutosendOutcome::keyboard_failed(
+                "System Events denied".to_string(),
+            ))
+        });
+
+        let outcome = result.unwrap();
+        assert!(outcome.copied);
+        assert!(!outcome.sent);
+        assert_eq!(outcome.error.as_deref(), Some("System Events denied"));
     }
 
     #[test]

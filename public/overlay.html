@@ -11,6 +11,7 @@ body {
 }
 
 body {
+  position: relative;
   display: grid;
   place-items: center;
 }
@@ -58,14 +59,57 @@ body {
 .calico-entry.is-dragging .calico-sprite {
   transform: rotate(-2deg) scale(1.03);
 }
+
+.calico-status-bubble {
+  position: absolute;
+  top: 4px;
+  left: 50%;
+  z-index: 2;
+  max-width: 124px;
+  padding: 5px 8px;
+  overflow: hidden;
+  color: #1f2937;
+  background: rgba(255, 255, 255, 0.94);
+  border: 1px solid rgba(203, 213, 225, 0.9);
+  border-radius: 999px;
+  box-shadow: 0 8px 18px rgba(15, 23, 42, 0.14);
+  font: 700 11px/1.2 -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+  opacity: 0;
+  pointer-events: none;
+  text-align: center;
+  text-overflow: ellipsis;
+  transform: translateX(-50%) translateY(-4px);
+  transition:
+    opacity 120ms ease,
+    transform 120ms ease;
+  white-space: nowrap;
+}
+
+.calico-status-bubble.is-visible {
+  opacity: 1;
+  transform: translateX(-50%) translateY(0);
+}
+
+.calico-status-bubble.is-sent {
+  color: #166534;
+  border-color: rgba(134, 239, 172, 0.9);
+}
+
+.calico-status-bubble.is-copied,
+.calico-status-bubble.is-failed {
+  color: #92400e;
+  border-color: rgba(253, 186, 116, 0.9);
+}
 </style></head>
 <body>
+<div id="statusBubble" class="calico-status-bubble" aria-live="polite"></div>
 <button id="btn" class="calico-entry" title="Open Prompt Picker" aria-label="Open Prompt Picker">
   <img id="calicoSprite" class="calico-sprite" src="/calico/calico-idle.apng" alt="" draggable="false" />
 </button>
 <script type="module">
 const btn = document.getElementById('btn');
 const sprite = document.getElementById('calicoSprite');
+const statusBubble = document.getElementById('statusBubble');
 const tauri = window.__TAURI__;
 const sprites = {
   idle: '/calico/calico-idle.apng',
@@ -81,6 +125,7 @@ let contextMenuOpened = false;
 let pointerSequence = 0;
 let dragStartedEmitted = false;
 let spriteResetTimer = 0;
+let statusTimer = 0;
 
 function setSprite(state, resetMs = 0) {
   if (!sprite || !sprites[state]) return;
@@ -117,6 +162,30 @@ async function emit(event, payload) {
   } catch (error) {
     console.error(`Tauri event failed: ${event}`, error);
   }
+}
+
+function hideStatusBubble() {
+  if (!statusBubble) return;
+  statusBubble.classList.remove('is-visible');
+}
+
+function showStatusBubble(payload) {
+  if (!statusBubble || !payload) return;
+  const kind = payload.kind || 'copied';
+  const message = payload.message || '已复制';
+  window.clearTimeout(statusTimer);
+  statusBubble.textContent = message;
+  statusBubble.className = `calico-status-bubble is-visible is-${kind}`;
+  statusTimer = window.setTimeout(hideStatusBubble, 1800);
+}
+
+function listenForAutosendStatus() {
+  if (!tauri?.event?.listen) return;
+  tauri.event.listen('prompt-autosend-status', (event) => {
+    showStatusBubble(event.payload);
+  }).catch((error) => {
+    console.error('Tauri event listen failed: prompt-autosend-status', error);
+  });
 }
 
 async function openButtonControls(event) {
@@ -240,6 +309,8 @@ btn.addEventListener('pointerup', async (event) => {
 btn.addEventListener('contextmenu', async (event) => {
   await openButtonControls(event);
 });
+
+listenForAutosendStatus();
 </script>
 </body>
 </html>

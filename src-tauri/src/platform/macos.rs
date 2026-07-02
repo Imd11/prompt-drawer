@@ -14,11 +14,60 @@ pub struct AccessibilityStatus {
     pub trusted: bool,
 }
 
+#[derive(Clone, Debug, Serialize)]
+pub struct AutosendOutcome {
+    pub copied: bool,
+    pub sent: bool,
+    pub error: Option<String>,
+}
+
+impl AutosendOutcome {
+    pub fn sent() -> Self {
+        Self {
+            copied: true,
+            sent: true,
+            error: None,
+        }
+    }
+
+    pub fn copy_failed(error: String) -> Self {
+        Self {
+            copied: false,
+            sent: false,
+            error: Some(error),
+        }
+    }
+
+    pub fn keyboard_failed(error: String) -> Self {
+        Self {
+            copied: true,
+            sent: false,
+            error: Some(error),
+        }
+    }
+}
+
 // ── Accessibility ──────────────────────────────────────────────────────────────
 
 pub fn accessibility_status() -> AccessibilityStatus {
     AccessibilityStatus {
         trusted: is_accessibility_trusted(),
+    }
+}
+
+pub fn accessibility_settings_url() -> &'static str {
+    "x-apple.systempreferences:com.apple.preference.security?Privacy_Accessibility"
+}
+
+pub fn open_accessibility_settings() -> Result<(), String> {
+    let output = Command::new("open")
+        .arg(accessibility_settings_url())
+        .output()
+        .map_err(|e| e.to_string())?;
+    if output.status.success() {
+        Ok(())
+    } else {
+        Err(String::from_utf8_lossy(&output.stderr).to_string())
     }
 }
 
@@ -226,8 +275,10 @@ pub fn type_or_paste_prompt_and_submit_to_app(body: &str, bundle_id: &str) -> Re
     })
 }
 
-pub fn paste_prompt_and_submit_to_foreground(body: &str) -> Result<(), String> {
-    copy_to_clipboard(body)?;
+pub fn paste_prompt_and_submit_to_foreground(body: &str) -> Result<AutosendOutcome, String> {
+    if let Err(error) = copy_to_clipboard(body) {
+        return Ok(AutosendOutcome::copy_failed(error));
+    }
     refocus_previous_app_if_prompt_picker_frontmost();
 
     let script = foreground_paste_and_submit_script();
@@ -237,12 +288,12 @@ pub fn paste_prompt_and_submit_to_foreground(body: &str) -> Result<(), String> {
         .output()
         .map_err(|e| e.to_string())?;
     if !output.status.success() {
-        return Err(format_autosend_error(
+        return Ok(AutosendOutcome::keyboard_failed(format_autosend_error(
             "foreground-paste-and-submit",
             String::from_utf8_lossy(&output.stderr).as_ref(),
-        ));
+        )));
     }
-    Ok(())
+    Ok(AutosendOutcome::sent())
 }
 
 #[allow(dead_code)]
@@ -568,6 +619,38 @@ fn input_click_point_for_frame(frame: &CandidateInput) -> (f64, f64) {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn autosend_outcome_reports_copy_failure() {
+        let outcome = AutosendOutcome::copy_failed("pbcopy failed".to_string());
+
+        assert!(!outcome.copied);
+        assert!(!outcome.sent);
+        assert_eq!(outcome.error.as_deref(), Some("pbcopy failed"));
+    }
+
+    #[test]
+    fn autosend_outcome_reports_keyboard_failure_after_copy() {
+        let outcome = AutosendOutcome::keyboard_failed("System Events denied".to_string());
+
+        assert!(outcome.copied);
+        assert!(!outcome.sent);
+        assert_eq!(outcome.error.as_deref(), Some("System Events denied"));
+    }
+
+    #[test]
+    fn autosend_outcome_reports_sent_after_keyboard_success() {
+        let outcome = AutosendOutcome::sent();
+
+        assert!(outcome.copied);
+        assert!(outcome.sent);
+        assert!(outcome.error.is_none());
+    }
+
+    #[test]
+    fn accessibility_settings_url_targets_privacy_accessibility() {
+        assert!(accessibility_settings_url().contains("Privacy_Accessibility"));
+    }
 
     #[test]
     fn parses_lsappinfo_front_asn_output() {

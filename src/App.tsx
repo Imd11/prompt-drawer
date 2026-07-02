@@ -1,5 +1,6 @@
 import { useState, useEffect, useRef, useCallback } from "react";
 import { invoke } from "@tauri-apps/api/core";
+import { emit } from "@tauri-apps/api/event";
 import { getCurrentWindow } from "@tauri-apps/api/window";
 import { save, open } from "@tauri-apps/plugin-dialog";
 import { writeTextFile, readTextFile } from "@tauri-apps/plugin-fs";
@@ -10,8 +11,10 @@ import { createPromptStore } from "./shared/promptStore";
 import { createTauriPromptStorage } from "./storage/tauriPromptStorage";
 import { createTauriSettingsStorage } from "./storage/tauriSettingsStorage";
 import {
+  getAccessibilityStatus,
   hidePromptButton,
   hidePromptPopover,
+  openAccessibilitySettings,
   openMainWindow,
   pastePromptAndSubmitToLastTarget,
 } from "./platform/platformApi";
@@ -35,6 +38,16 @@ const DEFAULT_SETTINGS: Settings = {
 };
 
 const waitForWindowHide = () => new Promise((resolve) => window.setTimeout(resolve, 120));
+
+type AutosendStatusKind = "sent" | "copied" | "failed";
+
+async function emitAutosendStatus(kind: AutosendStatusKind, message: string) {
+  try {
+    await emit("prompt-autosend-status", { kind, message });
+  } catch (error) {
+    console.warn("Failed to emit autosend status:", error);
+  }
+}
 
 interface InputTargetPollingControllerProps {
   settings: Settings;
@@ -78,16 +91,24 @@ export function App({
   const [prompts, setPrompts] = useState<PromptItem[]>([]);
   const [submittingPromptId, setSubmittingPromptId] = useState<string | null>(null);
   const [activeSettings, setActiveSettings] = useState<Settings>(settings);
+  const [accessibilityTrusted, setAccessibilityTrusted] = useState<boolean | null>(null);
   const storeRef = useRef(createPromptStore(createTauriPromptStorage()));
   const settingsStoreRef = useRef(createSettingsStore(createTauriSettingsStorage()));
 
   useEffect(() => {
     storeRef.current.list().then(setPrompts);
     settingsStoreRef.current.get().then(setActiveSettings);
+    let label = initialWindowLabel();
     try {
-      setWindowLabel(getCurrentWindow().label);
+      label = getCurrentWindow().label;
     } catch {
-      setWindowLabel(initialWindowLabel());
+      label = initialWindowLabel();
+    }
+    setWindowLabel(label);
+    if (label === "main") {
+      getAccessibilityStatus()
+        .then((status) => setAccessibilityTrusted(status.trusted))
+        .catch(() => setAccessibilityTrusted(null));
     }
   }, []);
 
@@ -97,9 +118,17 @@ export function App({
     try {
       await hidePromptPopover();
       await waitForWindowHide();
-      await pastePromptAndSubmitToLastTarget(prompt.body);
+      const outcome = await pastePromptAndSubmitToLastTarget(prompt.body);
+      if (outcome.sent) {
+        await emitAutosendStatus("sent", "已发送");
+      } else if (outcome.copied) {
+        await emitAutosendStatus("copied", "已复制，可手动 Cmd+V");
+      } else {
+        await emitAutosendStatus("failed", "未能复制，请重试");
+      }
     } catch (e) {
       console.warn("Prompt autosend failed without blocking the picker:", e);
+      await emitAutosendStatus("failed", "未能发送，请重试");
     } finally {
       setSubmittingPromptId(null);
     }
@@ -144,8 +173,10 @@ export function App({
         {pollingController}
         <MainWindow
           floatingButtonVisible={activeSettings.floatingButton.visible}
+          accessibilityTrusted={accessibilityTrusted}
           onManage={handleManage}
           onSettings={handleSettings}
+          onOpenAccessibilitySettings={openAccessibilitySettings}
           onShowFloatingButton={async () => {
             await settingsStoreRef.current.setFloatingButtonVisible(true);
             setActiveSettings(await settingsStoreRef.current.get());
@@ -303,14 +334,18 @@ export function App({
 
 function MainWindow({
   floatingButtonVisible,
+  accessibilityTrusted,
   onManage,
   onSettings,
+  onOpenAccessibilitySettings,
   onShowFloatingButton,
   onHideFloatingButton,
 }: {
   floatingButtonVisible: boolean;
+  accessibilityTrusted: boolean | null;
   onManage: () => void;
   onSettings: () => void;
+  onOpenAccessibilitySettings: () => void;
   onShowFloatingButton: () => void;
   onHideFloatingButton: () => void;
 }) {
@@ -321,9 +356,24 @@ function MainWindow({
           <h1>Prompt Picker</h1>
           <p>Manage reusable prompts and insert them from the floating picker.</p>
         </div>
-        <span className={floatingButtonVisible ? "status-pill is-on" : "status-pill"}>
-          Status: {floatingButtonVisible ? "Visible" : "Hidden"}
-        </span>
+        <div className="status-row">
+          <span className={floatingButtonVisible ? "status-pill is-on" : "status-pill"}>
+            Status: {floatingButtonVisible ? "Visible" : "Hidden"}
+          </span>
+          {accessibilityTrusted === false ? (
+            <button
+              className="status-pill status-action"
+              aria-label="Open Accessibility Settings"
+              onClick={onOpenAccessibilitySettings}
+            >
+              Autosend: Needs Accessibility
+            </button>
+          ) : (
+            <span className="status-pill is-on">
+              Autosend: {accessibilityTrusted ? "Ready" : "Checking"}
+            </span>
+          )}
+        </div>
       </header>
 
       <div className="home-grid">

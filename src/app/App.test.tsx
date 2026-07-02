@@ -4,6 +4,7 @@ import { App } from "../App";
 import type { PromptItem } from "../shared/promptTypes";
 
 const inputTargetPollingMock = vi.hoisted(() => vi.fn());
+const emitMock = vi.hoisted(() => vi.fn().mockResolvedValue(undefined));
 
 vi.mock("../overlay/useInputTargetPolling", () => ({
   useInputTargetPolling: inputTargetPollingMock,
@@ -12,6 +13,10 @@ vi.mock("../overlay/useInputTargetPolling", () => ({
 // Mock Tauri core invoke
 vi.mock("@tauri-apps/api/core", () => ({
   invoke: vi.fn().mockResolvedValue(undefined),
+}));
+
+vi.mock("@tauri-apps/api/event", () => ({
+  emit: emitMock,
 }));
 
 // Mock getCurrentWindow
@@ -49,6 +54,7 @@ describe("app", () => {
     currentWindowLabel = "prompt-popover";
     window.history.pushState({}, "", "/");
     inputTargetPollingMock.mockClear();
+    emitMock.mockClear();
   });
 
   it("shows prompt list in popover mode by default", async () => {
@@ -148,7 +154,12 @@ describe("app", () => {
 
   it("autosends selected prompt into the backend last input target", async () => {
     const { invoke } = await import("@tauri-apps/api/core");
-    vi.mocked(invoke).mockResolvedValue(undefined);
+    vi.mocked(invoke).mockImplementation(async (command: string) => {
+      if (command === "paste_prompt_and_submit_to_last_target") {
+        return { copied: true, sent: true, error: null };
+      }
+      return undefined;
+    });
     const { readTextFile } = await import("@tauri-apps/plugin-fs");
     (readTextFile as ReturnType<typeof vi.fn>).mockResolvedValueOnce(
       JSON.stringify({ version: 1, prompts: mockPrompts })
@@ -168,10 +179,69 @@ describe("app", () => {
     });
   });
 
+  it("emits a sent status when autosend reports keyboard success", async () => {
+    const { invoke } = await import("@tauri-apps/api/core");
+    vi.mocked(invoke).mockImplementation(async (command: string) => {
+      if (command === "paste_prompt_and_submit_to_last_target") {
+        return { copied: true, sent: true, error: null };
+      }
+      return undefined;
+    });
+    const { readTextFile } = await import("@tauri-apps/plugin-fs");
+    (readTextFile as ReturnType<typeof vi.fn>).mockResolvedValueOnce(
+      JSON.stringify({ version: 1, prompts: mockPrompts })
+    );
+
+    await act(async () => {
+      render(<App />);
+    });
+
+    fireEvent.click(await screen.findByText("Test Prompt"));
+
+    await waitFor(() => {
+      expect(emitMock).toHaveBeenCalledWith("prompt-autosend-status", {
+        kind: "sent",
+        message: "已发送",
+      });
+    });
+  });
+
+  it("emits a copied status when autosend copies but keyboard automation fails", async () => {
+    const { invoke } = await import("@tauri-apps/api/core");
+    vi.mocked(invoke).mockImplementation(async (command: string) => {
+      if (command === "paste_prompt_and_submit_to_last_target") {
+        return { copied: true, sent: false, error: "System Events denied" };
+      }
+      return undefined;
+    });
+    const { readTextFile } = await import("@tauri-apps/plugin-fs");
+    (readTextFile as ReturnType<typeof vi.fn>).mockResolvedValueOnce(
+      JSON.stringify({ version: 1, prompts: mockPrompts })
+    );
+
+    await act(async () => {
+      render(<App />);
+    });
+
+    fireEvent.click(await screen.findByText("Test Prompt"));
+
+    await waitFor(() => {
+      expect(emitMock).toHaveBeenCalledWith("prompt-autosend-status", {
+        kind: "copied",
+        message: "已复制，可手动 Cmd+V",
+      });
+    });
+  });
+
   it("hides the prompt popover before autosending the selected prompt", async () => {
     const { invoke } = await import("@tauri-apps/api/core");
     vi.mocked(invoke).mockClear();
-    vi.mocked(invoke).mockResolvedValue(undefined);
+    vi.mocked(invoke).mockImplementation(async (command: string) => {
+      if (command === "paste_prompt_and_submit_to_last_target") {
+        return { copied: true, sent: true, error: null };
+      }
+      return undefined;
+    });
     const { readTextFile } = await import("@tauri-apps/plugin-fs");
     (readTextFile as ReturnType<typeof vi.fn>).mockResolvedValueOnce(
       JSON.stringify({ version: 1, prompts: mockPrompts })
@@ -196,7 +266,12 @@ describe("app", () => {
   it("does not run a frontend accessibility preflight before autosend", async () => {
     const { invoke } = await import("@tauri-apps/api/core");
     vi.mocked(invoke).mockClear();
-    vi.mocked(invoke).mockResolvedValue(undefined);
+    vi.mocked(invoke).mockImplementation(async (command: string) => {
+      if (command === "paste_prompt_and_submit_to_last_target") {
+        return { copied: true, sent: true, error: null };
+      }
+      return undefined;
+    });
     const { readTextFile } = await import("@tauri-apps/plugin-fs");
     (readTextFile as ReturnType<typeof vi.fn>).mockResolvedValueOnce(
       JSON.stringify({ version: 1, prompts: mockPrompts })
@@ -259,7 +334,12 @@ describe("app", () => {
   it("does not move the floating button when selecting a prompt from the popover", async () => {
     const { invoke } = await import("@tauri-apps/api/core");
     vi.mocked(invoke).mockClear();
-    vi.mocked(invoke).mockResolvedValue(undefined);
+    vi.mocked(invoke).mockImplementation(async (command: string) => {
+      if (command === "paste_prompt_and_submit_to_last_target") {
+        return { copied: true, sent: true, error: null };
+      }
+      return undefined;
+    });
     currentWindowLabel = "prompt-popover";
     window.history.pushState({}, "", "/?mode=popover");
     const { readTextFile } = await import("@tauri-apps/plugin-fs");
@@ -451,6 +531,48 @@ describe("app", () => {
     await waitFor(() => {
       expect(screen.getByText("Status: Visible")).toBeTruthy();
     });
+  });
+
+  it("shows autosend accessibility readiness in the main window", async () => {
+    currentWindowLabel = "main";
+    const { invoke } = await import("@tauri-apps/api/core");
+    vi.mocked(invoke).mockImplementation(async (command: string) => {
+      if (command === "accessibility_status_cmd") return { trusted: false };
+      return undefined;
+    });
+    const { readTextFile } = await import("@tauri-apps/plugin-fs");
+    (readTextFile as ReturnType<typeof vi.fn>).mockResolvedValue(
+      JSON.stringify({ version: 1, prompts: mockPrompts })
+    );
+
+    await act(async () => {
+      render(<App />);
+    });
+
+    expect(await screen.findByText("Autosend: Needs Accessibility")).toBeTruthy();
+  });
+
+  it("opens Accessibility settings from the main window status control", async () => {
+    currentWindowLabel = "main";
+    const { invoke } = await import("@tauri-apps/api/core");
+    vi.mocked(invoke).mockImplementation(async (command: string) => {
+      if (command === "accessibility_status_cmd") return { trusted: false };
+      return undefined;
+    });
+    const { readTextFile } = await import("@tauri-apps/plugin-fs");
+    (readTextFile as ReturnType<typeof vi.fn>).mockResolvedValue(
+      JSON.stringify({ version: 1, prompts: mockPrompts })
+    );
+
+    await act(async () => {
+      render(<App />);
+    });
+
+    fireEvent.click(
+      await screen.findByRole("button", { name: "Open Accessibility Settings" })
+    );
+
+    expect(vi.mocked(invoke)).toHaveBeenCalledWith("open_accessibility_settings");
   });
 
   it("renders button controls mode without prompt management UI", async () => {
