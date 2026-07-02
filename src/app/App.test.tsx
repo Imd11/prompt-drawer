@@ -146,7 +146,7 @@ describe("app", () => {
     expect(inputTargetPollingMock).toHaveBeenCalled();
   });
 
-  it("pastes selected prompt into the backend last input target", async () => {
+  it("autosends selected prompt into the backend last Codex target", async () => {
     const { invoke } = await import("@tauri-apps/api/core");
     vi.mocked(invoke).mockResolvedValue(undefined);
     const { readTextFile } = await import("@tauri-apps/plugin-fs");
@@ -162,7 +162,7 @@ describe("app", () => {
 
     await waitFor(() => {
       expect(vi.mocked(invoke)).toHaveBeenCalledWith(
-        "paste_prompt_to_last_target",
+        "paste_prompt_and_submit_to_last_target",
         { body: "Test body" }
       );
     });
@@ -187,7 +187,7 @@ describe("app", () => {
 
     await waitFor(() => {
       expect(vi.mocked(invoke)).toHaveBeenCalledWith(
-        "paste_prompt_to_last_target",
+        "paste_prompt_and_submit_to_last_target",
         { body: "Test body" }
       );
     });
@@ -202,8 +202,8 @@ describe("app", () => {
   it("does not fall back to blind paste when no input target is recorded", async () => {
     const { invoke } = await import("@tauri-apps/api/core");
     vi.mocked(invoke).mockImplementation(async (command) => {
-      if (command === "paste_prompt_to_last_target") {
-        throw new Error("Click into a text field first, then choose a prompt.");
+      if (command === "paste_prompt_and_submit_to_last_target") {
+        throw new Error("Click into the Codex input box first, then choose a prompt.");
       }
       return undefined;
     });
@@ -221,7 +221,7 @@ describe("app", () => {
 
     await waitFor(() => {
       expect(window.alert).toHaveBeenCalledWith(
-        "Click into a text field first, then choose a prompt."
+        "Click into the Codex input box first, then choose a prompt."
       );
     });
     expect(vi.mocked(invoke)).not.toHaveBeenCalledWith("paste_prompt", {

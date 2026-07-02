@@ -30,6 +30,10 @@ export async function pastePromptToLastTarget(body: string): Promise<void> {
   return invoke("paste_prompt_to_last_target", { body });
 }
 
+export async function pastePromptAndSubmitToLastTarget(body: string): Promise<void> {
+  return invoke("paste_prompt_and_submit_to_last_target", { body });
+}
+
 export async function getCurrentInputTarget(): Promise<unknown> {
   return invoke("current_input_target");
 }
