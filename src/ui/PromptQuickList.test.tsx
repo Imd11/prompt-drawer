@@ -55,7 +55,17 @@ describe("PromptQuickList", () => {
     expect(screen.queryByText("3. 完成验证。")).toBeNull();
   });
 
-  it("shows full prompt content on hover", () => {
+  it("shows full single prompt content on hover", () => {
+    render(<PromptQuickList prompts={prompts} onSelect={() => {}} />);
+
+    fireEvent.mouseEnter(screen.getByRole("option", { name: /讨论方案/i }));
+
+    expect(screen.getByRole("tooltip").textContent).toContain(
+      "使用 brainstorming skill，先和我讨论方案，不要修改代码。"
+    );
+  });
+
+  it("shows full group prompt content on hover", () => {
     render(<PromptQuickList prompts={prompts} onSelect={() => {}} />);
 
     expect(screen.queryByRole("tooltip")).toBeNull();
@@ -85,6 +95,17 @@ describe("PromptQuickList", () => {
     render(<PromptQuickList prompts={prompts} onSelect={(prompt) => { selected = prompt; }} />);
 
     fireEvent.click(screen.getByText("修复流程"));
+
+    expect(selected).toEqual(prompts[1]);
+  });
+
+  it("keeps prompt options selectable after hover preview appears", () => {
+    let selected: PromptContainer | null = null;
+    render(<PromptQuickList prompts={prompts} onSelect={(prompt) => { selected = prompt; }} />);
+
+    const option = screen.getByRole("option", { name: /修复流程/i });
+    fireEvent.mouseEnter(option);
+    fireEvent.click(option);
 
     expect(selected).toEqual(prompts[1]);
   });

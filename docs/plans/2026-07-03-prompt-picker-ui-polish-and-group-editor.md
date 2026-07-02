@@ -784,4 +784,3 @@ After this plan is implemented, the user should see:
 - Hovering a prompt container shows a bounded full preview panel with complete content.
 - The main App page directly feels like a prompt manager, with less clutter and a cleaner Codex-like style.
 - Group editing feels like editing an ordered list: row controls appear only when needed, and rows can be dragged to reorder.
-
