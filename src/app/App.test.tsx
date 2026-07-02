@@ -359,6 +359,9 @@ describe("app", () => {
         message: "已粘贴并回车",
       });
     });
+    expect(emitMock).toHaveBeenCalledWith("prompt-throw-send", {
+      kind: "single",
+    });
   });
 
   it("emits an actionable permission status when autosend lacks accessibility permission", async () => {
@@ -391,6 +394,9 @@ describe("app", () => {
         message: "点击授权",
         action: "request_accessibility_permission",
       });
+    });
+    expect(emitMock).toHaveBeenCalledWith("prompt-throw-send", {
+      kind: "single",
     });
     expect(emitMock).not.toHaveBeenCalledWith(
       "prompt-autosend-status",
