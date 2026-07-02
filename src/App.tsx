@@ -101,8 +101,8 @@ export function App({
         );
         return;
       }
-      await pastePromptAndSubmitToLastTarget(prompt.body);
       await hidePromptPopover();
+      await pastePromptAndSubmitToLastTarget(prompt.body);
     } catch (e) {
       console.error("Failed to paste prompt:", e);
       const message = e instanceof Error ? e.message : String(e);

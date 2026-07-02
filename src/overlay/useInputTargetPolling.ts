@@ -13,6 +13,7 @@ interface InputTarget {
   frame: { x: number; y: number; width: number; height: number };
   window_frame: { x: number; y: number; width: number; height: number };
   button_position: [number, number];
+  click_point?: [number, number];
   app: FrontmostApp | null;
 }
 

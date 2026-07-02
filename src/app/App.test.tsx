@@ -168,6 +168,31 @@ describe("app", () => {
     });
   });
 
+  it("hides the prompt popover before autosending the selected prompt", async () => {
+    const { invoke } = await import("@tauri-apps/api/core");
+    vi.mocked(invoke).mockClear();
+    vi.mocked(invoke).mockResolvedValue(undefined);
+    const { readTextFile } = await import("@tauri-apps/plugin-fs");
+    (readTextFile as ReturnType<typeof vi.fn>).mockResolvedValueOnce(
+      JSON.stringify({ version: 1, prompts: mockPrompts })
+    );
+
+    await act(async () => {
+      render(<App />);
+    });
+
+    fireEvent.click(await screen.findByText("Test Prompt"));
+
+    await waitFor(() => {
+      const calls = vi.mocked(invoke).mock.calls.map((call) => call[0]);
+      expect(calls).toContain("hide_prompt_popover");
+      expect(calls).toContain("paste_prompt_and_submit_to_last_target");
+      expect(calls.indexOf("hide_prompt_popover")).toBeLessThan(
+        calls.indexOf("paste_prompt_and_submit_to_last_target")
+      );
+    });
+  });
+
   it("does not move the floating button when selecting a prompt from the popover", async () => {
     const { invoke } = await import("@tauri-apps/api/core");
     vi.mocked(invoke).mockClear();

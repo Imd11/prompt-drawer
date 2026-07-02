@@ -85,10 +85,21 @@ fn paste_prompt_and_submit_to_last_target_impl(
     body: &str,
     state: &LastInputTargetState,
 ) -> Result<(), String> {
-    let bundle_id = last_target_bundle_id(state)?;
-    platform::macos::paste_prompt_and_submit_to_app(body, &bundle_id)
+    let Some(target) = state.get() else {
+        return Err("Click into a text field first, then choose a prompt.".to_string());
+    };
+    if let Some(point) = target.click_point {
+        return platform::macos::paste_prompt_and_submit_to_app_at_point(
+            body,
+            &target.app.bundle_id,
+            point.x,
+            point.y,
+        );
+    }
+    platform::macos::paste_prompt_and_submit_to_app(body, &target.app.bundle_id)
 }
 
+#[cfg(test)]
 fn last_target_bundle_id(state: &LastInputTargetState) -> Result<String, String> {
     let Some(target) = state.get() else {
         return Err("Click into a text field first, then choose a prompt.".to_string());
@@ -110,6 +121,13 @@ fn open_main_window(app: tauri::AppHandle) -> Result<(), String> {
 pub struct LastInputTarget {
     pub app: FrontmostApp,
     pub observed_at_ms: u128,
+    pub click_point: Option<TargetClickPoint>,
+}
+
+#[derive(Clone, Copy, Debug, serde::Serialize)]
+pub struct TargetClickPoint {
+    pub x: f64,
+    pub y: f64,
 }
 
 #[derive(Default)]
@@ -132,7 +150,17 @@ fn record_last_input_target_if_valid(state: &LastInputTargetState, target: &plat
     let Some(app) = target.app.clone() else {
         return;
     };
-    record_last_app_if_valid(state, app);
+    if is_prompt_picker_app(&app) {
+        return;
+    }
+    state.set(LastInputTarget {
+        app,
+        observed_at_ms: now_ms(),
+        click_point: Some(TargetClickPoint {
+            x: target.click_point.0,
+            y: target.click_point.1,
+        }),
+    });
 }
 
 fn record_last_app_if_valid(state: &LastInputTargetState, app: FrontmostApp) {
@@ -142,6 +170,7 @@ fn record_last_app_if_valid(state: &LastInputTargetState, app: FrontmostApp) {
     state.set(LastInputTarget {
         app,
         observed_at_ms: now_ms(),
+        click_point: None,
     });
 }
 
@@ -314,6 +343,7 @@ mod last_input_target_tests {
                 bundle_id: "com.apple.Notes".to_string(),
             },
             observed_at_ms: 123,
+            click_point: None,
         };
 
         state.set(target);
@@ -338,6 +368,7 @@ mod last_input_target_tests {
                 height: 100.0,
             },
             button_position: (10.0, 10.0),
+            click_point: (6.0, 5.0),
             app: Some(FrontmostApp {
                 name: "Notes".to_string(),
                 bundle_id: "com.apple.Notes".to_string(),
@@ -347,6 +378,40 @@ mod last_input_target_tests {
         record_last_input_target_if_valid(&state, &target);
 
         assert_eq!(state.get().unwrap().app.bundle_id, "com.apple.Notes");
+        assert_eq!(state.get().unwrap().click_point.unwrap().x, 6.0);
+    }
+
+    #[test]
+    fn records_input_click_point_separately_from_button_position() {
+        let state = LastInputTargetState::default();
+        let target = platform::InputTarget {
+            frame: CandidateInput {
+                x: 700.0,
+                y: 680.0,
+                width: 500.0,
+                height: 96.0,
+            },
+            window_frame: CandidateInput {
+                x: 10.0,
+                y: 20.0,
+                width: 1200.0,
+                height: 800.0,
+            },
+            button_position: (1200.0, 776.0),
+            click_point: (760.0, 728.0),
+            app: Some(FrontmostApp {
+                name: "Codex".to_string(),
+                bundle_id: "com.openai.codex".to_string(),
+            }),
+        };
+
+        record_last_input_target_if_valid(&state, &target);
+
+        let stored = state.get().unwrap();
+        let click_point = stored.click_point.unwrap();
+        assert_eq!(click_point.x, 760.0);
+        assert_eq!(click_point.y, 728.0);
+        assert_ne!(click_point.x, target.button_position.0);
     }
 
     #[test]
@@ -366,6 +431,7 @@ mod last_input_target_tests {
                 height: 100.0,
             },
             button_position: (10.0, 10.0),
+            click_point: (6.0, 5.0),
             app: Some(FrontmostApp {
                 name: "Prompt Picker".to_string(),
                 bundle_id: "local.promptpicker.dev".to_string(),
@@ -408,6 +474,7 @@ mod last_input_target_tests {
                 bundle_id: "com.tencent.xinWeChat".to_string(),
             },
             observed_at_ms: 123,
+            click_point: None,
         });
 
         assert_eq!(
@@ -425,6 +492,7 @@ mod last_input_target_tests {
                 bundle_id: "com.openai.codex".to_string(),
             },
             observed_at_ms: 123,
+            click_point: None,
         });
 
         assert_eq!(last_target_bundle_id(&state).unwrap(), "com.openai.codex");

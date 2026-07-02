@@ -75,6 +75,7 @@ pub struct InputTarget {
     pub frame: CandidateInput,
     pub window_frame: CandidateInput,
     pub button_position: (f64, f64),
+    pub click_point: (f64, f64),
     pub app: Option<FrontmostApp>,
 }
 
@@ -104,12 +105,14 @@ tell application "System Events"
         set frontWin to front window
         set winPos to position of frontWin
         set winSize to size of frontWin
-        set focusedElem to focused UI element of frontWin
         set elemPos to {{0, 0}}
         set elemSize to {{0, 0}}
         try
-            set elemPos to position of focusedElem
-            set elemSize to size of focusedElem
+            set focusedElem to value of attribute "AXFocusedUIElement" of frontWin
+            if focusedElem is not missing value then
+                set elemPos to position of focusedElem
+                set elemSize to size of focusedElem
+            end if
         end try
         return (item 1 of winPos as string) & "," & (item 2 of winPos as string) & "|" & (item 1 of winSize as string) & "," & (item 2 of winSize as string) & "|" & (item 1 of elemPos as string) & "," & (item 2 of elemPos as string) & "|" & (item 1 of elemSize as string) & "," & (item 2 of elemSize as string)
     end tell
@@ -184,6 +187,25 @@ pub fn paste_prompt_and_submit_to_app(body: &str, bundle_id: &str) -> Result<(),
     Ok(())
 }
 
+pub fn paste_prompt_and_submit_to_app_at_point(
+    body: &str,
+    bundle_id: &str,
+    x: f64,
+    y: f64,
+) -> Result<(), String> {
+    copy_to_clipboard(body)?;
+    let script = paste_and_submit_to_app_at_point_script(bundle_id, x, y);
+    let output = Command::new("osascript")
+        .arg("-e")
+        .arg(&script)
+        .output()
+        .map_err(|e| e.to_string())?;
+    if !output.status.success() {
+        return Err(String::from_utf8_lossy(&output.stderr).trim().to_string());
+    }
+    Ok(())
+}
+
 fn paste_to_app_script(bundle_id: &str) -> String {
     format!(
         r#"tell application id "{}" to activate
@@ -203,6 +225,21 @@ tell application "System Events"
     key code 36
 end tell"#,
         bundle_id
+    )
+}
+
+fn paste_and_submit_to_app_at_point_script(bundle_id: &str, x: f64, y: f64) -> String {
+    format!(
+        r#"tell application id "{}" to activate
+delay 0.2
+tell application "System Events"
+    click at {{{:.0}, {:.0}}}
+    delay 0.12
+    keystroke "v" using command down
+    delay 0.1
+    key code 36
+end tell"#,
+        bundle_id, x, y
     )
 }
 
@@ -313,16 +350,64 @@ pub fn parse_focused_input_output(raw: &str, app: &FrontmostApp) -> Option<Input
         height: elem_size.1,
     };
 
-    // Button anchors at bottom-right of focused element
-    let button_x = elem_pos.0 + elem_size.0;
-    let button_y = elem_pos.1 + elem_size.1;
+    let focused_frame_available = frame.width > 1.0 && frame.height > 1.0;
+    let button_position = if focused_frame_available {
+        // Button anchors at bottom-right of focused element.
+        (frame.x + frame.width, frame.y + frame.height)
+    } else {
+        fallback_button_position_for_window(&window_frame)
+    };
+    let click_point = if focused_frame_available {
+        input_click_point_for_frame(&frame)
+    } else {
+        let fallback = fallback_click_point_for_app(app, &window_frame);
+        (fallback.x, fallback.y)
+    };
 
     Some(InputTarget {
         frame,
         window_frame,
-        button_position: (button_x, button_y),
+        button_position,
+        click_point,
         app: Some(app.clone()),
     })
+}
+
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct TargetClickPoint {
+    pub x: f64,
+    pub y: f64,
+}
+
+pub fn fallback_click_point_for_app(
+    app: &FrontmostApp,
+    window_frame: &CandidateInput,
+) -> TargetClickPoint {
+    if app.bundle_id == "com.openai.codex" || app.name == "Codex" {
+        return TargetClickPoint {
+            x: window_frame.x + (window_frame.width / 2.0),
+            y: window_frame.y + window_frame.height - 65.0,
+        };
+    }
+
+    TargetClickPoint {
+        x: window_frame.x + (window_frame.width / 2.0),
+        y: window_frame.y + (window_frame.height / 2.0),
+    }
+}
+
+fn fallback_button_position_for_window(window_frame: &CandidateInput) -> (f64, f64) {
+    (
+        window_frame.x + window_frame.width - 24.0,
+        window_frame.y + window_frame.height - 24.0,
+    )
+}
+
+fn input_click_point_for_frame(frame: &CandidateInput) -> (f64, f64) {
+    let x_offset = (frame.width * 0.12)
+        .clamp(12.0, 80.0)
+        .min(frame.width / 2.0);
+    (frame.x + x_offset, frame.y + (frame.height / 2.0))
 }
 
 #[cfg(test)]
@@ -403,6 +488,56 @@ mod tests {
         assert_eq!(target.frame.height, 96.0);
         // button = elem_pos + elem_size = (700+500, 680+96) = (1200, 776)
         assert_eq!(target.button_position, (1200.0, 776.0));
+        assert_eq!(target.click_point, (760.0, 728.0));
+    }
+
+    #[test]
+    fn parses_focused_input_output_with_fallback_click_point() {
+        let app = FrontmostApp {
+            name: "Codex".to_string(),
+            bundle_id: "com.openai.codex".to_string(),
+        };
+        let target = parse_focused_input_output("100,200|800,600|0,0|0,0", &app).unwrap();
+
+        assert_eq!(target.window_frame.x, 100.0);
+        assert_eq!(target.frame.width, 0.0);
+        assert_eq!(target.click_point, (500.0, 735.0));
+        assert_eq!(target.button_position, (876.0, 776.0));
+    }
+
+    #[test]
+    fn codex_fallback_click_point_uses_bottom_center_of_window() {
+        let point = fallback_click_point_for_app(
+            &FrontmostApp {
+                name: "Codex".to_string(),
+                bundle_id: "com.openai.codex".to_string(),
+            },
+            &CandidateInput {
+                x: 100.0,
+                y: 200.0,
+                width: 800.0,
+                height: 600.0,
+            },
+        );
+
+        assert_eq!(point.x, 500.0);
+        assert_eq!(point.y, 735.0);
+    }
+
+    #[test]
+    fn focused_input_click_point_is_inside_input_not_button_anchor() {
+        let app = FrontmostApp {
+            name: "Codex".to_string(),
+            bundle_id: "com.openai.codex".to_string(),
+        };
+        let target = parse_focused_input_output("10,20|1200,800|700,680|500,96", &app).unwrap();
+
+        assert!(target.click_point.0 > target.frame.x);
+        assert!(target.click_point.0 < target.button_position.0);
+        assert_eq!(
+            target.click_point.1,
+            target.frame.y + (target.frame.height / 2.0)
+        );
     }
 
     #[test]
@@ -430,6 +565,20 @@ mod tests {
 
         assert!(!script.contains("keystroke \"{body}\""));
         assert!(!script.contains("Test body"));
+    }
+
+    #[test]
+    fn paste_and_submit_script_clicks_recorded_point_before_paste() {
+        let script = paste_and_submit_to_app_at_point_script("com.openai.codex", 640.0, 720.0);
+
+        assert!(script.contains("tell application id \"com.openai.codex\" to activate"));
+        assert!(script.contains("click at {640, 720}"));
+        assert!(script.contains("keystroke \"v\" using command down"));
+        assert!(script.contains("key code 36"));
+        assert!(
+            script.find("click at {640, 720}").unwrap()
+                < script.find("keystroke \"v\" using command down").unwrap()
+        );
     }
 
     #[test]
