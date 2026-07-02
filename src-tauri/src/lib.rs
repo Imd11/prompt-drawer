@@ -1,4 +1,5 @@
 use tauri::{
+    image::Image,
     menu::{Menu, MenuItem, PredefinedMenuItem},
     tray::TrayIconBuilder,
     Manager, WindowEvent,
@@ -577,6 +578,8 @@ const TRAY_SHOW_BUTTON_ID: &str = "show-floating-button";
 const TRAY_HIDE_BUTTON_ID: &str = "hide-floating-button";
 const TRAY_OPEN_ACCESSIBILITY_ID: &str = "open-accessibility-settings";
 const TRAY_QUIT_ID: &str = "quit";
+const MENUBAR_TEMPLATE_ICON: &[u8] = include_bytes!("../icons/menubar-template.rgba");
+const MENUBAR_TEMPLATE_ICON_SIZE: u32 = 22;
 
 #[derive(Debug, PartialEq, Eq)]
 enum TrayMenuAction {
@@ -597,6 +600,14 @@ fn tray_menu_action(id: &str) -> TrayMenuAction {
         TRAY_QUIT_ID => TrayMenuAction::Quit,
         _ => TrayMenuAction::Unknown,
     }
+}
+
+fn menubar_template_icon() -> Image<'static> {
+    Image::new(
+        MENUBAR_TEMPLATE_ICON,
+        MENUBAR_TEMPLATE_ICON_SIZE,
+        MENUBAR_TEMPLATE_ICON_SIZE,
+    )
 }
 
 fn parse_saved_button_position(contents: &str) -> Option<(f64, f64)> {
@@ -734,11 +745,12 @@ fn setup_menu_bar_app(app_handle: &tauri::AppHandle) -> Result<(), String> {
     )
     .map_err(|e| e.to_string())?;
 
-    let mut tray_builder = TrayIconBuilder::with_id(TRAY_ID)
+    let tray_builder = TrayIconBuilder::with_id(TRAY_ID)
         .menu(&menu)
         .tooltip("Prompt Picker")
         .show_menu_on_left_click(true)
         .icon_as_template(true)
+        .icon(menubar_template_icon())
         .on_menu_event(|app, event| match tray_menu_action(event.id().as_ref()) {
             TrayMenuAction::OpenMainWindow => {
                 let _ = open_main_window(app.clone());
@@ -762,10 +774,6 @@ fn setup_menu_bar_app(app_handle: &tauri::AppHandle) -> Result<(), String> {
             TrayMenuAction::Quit => app.exit(0),
             TrayMenuAction::Unknown => {}
         });
-
-    if let Some(icon) = app_handle.default_window_icon().cloned() {
-        tray_builder = tray_builder.icon(icon);
-    }
 
     tray_builder.build(app_handle).map_err(|e| e.to_string())?;
     Ok(())
@@ -1549,6 +1557,20 @@ mod menu_bar_app_tests {
     #[test]
     fn ignores_unknown_tray_menu_item_ids() {
         assert_eq!(tray_menu_action("unknown"), TrayMenuAction::Unknown);
+    }
+
+    #[test]
+    fn menubar_template_icon_is_transparent_mask() {
+        let icon = menubar_template_icon();
+
+        assert_eq!(icon.width(), MENUBAR_TEMPLATE_ICON_SIZE);
+        assert_eq!(icon.height(), MENUBAR_TEMPLATE_ICON_SIZE);
+        assert_eq!(
+            icon.rgba().len(),
+            (MENUBAR_TEMPLATE_ICON_SIZE * MENUBAR_TEMPLATE_ICON_SIZE * 4) as usize
+        );
+        assert!(icon.rgba().chunks_exact(4).any(|pixel| pixel[3] == 0));
+        assert!(icon.rgba().chunks_exact(4).any(|pixel| pixel[3] > 0));
     }
 
     #[test]
