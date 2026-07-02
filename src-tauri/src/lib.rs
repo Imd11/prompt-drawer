@@ -86,8 +86,7 @@ fn codex_last_target_bundle_id(state: &LastInputTargetState) -> Result<String, S
     };
     if target.app.bundle_id != CODEX_BUNDLE_ID {
         return Err(
-            "Autosend is only enabled for Codex. Click into the Codex input box first."
-                .to_string(),
+            "Autosend is only enabled for Codex. Click into the Codex input box first.".to_string(),
         );
     }
     Ok(target.app.bundle_id)
