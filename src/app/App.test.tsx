@@ -295,6 +295,12 @@ describe("app", () => {
       await waitFor(() => {
         expect(setTimeoutSpy).toHaveBeenCalledWith(expect.any(Function), 260);
       });
+      await waitFor(() => {
+        expect(vi.mocked(invoke)).toHaveBeenCalledWith(
+          "paste_prompt_and_submit_to_last_target",
+          { body: "Test body" }
+        );
+      });
     } finally {
       setTimeoutSpy.mockRestore();
     }
