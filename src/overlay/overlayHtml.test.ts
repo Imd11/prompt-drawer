@@ -105,4 +105,13 @@ describe("overlay button html", () => {
     expect(html).toContain("show_paper_plane_flight_from_button");
     expect(html).toContain("setSprite('throwSend'");
   });
+
+  it("grants only minimal IPC access to the paper-plane flight window", () => {
+    const capability = JSON.parse(
+      readFileSync("src-tauri/capabilities/paper-flight.json", "utf8")
+    );
+
+    expect(capability.windows).toEqual(["paper-plane-flight"]);
+    expect(capability.permissions).toEqual(["core:default"]);
+  });
 });

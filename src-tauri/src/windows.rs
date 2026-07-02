@@ -261,6 +261,9 @@ pub fn show_paper_plane_flight_from_button(app: tauri::AppHandle) -> Result<(), 
     .decorations(false)
     .always_on_top(true)
     .skip_taskbar(true)
+    .visible(false)
+    .focused(false)
+    .focusable(false)
     .position(monitor_x, monitor_y)
     .build()
     .map_err(|e| e.to_string())?;
@@ -268,6 +271,7 @@ pub fn show_paper_plane_flight_from_button(app: tauri::AppHandle) -> Result<(), 
     crate::macos_panels::configure_transparent_webview_window(&window)?;
     crate::macos_panels::configure_non_activating_panel(&window)?;
     crate::macos_panels::configure_ignores_mouse_events(&window, true)?;
+    window.show().map_err(|e| e.to_string())?;
 
     let app_for_close = app.clone();
     std::thread::spawn(move || {
@@ -505,5 +509,26 @@ mod tests {
         let source = include_str!("windows.rs");
         assert!(source.contains("PAPER_FLIGHT_WINDOW_LABEL"));
         assert!(source.contains("Duration::from_millis(1200)"));
+    }
+
+    #[test]
+    fn paper_flight_window_is_configured_before_showing() {
+        let source = include_str!("windows.rs");
+        let start = source
+            .find("pub fn show_paper_plane_flight_from_button")
+            .expect("paper flight command should exist");
+        let end = source[start..]
+            .find("let app_for_close = app.clone();")
+            .expect("paper flight backend close fallback should exist");
+        let command_source = &source[start..start + end];
+        assert!(command_source.contains(".visible(false)"));
+        assert!(command_source.contains(".focused(false)"));
+        assert!(command_source.contains(".focusable(false)"));
+        assert!(command_source.contains("configure_ignores_mouse_events(&window, true)?;"));
+        assert!(command_source.contains("window.show().map_err"));
+        assert!(
+            command_source.find("configure_ignores_mouse_events(&window, true)?;")
+                < command_source.find("window.show().map_err")
+        );
     }
 }
