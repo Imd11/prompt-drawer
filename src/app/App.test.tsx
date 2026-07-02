@@ -263,6 +263,39 @@ describe("app", () => {
     });
   });
 
+  it("waits long enough for the popover to hide before autosend", async () => {
+    const setTimeoutSpy = vi.spyOn(window, "setTimeout");
+    try {
+      const { invoke } = await import("@tauri-apps/api/core");
+      vi.mocked(invoke).mockClear();
+      vi.mocked(invoke).mockImplementation(async (command: string) => {
+        if (command === "paste_prompt_and_submit_to_last_target") {
+          return { copied: true, sent: true, error: null };
+        }
+        return undefined;
+      });
+      const { readTextFile } = await import("@tauri-apps/plugin-fs");
+      (readTextFile as ReturnType<typeof vi.fn>).mockResolvedValueOnce(
+        JSON.stringify({ version: 1, prompts: mockPrompts })
+      );
+
+      await act(async () => {
+        render(<App />);
+      });
+
+      fireEvent.click(await screen.findByText("Test Prompt"));
+
+      await waitFor(() => {
+        expect(vi.mocked(invoke)).toHaveBeenCalledWith("hide_prompt_popover");
+      });
+      await waitFor(() => {
+        expect(setTimeoutSpy).toHaveBeenCalledWith(expect.any(Function), 260);
+      });
+    } finally {
+      setTimeoutSpy.mockRestore();
+    }
+  });
+
   it("does not run a frontend accessibility preflight before autosend", async () => {
     const { invoke } = await import("@tauri-apps/api/core");
     vi.mocked(invoke).mockClear();

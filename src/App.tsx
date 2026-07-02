@@ -37,7 +37,7 @@ const DEFAULT_SETTINGS: Settings = {
   floatingButton: { visible: true },
 };
 
-const waitForWindowHide = () => new Promise((resolve) => window.setTimeout(resolve, 120));
+const waitForWindowHide = () => new Promise((resolve) => window.setTimeout(resolve, 260));
 
 type AutosendStatusKind = "sent" | "copied" | "failed";
 
