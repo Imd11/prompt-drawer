@@ -15,6 +15,8 @@ pub use windows::{
 mod macos_panels;
 pub use macos_panels::{activate_main_window, configure_non_activating_panel};
 
+const CODEX_BUNDLE_ID: &str = "com.openai.codex";
+
 #[tauri::command]
 fn accessibility_status_cmd() -> AccessibilityStatus {
     accessibility_status()
@@ -60,6 +62,35 @@ fn paste_prompt_to_last_target_impl(
         return Err("Click into a text field first, then choose a prompt.".to_string());
     };
     platform::macos::paste_prompt_to_app(body, &target.app.bundle_id)
+}
+
+#[tauri::command]
+fn paste_prompt_and_submit_to_last_target(
+    body: String,
+    state: tauri::State<LastInputTargetState>,
+) -> Result<(), String> {
+    paste_prompt_and_submit_to_last_target_impl(&body, state.inner())
+}
+
+fn paste_prompt_and_submit_to_last_target_impl(
+    body: &str,
+    state: &LastInputTargetState,
+) -> Result<(), String> {
+    let bundle_id = codex_last_target_bundle_id(state)?;
+    platform::macos::paste_prompt_and_submit_to_app(body, &bundle_id)
+}
+
+fn codex_last_target_bundle_id(state: &LastInputTargetState) -> Result<String, String> {
+    let Some(target) = state.get() else {
+        return Err("Click into the Codex input box first, then choose a prompt.".to_string());
+    };
+    if target.app.bundle_id != CODEX_BUNDLE_ID {
+        return Err(
+            "Autosend is only enabled for Codex. Click into the Codex input box first."
+                .to_string(),
+        );
+    }
+    Ok(target.app.bundle_id)
 }
 
 #[tauri::command]
@@ -125,6 +156,7 @@ pub fn run() {
             paste_prompt,
             paste_prompt_to_app,
             paste_prompt_to_last_target,
+            paste_prompt_and_submit_to_last_target,
             show_prompt_button,
             hide_prompt_button,
             show_prompt_popover,
@@ -239,6 +271,53 @@ mod last_input_target_tests {
         assert_eq!(
             result.unwrap_err(),
             "Click into a text field first, then choose a prompt."
+        );
+    }
+
+    #[test]
+    fn missing_codex_last_target_returns_clear_autosend_error() {
+        let state = LastInputTargetState::default();
+        let result = codex_last_target_bundle_id(&state);
+
+        assert_eq!(
+            result.unwrap_err(),
+            "Click into the Codex input box first, then choose a prompt."
+        );
+    }
+
+    #[test]
+    fn rejects_non_codex_target_for_autosend() {
+        let state = LastInputTargetState::default();
+        state.set(LastInputTarget {
+            app: FrontmostApp {
+                name: "WeChat".to_string(),
+                bundle_id: "com.tencent.xinWeChat".to_string(),
+            },
+            observed_at_ms: 123,
+        });
+
+        let result = codex_last_target_bundle_id(&state);
+
+        assert_eq!(
+            result.unwrap_err(),
+            "Autosend is only enabled for Codex. Click into the Codex input box first."
+        );
+    }
+
+    #[test]
+    fn accepts_codex_target_for_autosend() {
+        let state = LastInputTargetState::default();
+        state.set(LastInputTarget {
+            app: FrontmostApp {
+                name: "Codex".to_string(),
+                bundle_id: "com.openai.codex".to_string(),
+            },
+            observed_at_ms: 123,
+        });
+
+        assert_eq!(
+            codex_last_target_bundle_id(&state).unwrap(),
+            "com.openai.codex"
         );
     }
 }
