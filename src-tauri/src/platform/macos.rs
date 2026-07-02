@@ -197,6 +197,7 @@ pub fn paste_prompt_and_submit_to_app(body: &str, bundle_id: &str) -> Result<(),
 
 pub fn type_or_paste_prompt_and_submit_to_app(body: &str, bundle_id: &str) -> Result<(), String> {
     ensure_accessibility_trusted_for_autosend(is_accessibility_trusted())?;
+    restore_focus_before_autosend(bundle_id)?;
 
     let mut direct_type_error = None;
     if should_direct_type(body) {
@@ -309,6 +310,53 @@ fn format_autosend_error(method: &str, stderr: &str) -> String {
     } else {
         format!("Autosend failed while using {}: {}", method, trimmed)
     }
+}
+
+fn should_cmd_tab_refocus_before_autosend(frontmost: Option<&FrontmostApp>) -> bool {
+    frontmost
+        .map(|app| app.bundle_id == "local.promptpicker.dev" || app.name == "Prompt Picker")
+        .unwrap_or(false)
+}
+
+fn cmd_tab_refocus_previous_app_script() -> &'static str {
+    r#"tell application "System Events"
+    key down command
+    key code 48
+    key up command
+end tell"#
+}
+
+fn restore_focus_before_autosend(bundle_id: &str) -> Result<(), String> {
+    let frontmost = frontmost_app();
+    if should_cmd_tab_refocus_before_autosend(frontmost.as_ref()) {
+        let output = Command::new("osascript")
+            .arg("-e")
+            .arg(cmd_tab_refocus_previous_app_script())
+            .output()
+            .map_err(|e| e.to_string())?;
+        if !output.status.success() {
+            return Err(format_autosend_error(
+                "cmd-tab-refocus",
+                String::from_utf8_lossy(&output.stderr).as_ref(),
+            ));
+        }
+    }
+
+    let script = format!(r#"tell application id "{}" to activate"#, bundle_id);
+    let output = Command::new("osascript")
+        .arg("-e")
+        .arg(script)
+        .output()
+        .map_err(|e| e.to_string())?;
+    if !output.status.success() {
+        return Err(format_autosend_error(
+            "activate-target",
+            String::from_utf8_lossy(&output.stderr).as_ref(),
+        ));
+    }
+
+    std::thread::sleep(std::time::Duration::from_millis(120));
+    Ok(())
 }
 
 fn paste_and_submit_to_app_at_point_script(bundle_id: &str, x: f64, y: f64) -> String {
@@ -729,6 +777,31 @@ mod tests {
     #[test]
     fn autosend_preflight_allows_trusted_accessibility_permission() {
         assert!(ensure_accessibility_trusted_for_autosend(true).is_ok());
+    }
+
+    #[test]
+    fn cmd_tab_refocus_script_matches_openwhip_pattern() {
+        let script = cmd_tab_refocus_previous_app_script();
+
+        assert!(script.contains("tell application \"System Events\""));
+        assert!(script.contains("key down command"));
+        assert!(script.contains("key code 48"));
+        assert!(script.contains("key up command"));
+    }
+
+    #[test]
+    fn should_cmd_tab_refocus_only_when_prompt_picker_is_frontmost() {
+        assert!(should_cmd_tab_refocus_before_autosend(Some(&FrontmostApp {
+            name: "Prompt Picker".to_string(),
+            bundle_id: "local.promptpicker.dev".to_string(),
+        })));
+
+        assert!(!should_cmd_tab_refocus_before_autosend(Some(&FrontmostApp {
+            name: "Codex".to_string(),
+            bundle_id: "com.openai.codex".to_string(),
+        })));
+
+        assert!(!should_cmd_tab_refocus_before_autosend(None));
     }
 
     #[test]
