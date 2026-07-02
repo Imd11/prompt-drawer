@@ -54,7 +54,8 @@ describe("app", () => {
     currentWindowLabel = "prompt-popover";
     window.history.pushState({}, "", "/");
     inputTargetPollingMock.mockClear();
-    emitMock.mockClear();
+    emitMock.mockReset();
+    emitMock.mockResolvedValue(undefined);
   });
 
   it("shows prompt list in popover mode by default", async () => {
@@ -179,6 +180,48 @@ describe("app", () => {
     });
   });
 
+  it("hides the prompt list before emitting a paper-plane throw event for a selected single prompt", async () => {
+    const { invoke } = await import("@tauri-apps/api/core");
+    const callOrder: string[] = [];
+    vi.mocked(invoke).mockClear();
+    vi.mocked(invoke).mockImplementation(async (command: string) => {
+      callOrder.push(`invoke:${command}`);
+      if (command === "paste_prompt_and_submit_to_last_target") {
+        return { copied: true, sent: true, error: null };
+      }
+      return undefined;
+    });
+    emitMock.mockImplementation(async (event: string) => {
+      callOrder.push(`emit:${event}`);
+    });
+    const { readTextFile } = await import("@tauri-apps/plugin-fs");
+    (readTextFile as ReturnType<typeof vi.fn>).mockResolvedValueOnce(
+      JSON.stringify({ version: 1, prompts: mockPrompts })
+    );
+
+    await act(async () => {
+      render(<App />);
+    });
+
+    fireEvent.click(await screen.findByText("Test Prompt"));
+
+    await waitFor(() => {
+      expect(vi.mocked(invoke)).toHaveBeenCalledWith(
+        "paste_prompt_and_submit_to_last_target",
+        { body: "Test body" }
+      );
+    });
+    expect(emitMock).toHaveBeenCalledWith("prompt-throw-send", {
+      kind: "single",
+    });
+    expect(callOrder.indexOf("invoke:hide_prompt_popover")).toBeLessThan(
+      callOrder.indexOf("emit:prompt-throw-send")
+    );
+    expect(callOrder.indexOf("emit:prompt-throw-send")).toBeLessThan(
+      callOrder.indexOf("invoke:paste_prompt_and_submit_to_last_target")
+    );
+  });
+
   it("autosends grouped prompts through the sequence backend command", async () => {
     const { invoke } = await import("@tauri-apps/api/core");
     vi.mocked(invoke).mockClear();
@@ -236,6 +279,59 @@ describe("app", () => {
       "paste_prompt_and_submit_to_last_target",
       expect.anything()
     );
+  });
+
+  it("emits one paper-plane throw event for a grouped prompt selection", async () => {
+    const { invoke } = await import("@tauri-apps/api/core");
+    vi.mocked(invoke).mockClear();
+    vi.mocked(invoke).mockImplementation(async (command: string) => {
+      if (command === "paste_prompt_sequence_and_submit_to_last_target") {
+        return {
+          copied: true,
+          sent: true,
+          sent_count: 2,
+          failed_index: null,
+          error: null,
+          reason: null,
+        };
+      }
+      return undefined;
+    });
+    const { readTextFile } = await import("@tauri-apps/plugin-fs");
+    (readTextFile as ReturnType<typeof vi.fn>).mockResolvedValueOnce(
+      JSON.stringify({
+        version: 2,
+        containers: [
+          {
+            id: "group-1",
+            title: "Repair Group",
+            type: "group",
+            prompts: [
+              { id: "entry-1", body: "First prompt", order: 0 },
+              { id: "entry-2", body: "Second prompt", order: 1 },
+            ],
+            intervalMs: 700,
+            order: 0,
+            createdAt: "2026-07-03T00:00:00.000Z",
+            updatedAt: "2026-07-03T00:00:00.000Z",
+          },
+        ],
+      })
+    );
+
+    await act(async () => {
+      render(<App />);
+    });
+
+    fireEvent.click(await screen.findByText("Repair Group"));
+
+    await waitFor(() => {
+      expect(emitMock).toHaveBeenCalledWith("prompt-throw-send", {
+        kind: "group",
+      });
+    });
+    const throwCalls = emitMock.mock.calls.filter(([event]) => event === "prompt-throw-send");
+    expect(throwCalls).toHaveLength(1);
   });
 
   it("emits a sent status when autosend reports keyboard success", async () => {

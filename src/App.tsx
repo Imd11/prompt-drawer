@@ -57,6 +57,14 @@ async function emitAutosendStatus(
   }
 }
 
+async function emitPromptThrowSend(kind: "single" | "group") {
+  try {
+    await emit("prompt-throw-send", { kind });
+  } catch (error) {
+    console.warn("Failed to emit prompt throw animation:", error);
+  }
+}
+
 function statusForAutosendOutcome(outcome: AutosendOutcome): {
   kind: AutosendStatusKind;
   message: string;
@@ -190,6 +198,7 @@ export function App({
     try {
       await hidePromptPopover();
       await waitForWindowHide();
+      await emitPromptThrowSend(prompt.type === "group" ? "group" : "single");
       const bodies = getPromptContainerBodies(prompt);
       if (bodies.length === 0) {
         await emitAutosendStatus("failed", "未能发送，请重试");
