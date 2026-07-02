@@ -48,4 +48,13 @@ describe("overlay button html", () => {
     expect(html).toContain("setPointerCapture");
     expect(html).toContain("releasePointerCapture");
   });
+
+  it("records the current input target before opening the prompt list", () => {
+    const html = readFileSync("public/overlay.html", "utf8");
+
+    expect(html).toContain("current_input_target");
+    expect(html.indexOf("current_input_target")).toBeLessThan(
+      html.indexOf("show_prompt_popover_from_button")
+    );
+  });
 });

@@ -224,6 +224,7 @@ btn.addEventListener('pointerup', async (event) => {
     }
   } else {
     setSprite('thinking', 900);
+    await invoke('current_input_target');
     await invoke('show_prompt_popover_from_button');
   }
   start = null;
