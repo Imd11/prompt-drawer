@@ -1,4 +1,8 @@
-use tauri::{Manager, WindowEvent};
+use tauri::{
+    menu::{Menu, MenuItem, PredefinedMenuItem},
+    tray::TrayIconBuilder,
+    Manager, WindowEvent,
+};
 
 mod platform;
 pub use platform::{
@@ -152,6 +156,103 @@ fn now_ms() -> u128 {
         .as_millis()
 }
 
+const TRAY_ID: &str = "prompt-picker-tray";
+const TRAY_OPEN_MAIN_ID: &str = "open-main-window";
+const TRAY_SHOW_BUTTON_ID: &str = "show-floating-button";
+const TRAY_HIDE_BUTTON_ID: &str = "hide-floating-button";
+const TRAY_QUIT_ID: &str = "quit";
+
+#[derive(Debug, PartialEq, Eq)]
+enum TrayMenuAction {
+    OpenMainWindow,
+    ShowFloatingButton,
+    HideFloatingButton,
+    Quit,
+    Unknown,
+}
+
+fn tray_menu_action(id: &str) -> TrayMenuAction {
+    match id {
+        TRAY_OPEN_MAIN_ID => TrayMenuAction::OpenMainWindow,
+        TRAY_SHOW_BUTTON_ID => TrayMenuAction::ShowFloatingButton,
+        TRAY_HIDE_BUTTON_ID => TrayMenuAction::HideFloatingButton,
+        TRAY_QUIT_ID => TrayMenuAction::Quit,
+        _ => TrayMenuAction::Unknown,
+    }
+}
+
+fn setup_menu_bar_app(app_handle: &tauri::AppHandle) -> Result<(), String> {
+    let open_main = MenuItem::with_id(
+        app_handle,
+        TRAY_OPEN_MAIN_ID,
+        "Open Prompt Picker",
+        true,
+        None::<&str>,
+    )
+    .map_err(|e| e.to_string())?;
+    let show_button = MenuItem::with_id(
+        app_handle,
+        TRAY_SHOW_BUTTON_ID,
+        "Show Calico",
+        true,
+        None::<&str>,
+    )
+    .map_err(|e| e.to_string())?;
+    let hide_button = MenuItem::with_id(
+        app_handle,
+        TRAY_HIDE_BUTTON_ID,
+        "Hide Calico",
+        true,
+        None::<&str>,
+    )
+    .map_err(|e| e.to_string())?;
+    let separator = PredefinedMenuItem::separator(app_handle).map_err(|e| e.to_string())?;
+    let quit = MenuItem::with_id(
+        app_handle,
+        TRAY_QUIT_ID,
+        "Quit Prompt Picker",
+        true,
+        None::<&str>,
+    )
+    .map_err(|e| e.to_string())?;
+    let menu = Menu::with_items(
+        app_handle,
+        &[&open_main, &show_button, &hide_button, &separator, &quit],
+    )
+    .map_err(|e| e.to_string())?;
+
+    let mut tray_builder = TrayIconBuilder::with_id(TRAY_ID)
+        .menu(&menu)
+        .tooltip("Prompt Picker")
+        .show_menu_on_left_click(true)
+        .icon_as_template(true)
+        .on_menu_event(|app, event| match tray_menu_action(event.id().as_ref()) {
+            TrayMenuAction::OpenMainWindow => {
+                let _ = open_main_window(app.clone());
+            }
+            TrayMenuAction::ShowFloatingButton => {
+                let position = prompt_button_position_cmd(app.clone()).ok().flatten();
+                let (x, y) = position
+                    .map(|point| (point.x, point.y))
+                    .unwrap_or((960.0, 700.0));
+                let _ = show_prompt_button(x, y, app.clone());
+            }
+            TrayMenuAction::HideFloatingButton => {
+                let _ = hide_prompt_popover(app.clone());
+                let _ = hide_prompt_button(app.clone());
+            }
+            TrayMenuAction::Quit => app.exit(0),
+            TrayMenuAction::Unknown => {}
+        });
+
+    if let Some(icon) = app_handle.default_window_icon().cloned() {
+        tray_builder = tray_builder.icon(icon);
+    }
+
+    tray_builder.build(app_handle).map_err(|e| e.to_string())?;
+    Ok(())
+}
+
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     tauri::Builder::default()
@@ -181,6 +282,8 @@ pub fn run() {
         .setup(|app| {
             #[cfg(target_os = "macos")]
             app.set_activation_policy(tauri::ActivationPolicy::Accessory);
+
+            setup_menu_bar_app(app.handle())?;
 
             let window = app.get_webview_window("main").unwrap();
             window.set_title("Prompt Picker").unwrap();
@@ -353,5 +456,40 @@ mod last_input_target_tests {
         );
 
         assert!(state.get().is_none());
+    }
+}
+
+#[cfg(test)]
+mod menu_bar_app_tests {
+    use super::*;
+
+    #[test]
+    fn maps_tray_menu_item_ids_to_actions() {
+        assert_eq!(
+            tray_menu_action(TRAY_OPEN_MAIN_ID),
+            TrayMenuAction::OpenMainWindow
+        );
+        assert_eq!(
+            tray_menu_action(TRAY_SHOW_BUTTON_ID),
+            TrayMenuAction::ShowFloatingButton
+        );
+        assert_eq!(
+            tray_menu_action(TRAY_HIDE_BUTTON_ID),
+            TrayMenuAction::HideFloatingButton
+        );
+        assert_eq!(tray_menu_action(TRAY_QUIT_ID), TrayMenuAction::Quit);
+    }
+
+    #[test]
+    fn ignores_unknown_tray_menu_item_ids() {
+        assert_eq!(tray_menu_action("unknown"), TrayMenuAction::Unknown);
+    }
+
+    #[test]
+    fn macos_info_plist_marks_app_as_menu_bar_app() {
+        let info_plist = include_str!("../Info.plist");
+
+        assert!(info_plist.contains("<key>LSUIElement</key>"));
+        assert!(info_plist.contains("<true/>"));
     }
 }

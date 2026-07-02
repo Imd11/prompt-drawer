@@ -20,6 +20,7 @@
         "minHeight": 460,
         "resizable": true,
         "acceptFirstMouse": true,
+        "visible": false,
         "fullscreen": false
       }
     ],
