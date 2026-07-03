@@ -232,6 +232,7 @@ let lastMove = null;
 let animationFrame = 0;
 let contextMenuOpened = false;
 let pointerSequence = 0;
+let promptPickSessionId = 0;
 let dragStartedEmitted = false;
 let motionResetTimer = 0;
 let throwReleaseTimer = 0;
@@ -442,8 +443,9 @@ btn.addEventListener('pointerup', async (event) => {
     }
   } else {
     setMotionState('ready', READY_TIMEOUT_MS);
-    const sessionPromise = invoke('begin_prompt_pick_session');
-    await invoke('show_prompt_popover_from_button');
+    const sessionId = ++promptPickSessionId;
+    const sessionPromise = invoke('begin_prompt_pick_session', { sessionId });
+    await invoke('show_prompt_popover_from_button', { sessionId });
     void sessionPromise.catch(() => null);
   }
   start = null;

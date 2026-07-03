@@ -133,6 +133,66 @@ describe("app", () => {
     expect(screen.queryByText("Test Prompt")).toBeNull();
   });
 
+  it("does not select stale prompt rows while a reused popover is refreshing", async () => {
+    currentWindowLabel = "prompt-popover";
+    window.history.pushState({}, "", "/?mode=popover");
+    const { invoke } = await import("@tauri-apps/api/core");
+    vi.mocked(invoke).mockClear();
+    vi.mocked(invoke).mockResolvedValue(undefined);
+    const initialPrompts = JSON.stringify({ version: 1, prompts: mockPrompts });
+    const refreshedPrompts = JSON.stringify({
+      version: 1,
+      prompts: [
+        {
+          ...mockPrompts[0],
+          id: "2",
+          title: "Fresh Prompt",
+          body: "Fresh body",
+        },
+      ],
+    });
+    let resolveRefresh: (value: string) => void = () => undefined;
+    const refreshRead = new Promise<string>((resolve) => {
+      resolveRefresh = resolve;
+    });
+    let promptReadCount = 0;
+    const { readTextFile } = await import("@tauri-apps/plugin-fs");
+    (readTextFile as ReturnType<typeof vi.fn>).mockImplementation(
+      async (path: string) => {
+        if (!path.includes("prompts")) throw new Error("missing file");
+        promptReadCount += 1;
+        return promptReadCount === 1 ? initialPrompts : refreshRead;
+      }
+    );
+
+    await act(async () => {
+      render(<App />);
+    });
+
+    expect(await screen.findByText("Test Prompt")).toBeTruthy();
+    const handler = eventHandlers.get("prompt-popover-opened");
+    let refreshResult: unknown;
+    act(() => {
+      refreshResult = handler?.({ payload: "popover" });
+    });
+
+    fireEvent.click(screen.getByText("Test Prompt"));
+    await act(async () => {
+      await new Promise((resolve) => window.setTimeout(resolve, 320));
+    });
+    expect(vi.mocked(invoke)).not.toHaveBeenCalledWith(
+      "paste_prompt_and_submit_to_last_target",
+      expect.anything()
+    );
+
+    await act(async () => {
+      resolveRefresh(refreshedPrompts);
+      await refreshResult;
+    });
+
+    expect(await screen.findByText("Fresh Prompt")).toBeTruthy();
+  });
+
   it("shows only prompt choices in popover mode", async () => {
     const { readTextFile } = await import("@tauri-apps/plugin-fs");
     (readTextFile as ReturnType<typeof vi.fn>).mockResolvedValueOnce(

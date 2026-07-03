@@ -60,6 +60,7 @@ fn current_input_target(
 
 #[tauri::command]
 fn begin_prompt_pick_session(
+    session_id: u64,
     session_state: tauri::State<PromptPickSessionState>,
     recent_state: tauri::State<LastInputTargetState>,
 ) -> Option<FrontmostApp> {
@@ -67,12 +68,15 @@ fn begin_prompt_pick_session(
         record_last_input_target_if_valid(recent_state.inner(), &input_target);
     }
 
-    let target = prompt_pick_session_target(
+    let Some(target) = prompt_pick_session_target(
         frontmost_app(),
         platform::macos::visible_apps(),
         recent_state.inner().get(),
-    )?;
-    record_prompt_pick_session_target_if_valid(session_state.inner(), target)
+    ) else {
+        session_state.inner().clear_if_current(session_id);
+        return None;
+    };
+    record_prompt_pick_session_target_if_valid(session_state.inner(), target, session_id)
 }
 
 #[tauri::command]
@@ -438,21 +442,58 @@ pub struct PromptPickSessionTarget {
 }
 
 #[derive(Default)]
-pub struct PromptPickSessionState(std::sync::Mutex<Option<PromptPickSessionTarget>>);
+struct PromptPickSessionInner {
+    active_session_id: u64,
+    target: Option<PromptPickSessionTarget>,
+}
+
+#[derive(Default)]
+pub struct PromptPickSessionState(std::sync::Mutex<PromptPickSessionInner>);
 
 impl PromptPickSessionState {
+    pub fn begin(&self, session_id: u64) {
+        let mut state = self.0.lock().expect("prompt pick session lock poisoned");
+        state.active_session_id = session_id;
+        state.target = None;
+    }
+
     pub fn set(&self, target: PromptPickSessionTarget) {
-        *self.0.lock().expect("prompt pick session lock poisoned") = Some(target);
+        self.0
+            .lock()
+            .expect("prompt pick session lock poisoned")
+            .target = Some(target);
+    }
+
+    pub fn set_if_current(&self, session_id: u64, target: PromptPickSessionTarget) -> bool {
+        let mut state = self.0.lock().expect("prompt pick session lock poisoned");
+        if state.active_session_id != session_id {
+            return false;
+        }
+        state.target = Some(target);
+        true
     }
 
     pub fn clear(&self) {
-        *self.0.lock().expect("prompt pick session lock poisoned") = None;
+        self.0
+            .lock()
+            .expect("prompt pick session lock poisoned")
+            .target = None;
+    }
+
+    pub fn clear_if_current(&self, session_id: u64) -> bool {
+        let mut state = self.0.lock().expect("prompt pick session lock poisoned");
+        if state.active_session_id != session_id {
+            return false;
+        }
+        state.target = None;
+        true
     }
 
     pub fn get(&self) -> Option<PromptPickSessionTarget> {
         self.0
             .lock()
             .expect("prompt pick session lock poisoned")
+            .target
             .clone()
     }
 
@@ -460,6 +501,7 @@ impl PromptPickSessionState {
         self.0
             .lock()
             .expect("prompt pick session lock poisoned")
+            .target
             .take()
     }
 }
@@ -467,15 +509,15 @@ impl PromptPickSessionState {
 fn record_prompt_pick_session_target_if_valid(
     state: &PromptPickSessionState,
     target: PromptPickSessionTarget,
+    session_id: u64,
 ) -> Option<FrontmostApp> {
     if !is_usable_autosend_app(&target.app) {
-        state.clear();
+        state.clear_if_current(session_id);
         return None;
     }
 
     let app = target.app.clone();
-    state.set(target);
-    Some(app)
+    state.set_if_current(session_id, target).then_some(app)
 }
 
 fn prompt_pick_session_target(
@@ -1309,6 +1351,68 @@ mod last_input_target_tests {
         let outcome = result.unwrap();
         assert!(outcome.sent);
         assert!(session_state.get().is_none());
+    }
+
+    #[test]
+    fn stale_prompt_pick_session_capture_is_ignored_after_new_session_begins() {
+        let session_state = PromptPickSessionState::default();
+        session_state.begin(1);
+        assert!(record_prompt_pick_session_target_if_valid(
+            &session_state,
+            PromptPickSessionTarget {
+                app: FrontmostApp {
+                    name: "WeChat".to_string(),
+                    bundle_id: "com.tencent.xinWeChat".to_string(),
+                },
+                observed_at_ms: now_ms(),
+                click_point: None,
+            },
+            1,
+        )
+        .is_some());
+        assert_eq!(
+            session_state.get().unwrap().app.bundle_id,
+            "com.tencent.xinWeChat"
+        );
+
+        session_state.begin(2);
+        assert!(record_prompt_pick_session_target_if_valid(
+            &session_state,
+            PromptPickSessionTarget {
+                app: FrontmostApp {
+                    name: "WeChat".to_string(),
+                    bundle_id: "com.tencent.xinWeChat".to_string(),
+                },
+                observed_at_ms: now_ms(),
+                click_point: None,
+            },
+            1,
+        )
+        .is_none());
+        assert!(session_state.get().is_none());
+
+        let recent_state = LastInputTargetState::default();
+        recent_state.set(LastInputTarget {
+            app: FrontmostApp {
+                name: "Codex".to_string(),
+                bundle_id: "com.openai.codex".to_string(),
+            },
+            observed_at_ms: now_ms(),
+            click_point: None,
+        });
+
+        let result = paste_prompt_and_submit_to_session_target_with_senders(
+            "hello",
+            &session_state,
+            Some(&recent_state),
+            |_, bundle_id, _| {
+                assert_eq!(bundle_id, "com.openai.codex");
+                AutosendOutcome::sent()
+            },
+            |_| panic!("copy sender must not run when recent target is usable"),
+        );
+
+        assert!(result.unwrap().sent);
     }
 
     #[test]

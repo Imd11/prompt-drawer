@@ -58,8 +58,10 @@ describe("overlay button html", () => {
   it("opens the prompt list without awaiting target session capture", () => {
     const html = readFileSync("public/overlay.html", "utf8");
 
-    expect(html).toContain("const sessionPromise = invoke('begin_prompt_pick_session');");
-    expect(html).toContain("await invoke('show_prompt_popover_from_button');");
+    expect(html).toContain("let promptPickSessionId = 0;");
+    expect(html).toContain("const sessionId = ++promptPickSessionId;");
+    expect(html).toContain("const sessionPromise = invoke('begin_prompt_pick_session', { sessionId });");
+    expect(html).toContain("await invoke('show_prompt_popover_from_button', { sessionId });");
     expect(html).toContain("void sessionPromise.catch(() => null);");
     expect(html).not.toContain("await invoke('begin_prompt_pick_session')");
     expect(html).not.toContain("await sessionPromise.catch");

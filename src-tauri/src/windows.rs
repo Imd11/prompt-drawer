@@ -245,7 +245,12 @@ pub fn hide_prompt_popover(app: tauri::AppHandle) -> Result<(), String> {
 }
 
 #[tauri::command]
-pub fn show_prompt_popover_from_button(app: tauri::AppHandle) -> Result<(), String> {
+pub fn show_prompt_popover_from_button(
+    session_id: u64,
+    session_state: tauri::State<crate::PromptPickSessionState>,
+    app: tauri::AppHandle,
+) -> Result<(), String> {
+    session_state.begin(session_id);
     let position = button_relative_popover_position(&app, BUTTON_WIDTH, BUTTON_HEIGHT);
     show_popover_mode(position.0, position.1, "popover", &app)
 }

@@ -181,6 +181,7 @@ export function App({
   const [settingsLoaded, setSettingsLoaded] = useState(false);
   const storeRef = useRef(createPromptStore(createTauriPromptStorage()));
   const settingsStoreRef = useRef(createSettingsStore(createTauriSettingsStorage()));
+  const promptListRefreshingRef = useRef(false);
   const reloadPrompts = useCallback(async () => {
     setPrompts(await storeRef.current.list());
   }, []);
@@ -211,7 +212,12 @@ export function App({
 
     listen<string>("prompt-popover-opened", async (event) => {
       if (!active || event.payload !== "popover") return;
-      await reloadPrompts();
+      promptListRefreshingRef.current = true;
+      try {
+        await reloadPrompts();
+      } finally {
+        promptListRefreshingRef.current = false;
+      }
     })
       .then((unlisten) => {
         if (active) {
@@ -231,7 +237,7 @@ export function App({
   }, [reloadPrompts, windowLabel]);
 
   const handleSelect = async (prompt: PromptContainer) => {
-    if (submittingPromptId) return;
+    if (submittingPromptId || promptListRefreshingRef.current) return;
     setSubmittingPromptId(prompt.id);
     try {
       await hidePromptPopover();
