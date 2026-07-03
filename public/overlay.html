@@ -219,6 +219,7 @@ const tauri = window.__TAURI__;
 const THROW_RELEASE_MS = 170;
 const THROW_RECOVER_MS = 760;
 const READY_TIMEOUT_MS = 30000;
+const DRAG_START_DISTANCE_PX = 10;
 const sprites = {
   idle: '/calico/calico-idle.apng',
   ready: '/calico/calico-react-drag.apng',
@@ -398,7 +399,7 @@ btn.addEventListener('pointerdown', (event) => {
 btn.addEventListener('pointermove', (event) => {
   if (!start) return;
   const current = { screenX: event.screenX, screenY: event.screenY };
-  if (!dragging && distance(start, current) < 4) return;
+  if (!dragging && distance(start, current) < DRAG_START_DISTANCE_PX) return;
   if (!dragStartedEmitted) {
     dragStartedEmitted = true;
     emit('prompt-button-drag-started').catch(() => {});
@@ -441,8 +442,9 @@ btn.addEventListener('pointerup', async (event) => {
     }
   } else {
     setMotionState('ready', READY_TIMEOUT_MS);
-    await invoke('begin_prompt_pick_session');
+    const sessionPromise = invoke('begin_prompt_pick_session');
     await invoke('show_prompt_popover_from_button');
+    void sessionPromise.catch(() => null);
   }
   start = null;
   dragging = false;

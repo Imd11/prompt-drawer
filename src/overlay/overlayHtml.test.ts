@@ -55,13 +55,22 @@ describe("overlay button html", () => {
     expect(html).toContain("releasePointerCapture");
   });
 
-  it("records the prompt pick session target before opening the prompt list", () => {
+  it("opens the prompt list without awaiting target session capture", () => {
     const html = readFileSync("public/overlay.html", "utf8");
 
-    expect(html).toContain("begin_prompt_pick_session");
-    expect(html.indexOf("begin_prompt_pick_session")).toBeLessThan(
-      html.indexOf("show_prompt_popover_from_button")
-    );
+    expect(html).toContain("const sessionPromise = invoke('begin_prompt_pick_session');");
+    expect(html).toContain("await invoke('show_prompt_popover_from_button');");
+    expect(html).toContain("void sessionPromise.catch(() => null);");
+    expect(html).not.toContain("await invoke('begin_prompt_pick_session')");
+    expect(html).not.toContain("await sessionPromise.catch");
+  });
+
+  it("requires deliberate pointer movement before treating a click as drag", () => {
+    const html = readFileSync("public/overlay.html", "utf8");
+
+    expect(html).toContain("const DRAG_START_DISTANCE_PX = 10;");
+    expect(html).toContain("distance(start, current) < DRAG_START_DISTANCE_PX");
+    expect(html).not.toContain("distance(start, current) < 4");
   });
 
   it("listens for prompt autosend status and renders a Calico status bubble", () => {
