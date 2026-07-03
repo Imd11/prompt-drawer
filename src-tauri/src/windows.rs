@@ -1,4 +1,4 @@
-use tauri::{Manager, WebviewUrl, WebviewWindowBuilder};
+use tauri::{Emitter, Manager, WebviewUrl, WebviewWindowBuilder};
 
 pub const BUTTON_WINDOW_LABEL: &str = "prompt-button";
 pub const POPOVER_WINDOW_LABEL: &str = "prompt-popover";
@@ -59,6 +59,33 @@ fn positions_are_close(a: (f64, f64), b: (f64, f64)) -> bool {
     (a.0 - b.0).abs() < 0.5 && (a.1 - b.1).abs() < 0.5
 }
 
+fn popover_mode_state() -> &'static std::sync::Mutex<Option<String>> {
+    static STATE: std::sync::OnceLock<std::sync::Mutex<Option<String>>> =
+        std::sync::OnceLock::new();
+    STATE.get_or_init(|| std::sync::Mutex::new(None))
+}
+
+fn current_popover_mode() -> Option<String> {
+    popover_mode_state()
+        .lock()
+        .expect("popover mode lock poisoned")
+        .clone()
+}
+
+fn set_popover_mode(mode: Option<&str>) {
+    *popover_mode_state()
+        .lock()
+        .expect("popover mode lock poisoned") = mode.map(str::to_string);
+}
+
+fn should_reuse_popover(existing_mode: Option<&str>, requested_mode: &str) -> bool {
+    existing_mode == Some(requested_mode)
+}
+
+fn emit_popover_opened(app: &tauri::AppHandle, mode: &str) {
+    let _ = app.emit_to(POPOVER_WINDOW_LABEL, "prompt-popover-opened", mode);
+}
+
 fn paper_flight_points(
     monitor_width: f64,
     monitor_height: f64,
@@ -112,7 +139,18 @@ pub fn move_prompt_button_to(x: f64, y: f64, app: tauri::AppHandle) -> Result<()
 
 fn show_popover_mode(x: f64, y: f64, mode: &str, app: &tauri::AppHandle) -> Result<(), String> {
     if let Some(window) = app.get_webview_window(POPOVER_WINDOW_LABEL) {
+        let existing_mode = current_popover_mode();
+        if should_reuse_popover(existing_mode.as_deref(), mode) {
+            window
+                .set_position(prompt_button_window_position(x, y))
+                .map_err(|e| e.to_string())?;
+            window.show().map_err(|e| e.to_string())?;
+            crate::macos_panels::configure_non_activating_panel(&window)?;
+            emit_popover_opened(app, mode);
+            return Ok(());
+        }
         window.close().map_err(|e| e.to_string())?;
+        set_popover_mode(None);
     }
 
     let url = format!("index.html?mode={}", mode);
@@ -128,6 +166,8 @@ fn show_popover_mode(x: f64, y: f64, mode: &str, app: &tauri::AppHandle) -> Resu
         .build()
         .map_err(|e| e.to_string())?;
     crate::macos_panels::configure_non_activating_panel(&window)?;
+    set_popover_mode(Some(mode));
+    emit_popover_opened(app, mode);
     Ok(())
 }
 
@@ -525,5 +565,33 @@ mod tests {
             command_source.find("configure_ignores_mouse_events(&window, true)?;")
                 < command_source.find("window.show().map_err")
         );
+    }
+
+    #[test]
+    fn reuses_popover_only_for_the_same_mode() {
+        assert!(should_reuse_popover(Some("popover"), "popover"));
+        assert!(should_reuse_popover(
+            Some("button-controls"),
+            "button-controls"
+        ));
+        assert!(!should_reuse_popover(Some("button-controls"), "popover"));
+        assert!(!should_reuse_popover(None, "popover"));
+    }
+
+    #[test]
+    fn reused_popover_is_repositioned_shown_and_announced() {
+        let source = include_str!("windows.rs");
+        let start = source
+            .find("fn show_popover_mode")
+            .expect("show_popover_mode should exist");
+        let end = source[start..]
+            .find("let url = format!")
+            .expect("show_popover_mode should build a fresh popover after reuse branch");
+        let reuse_source = &source[start..start + end];
+
+        assert!(reuse_source.contains("should_reuse_popover("));
+        assert!(reuse_source.contains("set_position(prompt_button_window_position(x, y))"));
+        assert!(reuse_source.contains("window.show().map_err"));
+        assert!(reuse_source.contains("emit_popover_opened(app, mode)"));
     }
 }
