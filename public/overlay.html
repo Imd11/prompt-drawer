@@ -45,7 +45,7 @@ body {
   height: 126px;
   object-fit: contain;
   pointer-events: none;
-  transform-origin: 58% 76%;
+  transform-origin: 45% 76%;
   transition: transform 140ms ease;
 }
 
@@ -80,12 +80,12 @@ body {
 }
 
 .calico-entry[data-motion-state="ready"] .calico-sprite {
-  animation: calico-ready-windup 1100ms ease-in-out infinite alternate;
+  animation: calico-ready-windup 820ms ease-in-out infinite alternate;
 }
 
 .calico-entry[data-motion-state="ready"] .calico-projectile {
   opacity: 1;
-  animation: calico-ready-projectile 1100ms ease-in-out infinite alternate;
+  animation: calico-ready-projectile 820ms ease-in-out infinite alternate;
 }
 
 .calico-entry[data-motion-state="throwing"] .calico-sprite {
@@ -106,36 +106,36 @@ body {
 }
 
 @keyframes calico-ready-windup {
-  0% { transform: translate(-1px, 1px) rotate(-3deg) scale(1.015); }
-  100% { transform: translate(-5px, 4px) rotate(-8deg) scale(1.035); }
+  0% { transform: translate(-8px, 8px) rotate(-13deg) scale(1.02); }
+  100% { transform: translate(-12px, 10px) rotate(-18deg) scale(1.045); }
 }
 
 @keyframes calico-ready-projectile {
   0% {
     opacity: 1;
-    transform: translate(88px, 50px) rotate(-24deg) scale(0.76);
+    transform: translate(84px, 42px) rotate(-31deg) scale(0.82);
   }
   100% {
     opacity: 1;
-    transform: translate(92px, 45px) rotate(-18deg) scale(0.8);
+    transform: translate(89px, 37px) rotate(-22deg) scale(0.88);
   }
 }
 
 @keyframes calico-throw-snap {
-  0% { transform: translate(-5px, 4px) rotate(-8deg) scale(1.035); }
-  28% { transform: translate(-9px, 6px) rotate(-12deg) scale(1.04); }
-  48% { transform: translate(9px, -4px) rotate(10deg) scale(1.06); }
+  0% { transform: translate(-12px, 10px) rotate(-18deg) scale(1.045); }
+  28% { transform: translate(-15px, 12px) rotate(-24deg) scale(1.05); }
+  48% { transform: translate(11px, -7px) rotate(17deg) scale(1.06); }
   100% { transform: translate(0, 0) rotate(0deg) scale(1); }
 }
 
 @keyframes calico-throw-projectile-release {
   0% {
     opacity: 1;
-    transform: translate(92px, 45px) rotate(-18deg) scale(0.8);
+    transform: translate(89px, 37px) rotate(-22deg) scale(0.88);
   }
   32% {
     opacity: 1;
-    transform: translate(96px, 42px) rotate(-28deg) scale(0.84);
+    transform: translate(96px, 33px) rotate(-34deg) scale(0.9);
   }
   44% {
     opacity: 0;
@@ -221,6 +221,7 @@ const THROW_RECOVER_MS = 760;
 const READY_TIMEOUT_MS = 30000;
 const sprites = {
   idle: '/calico/calico-idle.apng',
+  ready: '/calico/calico-react-drag.apng',
   drag: '/calico/calico-react-drag.apng',
   throw: '/calico/calico-react-drag.apng'
 };
@@ -254,6 +255,8 @@ function setMotionState(state, resetMs = 0) {
   btn.dataset.motionState = state;
   if (state === 'dragging') {
     setSpriteSource(sprites.drag);
+  } else if (state === 'ready') {
+    setSpriteSource(sprites.ready);
   } else if (state === 'throwing') {
     setSpriteSource(sprites.throw);
   } else {

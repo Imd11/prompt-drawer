@@ -97,6 +97,8 @@ describe("overlay button html", () => {
 
     expect(html).toContain("setMotionState('ready'");
     expect(html).toContain('[data-motion-state="ready"]');
+    expect(html).toContain("ready: '/calico/calico-react-drag.apng'");
+    expect(html).toContain("setSpriteSource(sprites.ready)");
     expect(html).toContain("calico-ready-windup");
     expect(html).toContain("calico-ready-projectile");
     expect(html).not.toContain("throwReady: '/calico/calico-idle.apng'");
