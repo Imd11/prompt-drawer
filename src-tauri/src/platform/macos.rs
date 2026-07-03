@@ -402,8 +402,11 @@ fn native_autosend_uses_osascript() -> bool {
     false
 }
 
-pub fn paste_prompt(body: &str) -> Result<(), String> {
-    copy_to_clipboard(body)?;
+pub fn paste_prompt_with_copier<C>(body: &str, copy_sender: C) -> Result<(), String>
+where
+    C: FnOnce(&str) -> Result<(), String>,
+{
+    copy_sender(body)?;
     Command::new("osascript")
         .args([
             "-e",
@@ -414,17 +417,15 @@ pub fn paste_prompt(body: &str) -> Result<(), String> {
     Ok(())
 }
 
-pub fn copy_prompt_to_clipboard(body: &str) -> Result<(), String> {
-    copy_to_clipboard(body)
-}
-
-#[allow(dead_code)]
-pub fn paste_prompt_and_submit_to_app_native(body: &str, bundle_id: &str) -> AutosendOutcome {
-    paste_prompt_and_submit_to_app_clipboard(body, bundle_id, None)
-}
-
-pub fn paste_prompt_to_app(body: &str, bundle_id: &str) -> Result<(), String> {
-    copy_to_clipboard(body)?;
+pub fn paste_prompt_to_app_with_copier<C>(
+    body: &str,
+    bundle_id: &str,
+    copy_sender: C,
+) -> Result<(), String>
+where
+    C: FnOnce(&str) -> Result<(), String>,
+{
+    copy_sender(body)?;
     let script = paste_to_app_script(bundle_id);
     let output = Command::new("osascript")
         .arg("-e")
@@ -441,8 +442,15 @@ pub fn paste_prompt_to_app(body: &str, bundle_id: &str) -> Result<(), String> {
 }
 
 #[allow(dead_code)]
-pub fn paste_prompt_and_submit_to_app(body: &str, bundle_id: &str) -> Result<(), String> {
-    copy_to_clipboard(body)?;
+pub fn paste_prompt_and_submit_to_app_with_copier<C>(
+    body: &str,
+    bundle_id: &str,
+    copy_sender: C,
+) -> Result<(), String>
+where
+    C: FnOnce(&str) -> Result<(), String>,
+{
+    copy_sender(body)?;
     let script = paste_and_submit_to_app_script(bundle_id);
     let output = Command::new("osascript")
         .arg("-e")
@@ -458,12 +466,16 @@ pub fn paste_prompt_and_submit_to_app(body: &str, bundle_id: &str) -> Result<(),
     Ok(())
 }
 
-pub fn paste_prompt_and_submit_to_app_clipboard(
+pub fn paste_prompt_and_submit_to_app_clipboard_with_copier<C>(
     body: &str,
     bundle_id: &str,
     click_point: Option<(f64, f64)>,
-) -> AutosendOutcome {
-    if let Err(error) = copy_to_clipboard(body) {
+    copy_sender: C,
+) -> AutosendOutcome
+where
+    C: FnOnce(&str) -> Result<(), String>,
+{
+    if let Err(error) = copy_sender(body) {
         return AutosendOutcome::copy_failed(error);
     }
     if !is_accessibility_trusted() {
@@ -513,7 +525,14 @@ pub fn paste_prompt_and_submit_to_app_clipboard(
 }
 
 #[allow(dead_code)]
-pub fn type_or_paste_prompt_and_submit_to_app(body: &str, bundle_id: &str) -> Result<(), String> {
+pub fn type_or_paste_prompt_and_submit_to_app_with_copier<C>(
+    body: &str,
+    bundle_id: &str,
+    copy_sender: C,
+) -> Result<(), String>
+where
+    C: FnOnce(&str) -> Result<(), String>,
+{
     restore_focus_before_autosend(bundle_id);
 
     let mut direct_type_error = None;
@@ -533,18 +552,26 @@ pub fn type_or_paste_prompt_and_submit_to_app(body: &str, bundle_id: &str) -> Re
         ));
     }
 
-    paste_prompt_and_submit_to_app(body, bundle_id).map_err(|paste_error| {
-        if let Some(direct_error) = direct_type_error {
-            format!("{} Fallback also failed: {}", direct_error, paste_error)
-        } else {
-            paste_error
-        }
-    })
+    paste_prompt_and_submit_to_app_with_copier(body, bundle_id, copy_sender).map_err(
+        |paste_error| {
+            if let Some(direct_error) = direct_type_error {
+                format!("{} Fallback also failed: {}", direct_error, paste_error)
+            } else {
+                paste_error
+            }
+        },
+    )
 }
 
 #[allow(dead_code)]
-pub fn paste_prompt_and_submit_to_foreground(body: &str) -> Result<AutosendOutcome, String> {
-    if let Err(error) = copy_to_clipboard(body) {
+pub fn paste_prompt_and_submit_to_foreground_with_copier<C>(
+    body: &str,
+    copy_sender: C,
+) -> Result<AutosendOutcome, String>
+where
+    C: FnOnce(&str) -> Result<(), String>,
+{
+    if let Err(error) = copy_sender(body) {
         return Ok(AutosendOutcome::copy_failed(error));
     }
     if !is_accessibility_trusted() {
@@ -573,8 +600,14 @@ pub fn paste_prompt_and_submit_to_foreground(body: &str) -> Result<AutosendOutco
 }
 
 #[allow(dead_code)]
-pub fn type_or_paste_prompt_and_submit_to_foreground(body: &str) -> AutosendOutcome {
-    let copy_result = copy_to_clipboard(body);
+pub fn type_or_paste_prompt_and_submit_to_foreground_with_copier<C>(
+    body: &str,
+    copy_sender: C,
+) -> AutosendOutcome
+where
+    C: FnOnce(&str) -> Result<(), String>,
+{
+    let copy_result = copy_sender(body);
     if !is_accessibility_trusted() {
         return AutosendOutcome::missing_accessibility_permission();
     }
@@ -615,13 +648,17 @@ pub fn type_or_paste_prompt_and_submit_to_foreground(body: &str) -> AutosendOutc
 }
 
 #[allow(dead_code)]
-pub fn paste_prompt_and_submit_to_app_at_point(
+pub fn paste_prompt_and_submit_to_app_at_point_with_copier<C>(
     body: &str,
     bundle_id: &str,
     x: f64,
     y: f64,
-) -> Result<(), String> {
-    copy_to_clipboard(body)?;
+    copy_sender: C,
+) -> Result<(), String>
+where
+    C: FnOnce(&str) -> Result<(), String>,
+{
+    copy_sender(body)?;
     let script = paste_and_submit_to_app_at_point_script(bundle_id, x, y);
     let output = Command::new("osascript")
         .arg("-e")
@@ -838,21 +875,6 @@ end tell"#,
     )
 }
 
-fn copy_to_clipboard(body: &str) -> Result<(), String> {
-    use std::io::Write;
-    let mut child = Command::new("pbcopy")
-        .stdin(std::process::Stdio::piped())
-        .spawn()
-        .map_err(|e| e.to_string())?;
-    if let Some(mut stdin) = child.stdin.take() {
-        stdin
-            .write_all(body.as_bytes())
-            .map_err(|e| e.to_string())?;
-    }
-    child.wait().map_err(|e| e.to_string())?;
-    Ok(())
-}
-
 // ── Parsing helpers (pub for testing) ─────────────────────────────────────────
 
 /// Parse "ASN:0x0-0x46046:\n" → "ASN:0x0-0x46046"
@@ -1027,11 +1049,11 @@ mod tests {
 
     #[test]
     fn autosend_outcome_reports_copy_failure() {
-        let outcome = AutosendOutcome::copy_failed("pbcopy failed".to_string());
+        let outcome = AutosendOutcome::copy_failed("clipboard failed".to_string());
 
         assert!(!outcome.copied);
         assert!(!outcome.sent);
-        assert_eq!(outcome.error.as_deref(), Some("pbcopy failed"));
+        assert_eq!(outcome.error.as_deref(), Some("clipboard failed"));
         assert_eq!(outcome.reason, Some(AutosendFailureReason::CopyFailed));
     }
 
@@ -1120,6 +1142,13 @@ mod tests {
     #[test]
     fn native_autosend_does_not_depend_on_osascript() {
         assert!(!native_autosend_uses_osascript());
+    }
+
+    #[test]
+    fn clipboard_copy_does_not_shell_out_to_system_command() {
+        let source = include_str!("macos.rs");
+
+        assert!(!source.contains(&format!("Command::new(\"{}\")", concat!("pb", "copy"))));
     }
 
     #[test]

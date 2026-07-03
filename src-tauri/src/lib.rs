@@ -4,6 +4,7 @@ use tauri::{
     tray::TrayIconBuilder,
     Manager, WindowEvent,
 };
+use tauri_plugin_clipboard_manager::ClipboardExt;
 
 mod platform;
 pub use platform::{
@@ -75,39 +76,53 @@ fn begin_prompt_pick_session(
 }
 
 #[tauri::command]
-fn paste_prompt(body: String) -> Result<(), String> {
-    platform::macos::paste_prompt(&body)
+fn paste_prompt(body: String, app: tauri::AppHandle) -> Result<(), String> {
+    platform::macos::paste_prompt_with_copier(&body, |text| copy_text_to_clipboard(&app, text))
 }
 
 #[tauri::command]
-fn paste_prompt_to_app(body: String, bundle_id: String) -> Result<(), String> {
-    platform::macos::paste_prompt_to_app(&body, &bundle_id)
+fn paste_prompt_to_app(
+    body: String,
+    bundle_id: String,
+    app: tauri::AppHandle,
+) -> Result<(), String> {
+    platform::macos::paste_prompt_to_app_with_copier(&body, &bundle_id, |text| {
+        copy_text_to_clipboard(&app, text)
+    })
 }
 
 #[tauri::command]
 fn paste_prompt_to_last_target(
     body: String,
     state: tauri::State<LastInputTargetState>,
+    app: tauri::AppHandle,
 ) -> Result<(), String> {
-    paste_prompt_to_last_target_impl(&body, state.inner())
+    paste_prompt_to_last_target_impl(&body, state.inner(), |text| {
+        copy_text_to_clipboard(&app, text)
+    })
 }
 
-fn paste_prompt_to_last_target_impl(
+fn paste_prompt_to_last_target_impl<C>(
     body: &str,
     state: &LastInputTargetState,
-) -> Result<(), String> {
+    copy_sender: C,
+) -> Result<(), String>
+where
+    C: FnOnce(&str) -> Result<(), String>,
+{
     let Some(target) = state.get() else {
         return Err("Click into a text field first, then choose a prompt.".to_string());
     };
-    platform::macos::paste_prompt_to_app(body, &target.app.bundle_id)
+    platform::macos::paste_prompt_to_app_with_copier(body, &target.app.bundle_id, copy_sender)
 }
 
 #[tauri::command]
 fn paste_prompt_and_submit_to_last_target(
     body: String,
     session_state: tauri::State<PromptPickSessionState>,
+    app: tauri::AppHandle,
 ) -> Result<AutosendOutcome, String> {
-    paste_prompt_and_submit_to_last_target_impl(&body, session_state.inner())
+    paste_prompt_and_submit_to_last_target_impl(&body, session_state.inner(), &app)
 }
 
 #[derive(Clone, Debug, serde::Serialize)]
@@ -149,11 +164,13 @@ fn paste_prompt_sequence_and_submit_to_last_target(
     bodies: Vec<String>,
     interval_ms: u64,
     session_state: tauri::State<PromptPickSessionState>,
+    app: tauri::AppHandle,
 ) -> Result<AutosendSequenceOutcome, String> {
     paste_prompt_sequence_and_submit_to_last_target_impl(
         &bodies,
         interval_ms,
         session_state.inner(),
+        &app,
     )
 }
 
@@ -161,19 +178,22 @@ fn paste_prompt_sequence_and_submit_to_last_target_impl(
     bodies: &[String],
     interval_ms: u64,
     state: &PromptPickSessionState,
+    app: &tauri::AppHandle,
 ) -> Result<AutosendSequenceOutcome, String> {
+    let clipboard_app = app.clone();
     paste_prompt_sequence_and_submit_to_session_target_with_senders(
         bodies,
         interval_ms,
         state,
         |body, bundle_id, click_point| {
-            platform::macos::paste_prompt_and_submit_to_app_clipboard(
+            platform::macos::paste_prompt_and_submit_to_app_clipboard_with_copier(
                 body,
                 bundle_id,
                 click_point.map(|point| (point.x, point.y)),
+                |text| copy_text_to_clipboard(&clipboard_app, text),
             )
         },
-        platform::macos::copy_prompt_to_clipboard,
+        |text| copy_text_to_clipboard(app, text),
         |delay_ms| std::thread::sleep(std::time::Duration::from_millis(delay_ms)),
     )
 }
@@ -181,19 +201,28 @@ fn paste_prompt_sequence_and_submit_to_last_target_impl(
 fn paste_prompt_and_submit_to_last_target_impl(
     body: &str,
     state: &PromptPickSessionState,
+    app: &tauri::AppHandle,
 ) -> Result<AutosendOutcome, String> {
+    let clipboard_app = app.clone();
     paste_prompt_and_submit_to_session_target_with_senders(
         body,
         state,
         |body, bundle_id, click_point| {
-            platform::macos::paste_prompt_and_submit_to_app_clipboard(
+            platform::macos::paste_prompt_and_submit_to_app_clipboard_with_copier(
                 body,
                 bundle_id,
                 click_point.map(|point| (point.x, point.y)),
+                |text| copy_text_to_clipboard(&clipboard_app, text),
             )
         },
-        platform::macos::copy_prompt_to_clipboard,
+        |text| copy_text_to_clipboard(app, text),
     )
+}
+
+fn copy_text_to_clipboard(app: &tauri::AppHandle, body: &str) -> Result<(), String> {
+    app.clipboard()
+        .write_text(body)
+        .map_err(|error| format!("Clipboard write failed: {}", error))
 }
 
 const MIN_SEQUENCE_INTERVAL_MS: u64 = 200;
@@ -1188,7 +1217,9 @@ mod last_input_target_tests {
     #[test]
     fn missing_last_target_returns_clear_error() {
         let state = LastInputTargetState::default();
-        let result = paste_prompt_to_last_target_impl("hello", &state);
+        let result = paste_prompt_to_last_target_impl("hello", &state, |_| {
+            panic!("copy sender must not run without a target")
+        });
 
         assert_eq!(
             result.unwrap_err(),
