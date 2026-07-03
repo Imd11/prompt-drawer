@@ -84,6 +84,12 @@ function moveArrayItem<T>(items: T[], from: number, to: number): T[] {
   return next;
 }
 
+function PromptKindBadge({ prompt }: { prompt: PromptContainer }) {
+  const meta = getPromptContainerMeta(prompt);
+  if (!meta) return null;
+  return <span className="prompt-kind-badge">{meta}</span>;
+}
+
 export function PromptManager({
   prompts,
   onCreate,
@@ -340,7 +346,7 @@ export function PromptManager({
                   <div className="prompt-info">
                     <div className="prompt-title-row">
                       <strong>{prompt.title}</strong>
-                      <span className="prompt-kind-badge">{getPromptContainerMeta(prompt)}</span>
+                      <PromptKindBadge prompt={prompt} />
                     </div>
                     <span className="prompt-preview-lines">
                       {getPromptContainerPreviewLines(prompt).map((line) => (

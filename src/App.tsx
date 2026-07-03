@@ -5,7 +5,7 @@ import { save, open } from "@tauri-apps/plugin-dialog";
 import { writeTextFile, readTextFile } from "@tauri-apps/plugin-fs";
 import type { PromptContainer } from "./shared/promptTypes";
 import { getPromptContainerBodies } from "./shared/promptTypes";
-import type { Settings } from "./shared/settingsStore";
+import type { PromptInsertionMode, Settings } from "./shared/settingsStore";
 import { createSettingsStore } from "./shared/settingsStore";
 import { createPromptStore } from "./shared/promptStore";
 import { createTauriPromptStorage } from "./storage/tauriPromptStorage";
@@ -15,6 +15,7 @@ import {
   hidePromptPopover,
   openAccessibilitySettings,
   openMainWindow,
+  pastePromptToLastTarget,
   pastePromptAndSubmitToLastTarget,
   pastePromptSequenceAndSubmitToLastTarget,
   quitPromptPicker,
@@ -37,6 +38,7 @@ const DEFAULT_SETTINGS: Settings = {
   blacklistedApps: [],
   overlayPlacement: { buttonOffset: null, buttonPosition: null },
   floatingButton: { visible: true },
+  promptInsertion: { mode: "paste_and_submit" },
 };
 
 const waitForWindowHide = () => new Promise((resolve) => window.setTimeout(resolve, 260));
@@ -71,6 +73,11 @@ async function emitPromptPopoverDismissed() {
   } catch (error) {
     console.warn("Failed to emit prompt popover dismissal:", error);
   }
+}
+
+function pasteOnlyBody(prompt: PromptContainer, bodies: string[]): string {
+  if (prompt.type === "group") return bodies.join("\n\n");
+  return bodies[0] ?? "";
 }
 
 function statusForAutosendOutcome(outcome: AutosendOutcome): {
@@ -205,6 +212,46 @@ export function App({
   }, []);
 
   useEffect(() => {
+    let active = true;
+    const disposers: Array<() => void> = [];
+
+    listen("open-manager-window", () => {
+      if (!active || currentWindowLabel() !== "main") return;
+      setMode("manager");
+    })
+      .then((unlisten) => {
+        if (active) {
+          disposers.push(unlisten);
+          return;
+        }
+        unlisten();
+      })
+      .catch((error) => {
+        console.warn("Failed to listen for manager window requests:", error);
+      });
+
+    listen("open-settings-window", () => {
+      if (!active || currentWindowLabel() !== "main") return;
+      setMode("settings");
+    })
+      .then((unlisten) => {
+        if (active) {
+          disposers.push(unlisten);
+          return;
+        }
+        unlisten();
+      })
+      .catch((error) => {
+        console.warn("Failed to listen for settings window requests:", error);
+      });
+
+    return () => {
+      active = false;
+      disposers.forEach((dispose) => dispose());
+    };
+  }, []);
+
+  useEffect(() => {
     if (windowLabel !== "prompt-popover") return;
 
     let active = true;
@@ -248,6 +295,11 @@ export function App({
         await emitAutosendStatus("failed", "未能发送，请重试");
         return;
       }
+      if (activeSettings.promptInsertion.mode === "paste_only") {
+        await pastePromptToLastTarget(pasteOnlyBody(prompt, bodies));
+        await emitAutosendStatus("sent", "已粘贴");
+        return;
+      }
       const status = prompt.type === "group"
         ? statusForAutosendSequenceOutcome(
           await pastePromptSequenceAndSubmitToLastTarget(bodies, prompt.intervalMs)
@@ -279,6 +331,11 @@ export function App({
 
   const removeBlacklistedApp = async (bundleId: string) => {
     await settingsStoreRef.current.removeBlacklistedApp(bundleId);
+    setActiveSettings(await settingsStoreRef.current.get());
+  };
+
+  const updatePromptInsertionMode = async (mode: PromptInsertionMode) => {
+    await settingsStoreRef.current.setPromptInsertionMode(mode);
     setActiveSettings(await settingsStoreRef.current.get());
   };
 
@@ -371,12 +428,15 @@ export function App({
           <SettingsPanel
             settings={activeSettings}
             onRemove={removeBlacklistedApp}
+            onPromptInsertionModeChange={updatePromptInsertionMode}
           />
-          <div className="page-footer">
-            <button className="button button-secondary" onClick={handleBackToPopover}>
-              Back
-            </button>
-          </div>
+          {windowLabel !== "main" ? (
+            <div className="page-footer">
+              <button className="button button-secondary" onClick={handleBackToPopover}>
+                Back
+              </button>
+            </div>
+          ) : null}
         </div>
       </>
     );

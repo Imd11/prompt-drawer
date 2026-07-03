@@ -14,6 +14,7 @@ describe("settings store", () => {
     const store = createTestSettingsStore();
     const settings = await store.get();
     expect(settings.blacklistedApps).toEqual([]);
+    expect(settings.promptInsertion.mode).toBe("paste_and_submit");
   });
 
   it("add bundle id to blacklist", async () => {
@@ -94,5 +95,21 @@ describe("settings store", () => {
     const store = createTestSettingsStore('{"version":1,"blacklistedApps":[],"overlayPlacement":{"buttonOffset":null}}');
     const settings = await store.get();
     expect(settings.floatingButton.visible).toBe(true);
+  });
+
+  it("saves prompt insertion mode", async () => {
+    const store = createTestSettingsStore();
+    await store.setPromptInsertionMode("paste_only");
+    expect((await store.get()).promptInsertion.mode).toBe("paste_only");
+    await store.setPromptInsertionMode("paste_and_submit");
+    expect((await store.get()).promptInsertion.mode).toBe("paste_and_submit");
+  });
+
+  it("normalizes old settings without prompt insertion mode", async () => {
+    const store = createTestSettingsStore(
+      '{"version":1,"blacklistedApps":[],"overlayPlacement":{"buttonOffset":null},"floatingButton":{"visible":true}}'
+    );
+    const settings = await store.get();
+    expect(settings.promptInsertion.mode).toBe("paste_and_submit");
   });
 });

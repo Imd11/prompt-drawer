@@ -273,6 +273,33 @@ describe("app", () => {
     expect(inputTargetPollingMock).toHaveBeenCalled();
   });
 
+  it("switches the main window to settings when the menu bar requests settings", async () => {
+    currentWindowLabel = "main";
+    const { readTextFile } = await import("@tauri-apps/plugin-fs");
+    (readTextFile as ReturnType<typeof vi.fn>)
+      .mockResolvedValueOnce(JSON.stringify({ version: 1, prompts: mockPrompts }))
+      .mockResolvedValueOnce(JSON.stringify({
+        version: 1,
+        blacklistedApps: [],
+        overlayPlacement: { buttonOffset: null, buttonPosition: null },
+        floatingButton: { visible: true },
+        promptInsertion: { mode: "paste_and_submit" },
+      }));
+
+    await act(async () => {
+      render(<App />);
+    });
+
+    await screen.findByRole("heading", { name: "Manage Prompts" });
+    await act(async () => {
+      eventHandlers.get("open-settings-window")?.({ payload: null });
+    });
+
+    expect(screen.getByRole("heading", { name: "Settings" })).toBeTruthy();
+    expect(screen.getByRole("button", { name: "Paste + Return" })).toBeTruthy();
+    expect(screen.queryByRole("button", { name: "Back" })).toBeNull();
+  });
+
   it("autosends selected prompt into the backend last input target", async () => {
     const { invoke } = await import("@tauri-apps/api/core");
     vi.mocked(invoke).mockImplementation(async (command: string) => {
@@ -297,6 +324,49 @@ describe("app", () => {
         "paste_prompt_and_submit_to_last_target",
         { body: "Test body" }
       );
+    });
+  });
+
+  it("pastes without pressing return when prompt insertion mode is paste only", async () => {
+    const { invoke } = await import("@tauri-apps/api/core");
+    vi.mocked(invoke).mockClear();
+    vi.mocked(invoke).mockResolvedValue(undefined);
+    const { readTextFile } = await import("@tauri-apps/plugin-fs");
+    (readTextFile as ReturnType<typeof vi.fn>)
+      .mockResolvedValueOnce(JSON.stringify({ version: 1, prompts: mockPrompts }))
+      .mockResolvedValueOnce(JSON.stringify({
+        version: 1,
+        blacklistedApps: [],
+        overlayPlacement: { buttonOffset: null, buttonPosition: null },
+        floatingButton: { visible: true },
+        promptInsertion: { mode: "paste_only" },
+      }));
+
+    await act(async () => {
+      render(<App />);
+    });
+
+    await screen.findByText("Test Prompt");
+    await waitFor(() => {
+      expect(readTextFile).toHaveBeenCalledWith(
+        "settings.json",
+        expect.objectContaining({ baseDir: "AppData" })
+      );
+    });
+    fireEvent.click(screen.getByText("Test Prompt"));
+
+    await waitFor(() => {
+      expect(vi.mocked(invoke)).toHaveBeenCalledWith("paste_prompt_to_last_target", {
+        body: "Test body",
+      });
+    });
+    expect(vi.mocked(invoke)).not.toHaveBeenCalledWith(
+      "paste_prompt_and_submit_to_last_target",
+      expect.anything()
+    );
+    expect(emitMock).toHaveBeenCalledWith("prompt-autosend-status", {
+      kind: "sent",
+      message: "已粘贴",
     });
   });
 

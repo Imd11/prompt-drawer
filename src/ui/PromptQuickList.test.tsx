@@ -50,9 +50,25 @@ describe("PromptQuickList", () => {
 
     expect(screen.getByText("修复流程")).toBeTruthy();
     expect(screen.getByText("Group · 3 prompts · 700ms")).toBeTruthy();
+    const groupOption = screen.getByRole("option", { name: /修复流程/i });
+    expect(groupOption.textContent).toContain("1. 分析根本原因。");
+    expect(groupOption.textContent).toContain("2. 执行修复。");
+    expect(groupOption.textContent).not.toContain("3. 完成验证。");
     expect(screen.getByText("1. 分析根本原因。")).toBeTruthy();
     expect(screen.getByText("2. 执行修复。")).toBeTruthy();
     expect(screen.queryByText("3. 完成验证。")).toBeNull();
+  });
+
+  it("renders hover preview as a floating tooltip outside the listbox", () => {
+    render(<PromptQuickList prompts={prompts} onSelect={() => {}} />);
+
+    const listbox = screen.getByRole("listbox", { name: "Prompts" });
+    fireEvent.mouseEnter(screen.getByRole("option", { name: /修复流程/i }));
+
+    const tooltip = screen.getByRole("tooltip");
+    expect(listbox.contains(tooltip)).toBe(false);
+    expect(tooltip.className).toContain("prompt-hover-preview");
+    expect(tooltip.className).toContain("prompt-hover-preview-floating");
   });
 
   it("shows full single prompt content on hover", () => {

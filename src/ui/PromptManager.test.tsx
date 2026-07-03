@@ -51,7 +51,7 @@ describe("prompt manager", () => {
 
     expect(screen.getByText("Code Review")).toBeTruthy();
     expect(screen.getByText("Repair Group")).toBeTruthy();
-    expect(screen.getByText("Single · 1 prompt")).toBeTruthy();
+    expect(screen.queryByText("Single · 1 prompt")).toBeNull();
     expect(screen.getByText("Group · 2 prompts · 700ms")).toBeTruthy();
   });
 

@@ -88,10 +88,10 @@ export function getPromptContainerPreview(
   return getPromptPreview(bodies[0] ?? "", maxLength);
 }
 
-export function getPromptContainerMeta(container: PromptContainer): string {
+export function getPromptContainerMeta(container: PromptContainer): string | null {
   const count = getPromptContainerBodies(container).length;
   if (container.type === "group") {
     return `Group · ${count} prompts · ${container.intervalMs}ms`;
   }
-  return "Single · 1 prompt";
+  return null;
 }

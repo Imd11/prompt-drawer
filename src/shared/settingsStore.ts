@@ -8,6 +8,8 @@ export type OverlayButtonPosition = {
   y: number;
 };
 
+export type PromptInsertionMode = "paste_only" | "paste_and_submit";
+
 export type Settings = {
   version: 1;
   blacklistedApps: Array<{ bundleId: string; name: string }>;
@@ -17,6 +19,9 @@ export type Settings = {
   };
   floatingButton: {
     visible: boolean;
+  };
+  promptInsertion: {
+    mode: PromptInsertionMode;
   };
 };
 
@@ -31,7 +36,8 @@ export function createSettingsStore(adapter: SettingsAdapter) {
       version: 1,
       blacklistedApps: [],
       overlayPlacement: { buttonOffset: null, buttonPosition: null },
-      floatingButton: { visible: true }
+      floatingButton: { visible: true },
+      promptInsertion: { mode: "paste_and_submit" }
     };
   }
 
@@ -62,6 +68,11 @@ export function createSettingsStore(adapter: SettingsAdapter) {
       },
       floatingButton: {
         visible: candidate.floatingButton?.visible === false ? false : true
+      },
+      promptInsertion: {
+        mode: candidate.promptInsertion?.mode === "paste_only"
+          ? "paste_only"
+          : "paste_and_submit"
       }
     };
   }
@@ -121,6 +132,12 @@ export function createSettingsStore(adapter: SettingsAdapter) {
     async setFloatingButtonVisible(visible: boolean): Promise<void> {
       const settings = await load();
       settings.floatingButton.visible = visible;
+      await save(settings);
+    },
+
+    async setPromptInsertionMode(mode: PromptInsertionMode): Promise<void> {
+      const settings = await load();
+      settings.promptInsertion.mode = mode;
       await save(settings);
     }
   };

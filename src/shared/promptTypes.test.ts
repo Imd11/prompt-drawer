@@ -34,7 +34,7 @@ describe("prompt model helpers", () => {
     };
 
     expect(getPromptContainerPreview(container)).toBe("Use writing-plans skill.");
-    expect(getPromptContainerMeta(container)).toBe("Single · 1 prompt");
+    expect(getPromptContainerMeta(container)).toBeNull();
   });
 
   it("creates a numbered preview from a group container without workflow wording", () => {

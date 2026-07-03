@@ -1,4 +1,5 @@
 use tauri::{
+    Emitter,
     image::Image,
     menu::{Menu, MenuItem, PredefinedMenuItem},
     tray::TrayIconBuilder,
@@ -393,6 +394,18 @@ fn open_main_window(app: tauri::AppHandle) -> Result<(), String> {
         activate_main_window(&window)?;
         window.set_focus().map_err(|e| e.to_string())?;
     }
+    app.emit("open-manager-window", ()).map_err(|e| e.to_string())?;
+    Ok(())
+}
+
+#[tauri::command]
+fn open_settings_window(app: tauri::AppHandle) -> Result<(), String> {
+    if let Some(window) = app.get_webview_window("main") {
+        window.show().map_err(|e| e.to_string())?;
+        activate_main_window(&window)?;
+        window.set_focus().map_err(|e| e.to_string())?;
+    }
+    app.emit("open-settings-window", ()).map_err(|e| e.to_string())?;
     Ok(())
 }
 
@@ -681,6 +694,7 @@ const TRAY_OPEN_MAIN_ID: &str = "open-main-window";
 const TRAY_SHOW_BUTTON_ID: &str = "show-floating-button";
 const TRAY_HIDE_BUTTON_ID: &str = "hide-floating-button";
 const TRAY_OPEN_ACCESSIBILITY_ID: &str = "open-accessibility-settings";
+const TRAY_OPEN_SETTINGS_ID: &str = "open-settings-window";
 const TRAY_QUIT_ID: &str = "quit";
 const MENUBAR_TEMPLATE_ICON: &[u8] = include_bytes!("../icons/menubar-template.rgba");
 const MENUBAR_TEMPLATE_ICON_SIZE: u32 = 22;
@@ -691,6 +705,7 @@ enum TrayMenuAction {
     ShowFloatingButton,
     HideFloatingButton,
     OpenAccessibilitySettings,
+    OpenSettingsWindow,
     Quit,
     Unknown,
 }
@@ -701,6 +716,7 @@ fn tray_menu_action(id: &str) -> TrayMenuAction {
         TRAY_SHOW_BUTTON_ID => TrayMenuAction::ShowFloatingButton,
         TRAY_HIDE_BUTTON_ID => TrayMenuAction::HideFloatingButton,
         TRAY_OPEN_ACCESSIBILITY_ID => TrayMenuAction::OpenAccessibilitySettings,
+        TRAY_OPEN_SETTINGS_ID => TrayMenuAction::OpenSettingsWindow,
         TRAY_QUIT_ID => TrayMenuAction::Quit,
         _ => TrayMenuAction::Unknown,
     }
@@ -735,6 +751,9 @@ fn default_settings_value() -> serde_json::Value {
         },
         "floatingButton": {
             "visible": true
+        },
+        "promptInsertion": {
+            "mode": "paste_and_submit"
         }
     })
 }
@@ -803,6 +822,14 @@ fn setup_menu_bar_app(app_handle: &tauri::AppHandle) -> Result<(), String> {
         None::<&str>,
     )
     .map_err(|e| e.to_string())?;
+    let open_settings = MenuItem::with_id(
+        app_handle,
+        TRAY_OPEN_SETTINGS_ID,
+        "Settings...",
+        true,
+        None::<&str>,
+    )
+    .map_err(|e| e.to_string())?;
     let show_button = MenuItem::with_id(
         app_handle,
         TRAY_SHOW_BUTTON_ID,
@@ -840,6 +867,7 @@ fn setup_menu_bar_app(app_handle: &tauri::AppHandle) -> Result<(), String> {
         app_handle,
         &[
             &open_main,
+            &open_settings,
             &show_button,
             &hide_button,
             &open_accessibility,
@@ -858,6 +886,9 @@ fn setup_menu_bar_app(app_handle: &tauri::AppHandle) -> Result<(), String> {
         .on_menu_event(|app, event| match tray_menu_action(event.id().as_ref()) {
             TrayMenuAction::OpenMainWindow => {
                 let _ = open_main_window(app.clone());
+            }
+            TrayMenuAction::OpenSettingsWindow => {
+                let _ = open_settings_window(app.clone());
             }
             TrayMenuAction::ShowFloatingButton => {
                 let _ = set_saved_floating_button_visible(app, true);
@@ -915,6 +946,7 @@ pub fn run() {
             prompt_button_position_cmd,
             move_prompt_button_to,
             open_main_window,
+            open_settings_window,
             quit_prompt_picker
         ])
         .setup(|app| {
@@ -1795,6 +1827,10 @@ mod menu_bar_app_tests {
         assert_eq!(
             tray_menu_action(TRAY_OPEN_ACCESSIBILITY_ID),
             TrayMenuAction::OpenAccessibilitySettings
+        );
+        assert_eq!(
+            tray_menu_action(TRAY_OPEN_SETTINGS_ID),
+            TrayMenuAction::OpenSettingsWindow
         );
         assert_eq!(tray_menu_action(TRAY_QUIT_ID), TrayMenuAction::Quit);
     }

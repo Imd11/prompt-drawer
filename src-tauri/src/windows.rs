@@ -8,7 +8,7 @@ pub const BUTTON_WIDTH: f64 = 132.0;
 pub const BUTTON_HEIGHT: f64 = 132.0;
 pub const BUTTON_WINDOW_TRANSPARENT: bool = true;
 pub const POPOVER_WIDTH: f64 = 280.0;
-pub const POPOVER_HEIGHT: f64 = 240.0;
+pub const POPOVER_HEIGHT: f64 = 340.0;
 pub const POPOVER_GAP: f64 = 8.0;
 
 #[derive(Clone, Copy)]
@@ -448,6 +448,11 @@ mod tests {
         let expected_x = 500.0 + (BUTTON_WIDTH / 2.0) - (POPOVER_WIDTH / 2.0);
         let expected_y = 400.0 - POPOVER_HEIGHT - POPOVER_GAP;
         assert_eq!(position, (expected_x, expected_y));
+    }
+
+    #[test]
+    fn prompt_popover_height_supports_group_prompt_previews() {
+        assert!(POPOVER_HEIGHT >= 320.0);
     }
 
     #[test]
