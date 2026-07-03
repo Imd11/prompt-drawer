@@ -30,14 +30,16 @@ describe("overlay button html", () => {
     const html = readFileSync("public/overlay.html", "utf8");
 
     expect(html).toContain("calico-entry");
-    expect(html).toContain("calico-rig");
-    expect(html).toContain("calico-body");
-    expect(html).toContain("calico-head");
-    expect(html).toContain("calico-tail");
-    expect(html).toContain("calico-throw-paw");
+    expect(html).toContain("calico-sprite");
+    expect(html).toContain("calico-idle.apng");
+    expect(html).toContain("calico-react-drag.apng");
     expect(html).toContain("calico-projectile");
     expect(html).toContain('data-motion-state="idle"');
     expect(html).toContain('aria-label="Open Prompt Picker"');
+    expect(html).not.toContain("calico-rig");
+    expect(html).not.toContain("calico-body");
+    expect(html).not.toContain("calico-head");
+    expect(html).not.toContain('class="calico-svg"');
     expect(html).not.toContain("<span>Prompts</span>");
   });
 
@@ -95,7 +97,8 @@ describe("overlay button html", () => {
 
     expect(html).toContain("setMotionState('ready'");
     expect(html).toContain('[data-motion-state="ready"]');
-    expect(html).toContain("calico-ready-breath");
+    expect(html).toContain("calico-ready-windup");
+    expect(html).toContain("calico-ready-projectile");
     expect(html).not.toContain("throwReady: '/calico/calico-idle.apng'");
     expect(html.indexOf("setMotionState('ready'")).toBeLessThan(
       html.indexOf("begin_prompt_pick_session")
@@ -110,6 +113,8 @@ describe("overlay button html", () => {
     expect(html).toContain("show_paper_plane_flight_from_button");
     expect(html).toContain("setMotionState('throwing'");
     expect(html).toContain("setMotionState('recovering'");
+    expect(html).toContain("calico-throw-snap");
+    expect(html).toContain("calico-throw-projectile-release");
     expect(html).toContain("THROW_RELEASE_MS");
   });
 
