@@ -1,3 +1,13 @@
+use std::sync::atomic::{AtomicBool, Ordering};
+
+#[cfg(target_os = "macos")]
+use block2::RcBlock;
+#[cfg(target_os = "macos")]
+use objc2::rc::Retained;
+#[cfg(target_os = "macos")]
+use objc2::runtime::AnyObject;
+#[cfg(target_os = "macos")]
+use objc2_app_kit::{NSEvent, NSEventMask};
 use tauri::{Emitter, Manager, WebviewUrl, WebviewWindowBuilder};
 
 pub const BUTTON_WINDOW_LABEL: &str = "prompt-button";
@@ -11,12 +21,52 @@ pub const POPOVER_WIDTH: f64 = 280.0;
 pub const POPOVER_HEIGHT: f64 = 388.0;
 pub const POPOVER_GAP: f64 = 4.0;
 
+static OUTSIDE_CLICK_MONITOR_ACTIVE: AtomicBool = AtomicBool::new(false);
+#[cfg(target_os = "macos")]
+static OUTSIDE_CLICK_MONITOR_INSTALLED: AtomicBool = AtomicBool::new(false);
+
 #[derive(Clone, Copy)]
 struct MonitorBounds {
     x: f64,
     y: f64,
     width: f64,
     height: f64,
+}
+
+#[derive(Clone, Copy)]
+struct WindowRect {
+    x: f64,
+    y: f64,
+    width: f64,
+    height: f64,
+}
+
+fn point_inside_rect(point: (f64, f64), rect: WindowRect) -> bool {
+    point.0 >= rect.x
+        && point.0 <= rect.x + rect.width
+        && point.1 >= rect.y
+        && point.1 <= rect.y + rect.height
+}
+
+fn should_dismiss_popover_for_click(
+    point: (f64, f64),
+    button: Option<WindowRect>,
+    popover: Option<WindowRect>,
+) -> bool {
+    if popover.is_none() {
+        return false;
+    }
+    if button.is_some_and(|rect| point_inside_rect(point, rect)) {
+        return false;
+    }
+    if popover.is_some_and(|rect| point_inside_rect(point, rect)) {
+        return false;
+    }
+    true
+}
+
+fn bottom_left_to_top_left_point(point: (f64, f64), bounds: MonitorBounds) -> (f64, f64) {
+    (point.0, bounds.y + bounds.height - point.1)
 }
 
 fn prompt_button_window_position(x: f64, y: f64) -> tauri::Position {
@@ -78,6 +128,10 @@ fn set_popover_mode(mode: Option<&str>) {
         .expect("popover mode lock poisoned") = mode.map(str::to_string);
 }
 
+fn set_outside_click_monitor_active(active: bool) {
+    OUTSIDE_CLICK_MONITOR_ACTIVE.store(active, Ordering::SeqCst);
+}
+
 fn should_reuse_popover(existing_mode: Option<&str>, requested_mode: &str) -> bool {
     existing_mode == Some(requested_mode)
 }
@@ -92,6 +146,118 @@ fn emit_popover_opened(app: &tauri::AppHandle, mode: &str) {
 
 fn emit_popover_dismissed(app: &tauri::AppHandle) {
     let _ = app.emit("prompt-popover-dismissed", ());
+}
+
+fn window_rect(app: &tauri::AppHandle, label: &str) -> Option<WindowRect> {
+    let window = app.get_webview_window(label)?;
+    if !window.is_visible().ok()? {
+        return None;
+    }
+
+    let position = window.outer_position().ok()?;
+    let size = window.outer_size().ok()?;
+    let scale = window.scale_factor().unwrap_or(1.0);
+
+    Some(WindowRect {
+        x: position.x as f64 / scale,
+        y: position.y as f64 / scale,
+        width: size.width as f64 / scale,
+        height: size.height as f64 / scale,
+    })
+}
+
+#[cfg(target_os = "macos")]
+fn current_mouse_point_for_popover(app: &tauri::AppHandle) -> Option<(f64, f64)> {
+    let popover = app.get_webview_window(POPOVER_WINDOW_LABEL)?;
+    let monitor = popover
+        .current_monitor()
+        .ok()
+        .flatten()
+        .or_else(|| app.primary_monitor().ok().flatten())?;
+    let bounds = monitor_bounds(&monitor);
+    let point = NSEvent::mouseLocation();
+
+    Some(bottom_left_to_top_left_point((point.x, point.y), bounds))
+}
+
+#[cfg(target_os = "macos")]
+fn handle_prompt_popover_outside_click(app: tauri::AppHandle) {
+    if !OUTSIDE_CLICK_MONITOR_ACTIVE.load(Ordering::SeqCst) {
+        return;
+    }
+    if current_popover_mode().as_deref() != Some("popover") {
+        set_outside_click_monitor_active(false);
+        return;
+    }
+
+    let Some(popover_window) = app.get_webview_window(POPOVER_WINDOW_LABEL) else {
+        set_outside_click_monitor_active(false);
+        return;
+    };
+    if !popover_window.is_visible().unwrap_or(false) {
+        set_outside_click_monitor_active(false);
+        return;
+    }
+
+    let Some(point) = current_mouse_point_for_popover(&app) else {
+        return;
+    };
+    if should_dismiss_popover_for_click(
+        point,
+        window_rect(&app, BUTTON_WINDOW_LABEL),
+        window_rect(&app, POPOVER_WINDOW_LABEL),
+    ) {
+        let _ = popover_window.hide();
+        set_outside_click_monitor_active(false);
+        emit_popover_dismissed(&app);
+    }
+}
+
+#[cfg(target_os = "macos")]
+fn retain_event_monitor(monitor: Retained<AnyObject>) {
+    let _ = Retained::into_raw(monitor);
+}
+
+#[cfg(target_os = "macos")]
+fn install_prompt_popover_outside_click_monitor(app: &tauri::AppHandle) {
+    if OUTSIDE_CLICK_MONITOR_INSTALLED
+        .compare_exchange(false, true, Ordering::SeqCst, Ordering::SeqCst)
+        .is_err()
+    {
+        return;
+    }
+
+    let mask =
+        NSEventMask::LeftMouseDown | NSEventMask::RightMouseDown | NSEventMask::OtherMouseDown;
+
+    let global_app = app.clone();
+    let global_block = RcBlock::new(move |_event: std::ptr::NonNull<NSEvent>| {
+        handle_prompt_popover_outside_click(global_app.clone());
+    });
+    if let Some(monitor) =
+        NSEvent::addGlobalMonitorForEventsMatchingMask_handler(mask, &global_block)
+    {
+        retain_event_monitor(monitor);
+    }
+
+    let local_app = app.clone();
+    let local_block = RcBlock::new(move |event: std::ptr::NonNull<NSEvent>| -> *mut NSEvent {
+        handle_prompt_popover_outside_click(local_app.clone());
+        event.as_ptr()
+    });
+    if let Some(monitor) =
+        unsafe { NSEvent::addLocalMonitorForEventsMatchingMask_handler(mask, &local_block) }
+    {
+        retain_event_monitor(monitor);
+    }
+}
+
+#[cfg(not(target_os = "macos"))]
+fn install_prompt_popover_outside_click_monitor(_app: &tauri::AppHandle) {}
+
+fn enable_prompt_popover_outside_click_monitor(app: &tauri::AppHandle) {
+    install_prompt_popover_outside_click_monitor(app);
+    set_outside_click_monitor_active(true);
 }
 
 fn paper_flight_points(
@@ -159,6 +325,9 @@ fn show_popover_mode(x: f64, y: f64, mode: &str, app: &tauri::AppHandle) -> Resu
                 .map_err(|e| e.to_string())?;
             if mode == "popover" {
                 crate::macos_panels::configure_transparent_webview_window(&window)?;
+                enable_prompt_popover_outside_click_monitor(app);
+            } else {
+                set_outside_click_monitor_active(false);
             }
             window.show().map_err(|e| e.to_string())?;
             crate::macos_panels::configure_non_activating_panel(&window)?;
@@ -183,6 +352,9 @@ fn show_popover_mode(x: f64, y: f64, mode: &str, app: &tauri::AppHandle) -> Resu
         .map_err(|e| e.to_string())?;
     if mode == "popover" {
         crate::macos_panels::configure_transparent_webview_window(&window)?;
+        enable_prompt_popover_outside_click_monitor(app);
+    } else {
+        set_outside_click_monitor_active(false);
     }
     crate::macos_panels::configure_non_activating_panel(&window)?;
     set_popover_mode(Some(mode));
@@ -259,6 +431,7 @@ pub fn show_prompt_popover(x: f64, y: f64, app: tauri::AppHandle) -> Result<(), 
 pub fn hide_prompt_popover(app: tauri::AppHandle) -> Result<(), String> {
     if let Some(window) = app.get_webview_window(POPOVER_WINDOW_LABEL) {
         window.hide().map_err(|e| e.to_string())?;
+        set_outside_click_monitor_active(false);
     }
     Ok(())
 }
@@ -285,6 +458,7 @@ pub fn toggle_prompt_popover_from_button(
         if should_close_prompt_popover_on_toggle(current_popover_mode().as_deref(), visible) {
             session_state.begin(session_id);
             window.hide().map_err(|e| e.to_string())?;
+            set_outside_click_monitor_active(false);
             emit_popover_dismissed(&app);
             return Ok(PromptPopoverToggleOutcome { opened: false });
         }
@@ -578,6 +752,112 @@ mod tests {
             }
             _ => panic!("prompt button position must use logical coordinates"),
         }
+    }
+
+    #[test]
+    fn outside_click_dismisses_when_point_is_outside_button_and_popover() {
+        let button = WindowRect {
+            x: 100.0,
+            y: 500.0,
+            width: BUTTON_WIDTH,
+            height: BUTTON_HEIGHT,
+        };
+        let popover = WindowRect {
+            x: 20.0,
+            y: 108.0,
+            width: POPOVER_WIDTH,
+            height: POPOVER_HEIGHT,
+        };
+
+        assert!(should_dismiss_popover_for_click(
+            (900.0, 900.0),
+            Some(button),
+            Some(popover)
+        ));
+    }
+
+    #[test]
+    fn outside_click_keeps_popover_when_point_is_inside_popover_or_button() {
+        let button = WindowRect {
+            x: 100.0,
+            y: 500.0,
+            width: BUTTON_WIDTH,
+            height: BUTTON_HEIGHT,
+        };
+        let popover = WindowRect {
+            x: 20.0,
+            y: 108.0,
+            width: POPOVER_WIDTH,
+            height: POPOVER_HEIGHT,
+        };
+
+        assert!(!should_dismiss_popover_for_click(
+            (40.0, 120.0),
+            Some(button),
+            Some(popover)
+        ));
+        assert!(!should_dismiss_popover_for_click(
+            (120.0, 520.0),
+            Some(button),
+            Some(popover)
+        ));
+    }
+
+    #[test]
+    fn outside_click_does_nothing_without_visible_popover_rect() {
+        let button = WindowRect {
+            x: 100.0,
+            y: 500.0,
+            width: BUTTON_WIDTH,
+            height: BUTTON_HEIGHT,
+        };
+
+        assert!(!should_dismiss_popover_for_click(
+            (900.0, 900.0),
+            Some(button),
+            None
+        ));
+    }
+
+    #[test]
+    fn converts_bottom_left_screen_point_to_top_left_logical_point() {
+        let bounds = MonitorBounds {
+            x: 0.0,
+            y: 0.0,
+            width: 1440.0,
+            height: 900.0,
+        };
+
+        assert_eq!(
+            bottom_left_to_top_left_point((100.0, 200.0), bounds),
+            (100.0, 700.0)
+        );
+    }
+
+    #[test]
+    fn prompt_list_mode_enables_outside_click_monitor() {
+        let source = include_str!("windows.rs");
+        let start = source
+            .find("fn show_popover_mode")
+            .expect("popover mode function should exist");
+        let end = source[start..]
+            .find("#[tauri::command]")
+            .expect("first popover command should follow show_popover_mode");
+        let show_source = &source[start..start + end];
+
+        assert!(show_source.contains("if mode == \"popover\""));
+        assert!(show_source.contains("enable_prompt_popover_outside_click_monitor(app);"));
+        assert!(show_source.contains("set_outside_click_monitor_active(false);"));
+    }
+
+    #[test]
+    fn outside_click_monitor_uses_global_and_local_mouse_down_events() {
+        let source = include_str!("windows.rs");
+        assert!(source.contains("addGlobalMonitorForEventsMatchingMask_handler"));
+        assert!(source.contains("addLocalMonitorForEventsMatchingMask_handler"));
+        assert!(source.contains("NSEventMask::LeftMouseDown"));
+        assert!(source.contains("NSEventMask::RightMouseDown"));
+        assert!(source.contains("NSEventMask::OtherMouseDown"));
     }
 
     #[test]
