@@ -8,8 +8,8 @@ pub const BUTTON_WIDTH: f64 = 132.0;
 pub const BUTTON_HEIGHT: f64 = 132.0;
 pub const BUTTON_WINDOW_TRANSPARENT: bool = true;
 pub const POPOVER_WIDTH: f64 = 280.0;
-pub const POPOVER_HEIGHT: f64 = 340.0;
-pub const POPOVER_GAP: f64 = 8.0;
+pub const POPOVER_HEIGHT: f64 = 388.0;
+pub const POPOVER_GAP: f64 = 4.0;
 
 #[derive(Clone, Copy)]
 struct MonitorBounds {
@@ -486,8 +486,13 @@ mod tests {
     }
 
     #[test]
-    fn prompt_popover_height_supports_group_prompt_previews() {
-        assert!(POPOVER_HEIGHT >= 320.0);
+    fn prompt_popover_height_supports_taller_prompt_list() {
+        assert_eq!(POPOVER_HEIGHT, 388.0);
+    }
+
+    #[test]
+    fn prompt_popover_gap_keeps_list_close_to_calico() {
+        assert_eq!(POPOVER_GAP, 4.0);
     }
 
     #[test]
