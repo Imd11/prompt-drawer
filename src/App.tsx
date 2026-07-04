@@ -62,14 +62,6 @@ async function emitAutosendStatus(
   }
 }
 
-async function emitPromptPopoverDismissed() {
-  try {
-    await emit("prompt-popover-dismissed");
-  } catch (error) {
-    console.warn("Failed to emit prompt popover dismissal:", error);
-  }
-}
-
 type CalicoMotionState =
   | "thinking"
   | "working-typing"
