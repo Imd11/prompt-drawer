@@ -1,51 +1,79 @@
-export const IDLE_MOTION_TIERS = [
-  {
-    name: "light",
-    availableAfterMs: 8_000,
-    delayRangeMs: [9_000, 16_000],
-    states: ["idle", "react-left", "mini-peek"],
-  },
-  {
-    name: "settled",
-    availableAfterMs: 25_000,
-    delayRangeMs: [12_000, 22_000],
-    states: ["yawning", "dozing", "react-poke", "mini-enter", "mini-idle", "mini-crabwalk"],
-  },
-  {
-    name: "deep",
-    availableAfterMs: 60_000,
-    delayRangeMs: [18_000, 32_000],
-    states: ["collapsing", "sleeping", "waking", "mini-happy", "mini-sleep", "mini-alert"],
-  },
+export const IDLE_RHYTHM_PHASES = [
+  { name: "early", availableAfterMs: 7_000, delayRangeMs: [2_500, 5_000] },
+  { name: "settled", availableAfterMs: 30_000, delayRangeMs: [2_000, 4_500] },
+  { name: "longIdle", availableAfterMs: 90_000, delayRangeMs: [3_000, 6_000] },
 ];
 
-const DEFAULT_IDLE_DISPLAY_MS = 3_200;
+export const IDLE_MOTION_POOL = [
+  { state: "idle", category: "light", weights: { early: 8, settled: 5, longIdle: 3 } },
+  { state: "react-left", category: "light", weights: { early: 6, settled: 4, longIdle: 3 } },
+  { state: "mini-peek", category: "mini", weights: { early: 5, settled: 5, longIdle: 4 } },
+  { state: "yawning", category: "life", weights: { early: 1, settled: 6, longIdle: 4 } },
+  { state: "dozing", category: "rest", weights: { early: 0, settled: 4, longIdle: 5 } },
+  { state: "react-poke", category: "attention", weights: { early: 1, settled: 2, longIdle: 1 } },
+  { state: "mini-enter", category: "mini", weights: { early: 1, settled: 3, longIdle: 3 } },
+  { state: "mini-idle", category: "mini", weights: { early: 0, settled: 3, longIdle: 4 } },
+  { state: "mini-crabwalk", category: "mini", weights: { early: 0, settled: 3, longIdle: 3 } },
+  { state: "collapsing", category: "rest", weights: { early: 0, settled: 1, longIdle: 4 } },
+  { state: "sleeping", category: "rest", weights: { early: 0, settled: 1, longIdle: 7 } },
+  { state: "waking", category: "rest", weights: { early: 0, settled: 2, longIdle: 5 } },
+  { state: "mini-happy", category: "mini", weights: { early: 2, settled: 4, longIdle: 5 } },
+  { state: "mini-sleep", category: "rest", weights: { early: 0, settled: 1, longIdle: 7 } },
+  { state: "mini-alert", category: "attention", weights: { early: 0, settled: 1, longIdle: 2 } },
+];
+
 const BASELINE_STATE = "idle-follow";
 const IDLE_PRIORITY = 1;
-
-const DISPLAY_OVERRIDES_MS = {
-  idle: 5_200,
-  yawning: 8_000,
-  dozing: 3_000,
-  collapsing: 5_200,
-  sleeping: 6_500,
-  waking: 5_800,
-  "mini-idle": 3_500,
-  "mini-sleep": 5_500,
-};
+const QUIET_START_MS = 7_000;
+const HOVER_PRIORITY = 2;
+const HOVER_COOLDOWN_MS = 10_000;
+const HOVER_IDLE_PAUSE_MS = 6_000;
+const RESTING_STATES = new Set(["sleeping", "dozing", "mini-sleep"]);
+const NEUTRAL_ATTENTION_STATES = new Set(["idle-follow", "idle", "mini-idle", "mini-peek"]);
+const PROTECTED_STATES = new Set([
+  "happy",
+  "react-drag",
+  "error",
+  "notification",
+  "thinking",
+  "working-typing",
+  "working-conducting",
+  "working-juggling",
+  "working-building",
+  "working-carrying",
+  "working-sweeping",
+]);
 
 function clampElapsed(value) {
-  return Number.isFinite(value) && value > 0 ? value : 0;
+  return Math.max(0, value);
 }
 
-function pick(items, random) {
-  if (items.length === 0) return null;
-  const index = Math.min(items.length - 1, Math.floor(random() * items.length));
-  return items[index];
-}
-
-function randomDelay([min, max], random) {
+function randomDelay(range, random) {
+  const [min, max] = range;
   return Math.round(min + (max - min) * random());
+}
+
+function weightedEntriesForPhase(phaseName) {
+  return IDLE_MOTION_POOL.filter((entry) => (entry.weights[phaseName] ?? 0) > 0);
+}
+
+function pickWeighted(entries, phaseName, random) {
+  const total = entries.reduce((sum, entry) => sum + (entry.weights[phaseName] ?? 0), 0);
+  if (total <= 0) return null;
+
+  let threshold = random() * total;
+  for (const entry of entries) {
+    threshold -= entry.weights[phaseName] ?? 0;
+    if (threshold <= 0) return entry.state;
+  }
+  return entries[entries.length - 1]?.state ?? null;
+}
+
+function attentionStateFor(currentState) {
+  if (PROTECTED_STATES.has(currentState)) return null;
+  if (RESTING_STATES.has(currentState)) return "waking";
+  if (NEUTRAL_ATTENTION_STATES.has(currentState)) return "mini-happy";
+  return "mini-happy";
 }
 
 export function createCalicoIdleDirector({
@@ -54,113 +82,142 @@ export function createCalicoIdleDirector({
   getCurrentState,
   isUserActive,
   random = Math.random,
-  setTimeout: schedule = window.setTimeout.bind(window),
-  clearTimeout: cancel = window.clearTimeout.bind(window),
+  setTimeout: setTimer = globalThis.setTimeout.bind(globalThis),
+  clearTimeout: clearTimer = globalThis.clearTimeout.bind(globalThis),
   now = () => Date.now(),
-}) {
-  let timer = 0;
+  motionDurations = {},
+} = {}) {
   let running = false;
+  let timer = 0;
   let idleStartedAt = now();
   let pausedUntil = 0;
   let lastState = "";
+  let attentionCooldownUntil = 0;
 
-  function clearTimer() {
-    cancel(timer);
-    timer = 0;
+  function displayMsFor(state) {
+    const duration = motionDurations[state];
+    if (Number.isFinite(duration) && duration > 0) return duration;
+    return 2600;
   }
 
-  function eligibleTiers() {
+  function currentPhase() {
     const elapsed = clampElapsed(now() - idleStartedAt);
-    return IDLE_MOTION_TIERS.filter((tier) => elapsed >= tier.availableAfterMs);
+    const phases = IDLE_RHYTHM_PHASES.filter((phase) => elapsed >= phase.availableAfterMs);
+    return phases[phases.length - 1] ?? null;
   }
 
   function nextDelay() {
-    const tiers = eligibleTiers();
-    const tier = tiers[tiers.length - 1] ?? IDLE_MOTION_TIERS[0];
-    return randomDelay(tier.delayRangeMs, random);
+    const phase = currentPhase() ?? IDLE_RHYTHM_PHASES[0];
+    return randomDelay(phase.delayRangeMs, random);
   }
 
-  function scheduleNext(delay = nextDelay()) {
-    clearTimer();
+  function playableEntries(phaseName) {
+    return weightedEntriesForPhase(phaseName).filter((entry) => entry.state !== lastState);
+  }
+
+  function scheduleNext(delayMs) {
+    clearTimer(timer);
     if (!running) return;
-    timer = schedule(playNext, delay);
+    timer = setTimer(playNext, Math.max(0, delayMs));
+    timer?.unref?.();
   }
 
-  function playableStates() {
-    const states = eligibleTiers().flatMap((tier) => tier.states);
-    return states.filter((state) => state !== lastState);
-  }
-
-  function displayMsFor(state) {
-    return DISPLAY_OVERRIDES_MS[state] ?? DEFAULT_IDLE_DISPLAY_MS;
+  function resetIdleClock() {
+    idleStartedAt = now();
   }
 
   function playNext() {
     if (!running) return;
-    if (isUserActive?.()) {
-      scheduleNext(1_500);
-      return;
-    }
-    if (now() < pausedUntil) {
-      scheduleNext(pausedUntil - now() + 1_000);
-      return;
-    }
-    const currentState = getCurrentState?.();
-    if (currentState && currentState !== BASELINE_STATE) {
-      scheduleNext(2_000);
+
+    const pauseRemaining = pausedUntil - now();
+    if (pauseRemaining > 0) {
+      scheduleNext(pauseRemaining);
       return;
     }
 
-    const state = pick(playableStates(), random);
+    if (isUserActive?.()) {
+      scheduleNext(1000);
+      return;
+    }
+
+    const currentState = getCurrentState?.() ?? BASELINE_STATE;
+    if (PROTECTED_STATES.has(currentState)) {
+      scheduleNext(nextDelay());
+      return;
+    }
+
+    const phase = currentPhase();
+    if (!phase) {
+      scheduleNext(1000);
+      return;
+    }
+
+    const state = pickWeighted(playableEntries(phase.name), phase.name, random);
     if (!state) {
-      scheduleNext(2_000);
+      scheduleNext(nextDelay());
       return;
     }
 
     const durationMs = displayMsFor(state);
-    const applied = applyMotion({
+    const applied = applyMotion?.({
       state,
       reason: "idle-director",
       priority: IDLE_PRIORITY,
       durationMs,
     });
-    if (!applied) {
-      scheduleNext(2_000);
+    if (applied) {
+      lastState = state;
+      scheduleNext(durationMs + nextDelay());
       return;
     }
-    lastState = state;
-    scheduleNext(durationMs + nextDelay());
+
+    scheduleNext(nextDelay());
   }
 
   function start() {
     if (running) return;
     running = true;
-    idleStartedAt = now();
-    scheduleNext();
+    resetIdleClock();
+    scheduleNext(QUIET_START_MS);
   }
 
   function stop() {
     running = false;
-    clearTimer();
+    clearTimer(timer);
   }
 
-  function pause(durationMs = 3_000) {
+  function pause(durationMs = 0) {
     pausedUntil = Math.max(pausedUntil, now() + durationMs);
-    clearTimer();
-    if (running) {
-      scheduleNext(durationMs + 1_000);
-    }
-  }
-
-  function resetIdleClock() {
-    idleStartedAt = now();
-    lastState = "";
+    scheduleNext(durationMs);
   }
 
   function resetToBaseline() {
     resetIdleClock();
     resetMotion?.();
-    pause(3_000);
+  }
+
+  function handleAttention() {
+    if (!running) return false;
+    if (isUserActive?.()) return false;
+    if (now() < attentionCooldownUntil) return false;
+
+    const currentState = getCurrentState?.() ?? BASELINE_STATE;
+    const state = attentionStateFor(currentState);
+    if (!state) return false;
+
+    const durationMs = displayMsFor(state);
+    const applied = applyMotion?.({
+      state,
+      reason: "hover-attention",
+      priority: HOVER_PRIORITY,
+      durationMs,
+    });
+    if (!applied) return false;
+
+    attentionCooldownUntil = now() + HOVER_COOLDOWN_MS;
+    resetIdleClock();
+    pause(HOVER_IDLE_PAUSE_MS);
+    return true;
   }
 
   return {
@@ -169,5 +226,6 @@ export function createCalicoIdleDirector({
     pause,
     resetIdleClock,
     resetToBaseline,
+    handleAttention,
   };
 }

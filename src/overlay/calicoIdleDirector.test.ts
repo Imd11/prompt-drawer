@@ -14,17 +14,30 @@ const protectedStates = [
   "error",
 ];
 
-type IdleMotionTier = {
-  name: string;
+type IdleRhythmPhase = {
+  name: "early" | "settled" | "longIdle";
   availableAfterMs: number;
   delayRangeMs: [number, number];
-  states: string[];
+};
+
+type IdleMotionPoolEntry = {
+  state: string;
+  category: "light" | "life" | "mini" | "rest" | "attention";
+  weights: Record<IdleRhythmPhase["name"], number>;
+};
+
+type IdleDirectorPayload = {
+  state: string;
+  priority?: number;
+  reason?: string;
+  durationMs?: number;
 };
 
 type IdleDirectorModule = {
-  IDLE_MOTION_TIERS: IdleMotionTier[];
+  IDLE_RHYTHM_PHASES: IdleRhythmPhase[];
+  IDLE_MOTION_POOL: IdleMotionPoolEntry[];
   createCalicoIdleDirector(options: {
-    applyMotion: (payload: { state: string; priority?: number; reason?: string }) => boolean;
+    applyMotion: (payload: IdleDirectorPayload) => boolean;
     resetMotion: () => void;
     getCurrentState: () => string;
     isUserActive: () => boolean;
@@ -32,12 +45,14 @@ type IdleDirectorModule = {
     setTimeout?: typeof window.setTimeout;
     clearTimeout?: typeof window.clearTimeout;
     now?: () => number;
+    motionDurations?: Record<string, number>;
   }): {
     start(): void;
     stop(): void;
     pause(durationMs?: number): void;
     resetIdleClock(): void;
     resetToBaseline(): void;
+    handleAttention(): boolean;
   };
 };
 
@@ -47,9 +62,19 @@ async function loadDirectorModule() {
 }
 
 describe("Calico idle director", () => {
-  it("uses a broad idle motion pool without protected semantic motions", async () => {
-    const { IDLE_MOTION_TIERS } = await loadDirectorModule();
-    const states = IDLE_MOTION_TIERS.flatMap((tier) => tier.states);
+  it("uses short rhythm delays instead of long hard-tier pauses", async () => {
+    const { IDLE_RHYTHM_PHASES } = await loadDirectorModule();
+
+    expect(IDLE_RHYTHM_PHASES).toEqual([
+      { name: "early", availableAfterMs: 7_000, delayRangeMs: [2_500, 5_000] },
+      { name: "settled", availableAfterMs: 30_000, delayRangeMs: [2_000, 4_500] },
+      { name: "longIdle", availableAfterMs: 90_000, delayRangeMs: [3_000, 6_000] },
+    ]);
+  });
+
+  it("uses a weighted idle pool without protected semantic motions", async () => {
+    const { IDLE_MOTION_POOL } = await loadDirectorModule();
+    const states = IDLE_MOTION_POOL.map((entry) => entry.state);
 
     expect(new Set(states).size).toBe(states.length);
     expect(states).toEqual(
@@ -71,16 +96,36 @@ describe("Calico idle director", () => {
         "mini-sleep",
       ])
     );
-    expect(states.length).toBeGreaterThanOrEqual(15);
     for (const state of protectedStates) {
       expect(states).not.toContain(state);
     }
   });
 
+  it("does not allow sleep states during early idle", async () => {
+    const { IDLE_MOTION_POOL } = await loadDirectorModule();
+    const sleeping = IDLE_MOTION_POOL.find((entry) => entry.state === "sleeping");
+    const miniSleep = IDLE_MOTION_POOL.find((entry) => entry.state === "mini-sleep");
+
+    expect(sleeping?.weights.early).toBe(0);
+    expect(miniSleep?.weights.early).toBe(0);
+  });
+
+  it("raises rest and mini weights during long idle", async () => {
+    const { IDLE_MOTION_POOL } = await loadDirectorModule();
+    const sleeping = IDLE_MOTION_POOL.find((entry) => entry.state === "sleeping");
+    const miniSleep = IDLE_MOTION_POOL.find((entry) => entry.state === "mini-sleep");
+    const yawning = IDLE_MOTION_POOL.find((entry) => entry.state === "yawning");
+
+    expect(sleeping?.weights.longIdle).toBeGreaterThan(sleeping?.weights.settled ?? 0);
+    expect(miniSleep?.weights.longIdle).toBeGreaterThan(miniSleep?.weights.settled ?? 0);
+    expect(yawning?.weights.settled).toBeGreaterThan(yawning?.weights.early ?? 0);
+  });
+
   it("starts from idle-follow and schedules low-priority idle flourishes", async () => {
     vi.useFakeTimers();
+    vi.setSystemTime(0);
     const { createCalicoIdleDirector } = await loadDirectorModule();
-    const applied: Array<{ state: string; priority?: number; reason?: string }> = [];
+    const applied: IdleDirectorPayload[] = [];
 
     const director = createCalicoIdleDirector({
       applyMotion: (payload) => {
@@ -97,7 +142,7 @@ describe("Calico idle director", () => {
     });
 
     director.start();
-    vi.advanceTimersByTime(8_000 + 9_000);
+    vi.advanceTimersByTime(7_000 + 2_500);
 
     expect(applied).toContainEqual(
       expect.objectContaining({
@@ -109,11 +154,11 @@ describe("Calico idle director", () => {
     vi.useRealTimers();
   });
 
-  it("pauses idle scheduling while protected motion is active", async () => {
+  it("does not schedule the next idle flourish until the current motion finishes", async () => {
     vi.useFakeTimers();
+    vi.setSystemTime(0);
     const { createCalicoIdleDirector } = await loadDirectorModule();
-    const applied: Array<{ state: string }> = [];
-    let active = false;
+    const applied: IdleDirectorPayload[] = [];
 
     const director = createCalicoIdleDirector({
       applyMotion: (payload) => {
@@ -122,28 +167,27 @@ describe("Calico idle director", () => {
       },
       resetMotion: vi.fn(),
       getCurrentState: () => "idle-follow",
-      isUserActive: () => active,
+      isUserActive: () => false,
       random: () => 0,
       setTimeout: window.setTimeout.bind(window),
       clearTimeout: window.clearTimeout.bind(window),
       now: () => Date.now(),
+      motionDurations: { idle: 5_200 },
     });
 
     director.start();
-    active = true;
-    director.pause(4_000);
-    vi.advanceTimersByTime(30_000);
-
-    expect(applied).toEqual([]);
-    active = false;
+    vi.advanceTimersByTime(7_000);
+    expect(applied).toHaveLength(1);
+    vi.advanceTimersByTime(5_200 + 2_499);
+    expect(applied).toHaveLength(1);
+    vi.advanceTimersByTime(1);
+    expect(applied).toHaveLength(2);
     vi.useRealTimers();
   });
 
-  it("does not play idle flourishes while a semantic state is still visible", async () => {
-    vi.useFakeTimers();
+  it("wakes Calico on hover attention when resting", async () => {
     const { createCalicoIdleDirector } = await loadDirectorModule();
-    const applied: Array<{ state: string }> = [];
-    let currentState = "happy";
+    const applied: IdleDirectorPayload[] = [];
 
     const director = createCalicoIdleDirector({
       applyMotion: (payload) => {
@@ -151,61 +195,72 @@ describe("Calico idle director", () => {
         return true;
       },
       resetMotion: vi.fn(),
-      getCurrentState: () => currentState,
+      getCurrentState: () => "sleeping",
       isUserActive: () => false,
       random: () => 0,
-      setTimeout: window.setTimeout.bind(window),
-      clearTimeout: window.clearTimeout.bind(window),
       now: () => Date.now(),
     });
 
     director.start();
-    vi.advanceTimersByTime(60_000);
-    expect(applied).toEqual([]);
-
-    currentState = "react-drag";
-    vi.advanceTimersByTime(10_000);
-    expect(applied).toEqual([]);
-
-    currentState = "idle-follow";
-    vi.advanceTimersByTime(3_000);
-    expect(applied.length).toBeGreaterThan(0);
-    vi.useRealTimers();
+    expect(director.handleAttention()).toBe(true);
+    expect(applied[0]).toMatchObject({
+      state: "waking",
+      reason: "hover-attention",
+      priority: 2,
+    });
   });
 
-  it("restarts idle tiers from light motions after user activity resets the clock", async () => {
+  it("uses mini-happy on hover attention from neutral idle states", async () => {
     const { createCalicoIdleDirector } = await loadDirectorModule();
-    const applied: Array<{ state: string; priority?: number; reason?: string }> = [];
-    const timers: Array<{ id: number; at: number; callback: () => void; cancelled: boolean }> = [];
-    let now = 0;
-    let timerId = 1;
+    const applied: IdleDirectorPayload[] = [];
 
-    const setScheduledTimeout = ((callback: TimerHandler, delay?: number) => {
-      const id = timerId++;
-      const callbackFn = typeof callback === "function" ? callback : () => undefined;
-      timers.push({
-        id,
-        at: now + Number(delay ?? 0),
-        callback: callbackFn as () => void,
-        cancelled: false,
+    const director = createCalicoIdleDirector({
+      applyMotion: (payload) => {
+        applied.push(payload);
+        return true;
+      },
+      resetMotion: vi.fn(),
+      getCurrentState: () => "idle-follow",
+      isUserActive: () => false,
+      random: () => 0,
+      now: () => Date.now(),
+    });
+
+    director.start();
+    expect(director.handleAttention()).toBe(true);
+    expect(applied[0]).toMatchObject({
+      state: "mini-happy",
+      reason: "hover-attention",
+    });
+  });
+
+  it("does not interrupt protected semantic states on hover attention", async () => {
+    const { createCalicoIdleDirector } = await loadDirectorModule();
+    const applied: IdleDirectorPayload[] = [];
+
+    for (const protectedState of ["happy", "react-drag", "error", "notification", "working-typing"]) {
+      const director = createCalicoIdleDirector({
+        applyMotion: (payload) => {
+          applied.push(payload);
+          return true;
+        },
+        resetMotion: vi.fn(),
+        getCurrentState: () => protectedState,
+        isUserActive: () => false,
+        random: () => 0,
+        now: () => Date.now(),
       });
-      return id;
-    }) as typeof window.setTimeout;
 
-    const clearScheduledTimeout = ((id?: number) => {
-      const timer = timers.find((item) => item.id === id);
-      if (timer) timer.cancelled = true;
-    }) as typeof window.clearTimeout;
-
-    function runNextTimer() {
-      const timer = timers
-        .filter((item) => !item.cancelled)
-        .sort((first, second) => first.at - second.at)[0];
-      if (!timer) throw new Error("Expected a scheduled idle timer");
-      timer.cancelled = true;
-      now = timer.at;
-      timer.callback();
+      director.start();
+      expect(director.handleAttention()).toBe(false);
     }
+    expect(applied).toEqual([]);
+  });
+
+  it("throttles hover attention with a cooldown", async () => {
+    const { createCalicoIdleDirector } = await loadDirectorModule();
+    const applied: IdleDirectorPayload[] = [];
+    let now = 0;
 
     const director = createCalicoIdleDirector({
       applyMotion: (payload) => {
@@ -215,56 +270,16 @@ describe("Calico idle director", () => {
       resetMotion: vi.fn(),
       getCurrentState: () => "idle-follow",
       isUserActive: () => false,
-      random: () => 0.95,
-      setTimeout: setScheduledTimeout,
-      clearTimeout: clearScheduledTimeout,
+      random: () => 0,
       now: () => now,
     });
 
     director.start();
-    now = 70_000;
-    director.resetIdleClock();
-    director.pause(6_000);
-
-    runNextTimer();
-    expect(applied).toEqual([]);
-
-    runNextTimer();
-    expect(applied[0]).toMatchObject({
-      state: "mini-peek",
-      reason: "idle-director",
-      priority: 1,
-    });
-  });
-
-  it("does not treat a rejected idle flourish as played", async () => {
-    vi.useFakeTimers();
-    const { createCalicoIdleDirector } = await loadDirectorModule();
-    const applied: Array<{ state: string }> = [];
-    let allowApply = false;
-
-    const director = createCalicoIdleDirector({
-      applyMotion: (payload) => {
-        if (!allowApply) return false;
-        applied.push(payload);
-        return true;
-      },
-      resetMotion: vi.fn(),
-      getCurrentState: () => "idle-follow",
-      isUserActive: () => false,
-      random: () => 0,
-      setTimeout: window.setTimeout.bind(window),
-      clearTimeout: window.clearTimeout.bind(window),
-      now: () => Date.now(),
-    });
-
-    director.start();
-    vi.advanceTimersByTime(8_000 + 9_000);
-    expect(applied).toEqual([]);
-
-    allowApply = true;
-    vi.advanceTimersByTime(2_000);
-    expect(applied[0]?.state).toBe("idle");
-    vi.useRealTimers();
+    expect(director.handleAttention()).toBe(true);
+    now = 5_000;
+    expect(director.handleAttention()).toBe(false);
+    now = 10_001;
+    expect(director.handleAttention()).toBe(true);
+    expect(applied).toHaveLength(2);
   });
 });

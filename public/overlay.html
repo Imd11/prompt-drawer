@@ -1,6 +1,11 @@
 <!doctype html>
 <html>
 <head><style>
+:root {
+  --calico-hit-area-size: 132px;
+  --calico-sprite-size: 126px;
+}
+
 html,
 body {
   width: 100%;
@@ -17,8 +22,8 @@ body {
 }
 
 .calico-entry {
-  width: 132px;
-  height: 132px;
+  width: var(--calico-hit-area-size);
+  height: var(--calico-hit-area-size);
   padding: 0;
   border: 0;
   background: transparent;
@@ -47,8 +52,8 @@ body {
   --calico-hover-y: 0px;
   --calico-press-y: 0px;
   --calico-rotate: 0deg;
-  width: 126px;
-  height: 126px;
+  width: var(--calico-sprite-size);
+  height: var(--calico-sprite-size);
   object-fit: contain;
   pointer-events: none;
   transform-origin: 45% 76%;
@@ -209,6 +214,7 @@ function resetCalicoMotion() {
 
 function pauseIdleForExternalMotion(payload = {}) {
   const durationMs = Number.isFinite(payload.durationMs) ? payload.durationMs : 3_600;
+  calicoIdleDirector?.resetIdleClock();
   calicoIdleDirector?.pause(durationMs + 1_000);
 }
 
@@ -222,13 +228,17 @@ async function initializeCalicoMotion() {
     const response = await fetch('/calico/manifest.json');
     const manifest = await response.json();
     calicoMotion = createCalicoMotionRuntime({ image: sprite, host: btn, manifest });
-    resetCalicoMotion();
+    const motionDurations = Object.fromEntries(
+      Object.entries(manifest.states).map(([state, entry]) => [state, entry.durationMs])
+    );
     calicoIdleDirector = createCalicoIdleDirector({
       applyMotion: applyCalicoMotion,
       resetMotion: resetCalicoMotion,
-      getCurrentState: () => btn.dataset.motionState,
-      isUserActive: () => dragging || Boolean(start) || contextMenuOpened
+      getCurrentState: () => btn.dataset.motionState || manifest.defaultState,
+      isUserActive: () => Boolean(start || dragging || contextMenuOpened),
+      motionDurations,
     });
+    resetCalicoMotion();
     calicoIdleDirector.start();
   } catch (error) {
     console.error('Failed to initialize Calico motion runtime', error);
@@ -308,7 +318,11 @@ function listenForCalicoMotion() {
 function listenForPromptPopoverDismissed() {
   if (!tauri?.event?.listen) return;
   tauri.event.listen('prompt-popover-dismissed', () => {
-    resetCalicoMotion();
+    if (calicoIdleDirector) {
+      calicoIdleDirector.resetToBaseline();
+    } else {
+      resetCalicoMotion();
+    }
   }).catch((error) => {
     console.error('Tauri event listen failed: prompt-popover-dismissed', error);
   });
@@ -333,6 +347,10 @@ async function flushMove() {
     x: start.windowX + lastMove.screenX - start.screenX,
     y: start.windowY + lastMove.screenY - start.screenY
   });
+}
+
+function handleCalicoPointerEnter() {
+  calicoIdleDirector?.handleAttention();
 }
 
 btn.addEventListener('pointerdown', (event) => {
@@ -383,6 +401,7 @@ btn.addEventListener('pointermove', (event) => {
   if (!dragging && distance(start, current) < DRAG_START_DISTANCE_PX) return;
   if (!dragStartedEmitted) {
     dragStartedEmitted = true;
+    calicoIdleDirector?.pause(4000);
     hidePromptPopoverForDrag().catch(() => {});
     emit('prompt-button-drag-started').catch(() => {});
   }
@@ -406,6 +425,7 @@ btn.addEventListener('pointerup', async (event) => {
     dragging = false;
     lastMove = null;
     btn.classList.remove('is-pressing', 'is-dragging');
+    calicoIdleDirector?.resetIdleClock();
     resetCalicoMotion();
     return;
   }
@@ -439,6 +459,7 @@ btn.addEventListener('pointerup', async (event) => {
   lastMove = null;
   dragStartedEmitted = false;
   btn.classList.remove('is-pressing', 'is-dragging');
+  calicoIdleDirector?.resetIdleClock();
   if (wasDragging) {
     if (calicoIdleDirector) {
       calicoIdleDirector.resetToBaseline();
@@ -447,6 +468,8 @@ btn.addEventListener('pointerup', async (event) => {
     }
   }
 });
+
+btn.addEventListener('pointerenter', handleCalicoPointerEnter);
 
 btn.addEventListener('contextmenu', async (event) => {
   await openButtonControls(event);

@@ -22,9 +22,7 @@ type CalicoManifest = {
 };
 
 type IdleDirectorModule = {
-  IDLE_MOTION_TIERS: Array<{
-    states: string[];
-  }>;
+  IDLE_MOTION_POOL: Array<{ state: string }>;
 };
 
 const phase1States = [
@@ -107,18 +105,17 @@ describe("Calico manifest", () => {
     expect(existsSync("public/calico/paper-plane.svg")).toBe(false);
   });
 
-  it("declares every idle director motion state in the shipped manifest", async () => {
+  it("ships every idle director state and hover response asset", async () => {
     const manifest = readManifest();
-    const { IDLE_MOTION_TIERS } = await loadIdleDirector();
-    const idleStates = IDLE_MOTION_TIERS.flatMap((tier) => tier.states);
+    const { IDLE_MOTION_POOL } = await loadIdleDirector();
 
-    expect(idleStates.length).toBeGreaterThanOrEqual(15);
-    for (const state of idleStates) {
+    for (const { state } of IDLE_MOTION_POOL) {
       expect(manifest.states[state], state).toBeDefined();
       expect(existsSync(`public${manifest.states[state].file}`), state).toBe(true);
     }
-    expect(idleStates).not.toContain("happy");
-    expect(idleStates).not.toContain("react-drag");
-    expect(idleStates).not.toContain("error");
+    expect(manifest.states.waking).toBeDefined();
+    expect(manifest.states["mini-happy"]).toBeDefined();
+    expect(existsSync(`public${manifest.states.waking.file}`)).toBe(true);
+    expect(existsSync(`public${manifest.states["mini-happy"].file}`)).toBe(true);
   });
 });

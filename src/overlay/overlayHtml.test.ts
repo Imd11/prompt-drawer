@@ -53,6 +53,8 @@ describe("overlay button html", () => {
 
     expect(html).toContain("/calico/motion-runtime.js");
     expect(html).toContain("createCalicoMotionRuntime");
+    expect(html).toContain("/calico/idle-director.js");
+    expect(html).toContain("createCalicoIdleDirector");
     expect(html).toContain("initializeCalicoMotion");
     expect(html).toContain("fetch('/calico/manifest.json')");
     expect(html).toContain("calico-motion");
@@ -67,8 +69,8 @@ describe("overlay button html", () => {
     expect(html).toContain("calicoIdleDirector = createCalicoIdleDirector");
     expect(html).toContain("applyMotion: applyCalicoMotion");
     expect(html).toContain("resetMotion: resetCalicoMotion");
-    expect(html).toContain("getCurrentState: () => btn.dataset.motionState");
-    expect(html).toContain("isUserActive: () => dragging || Boolean(start) || contextMenuOpened");
+    expect(html).toContain("getCurrentState: () => btn.dataset.motionState || manifest.defaultState");
+    expect(html).toContain("isUserActive: () => Boolean(start || dragging || contextMenuOpened)");
     expect(html).toContain("calicoIdleDirector.start();");
     expect(html.indexOf("calicoMotion = createCalicoMotionRuntime")).toBeLessThan(
       html.indexOf("calicoIdleDirector = createCalicoIdleDirector")
@@ -108,6 +110,49 @@ describe("overlay button html", () => {
     expect(html).toContain("prompt-button-drag-ended");
     expect(html).toContain("setPointerCapture");
     expect(html).toContain("releasePointerCapture");
+  });
+
+  it("keeps Calico click hover and drag bound to the centered entry hit area", () => {
+    const html = readFileSync("public/overlay.html", "utf8");
+
+    expect(html).toContain("--calico-hit-area-size: 132px");
+    expect(html).toContain("--calico-sprite-size: 126px");
+    expect(html).toContain("width: var(--calico-hit-area-size);");
+    expect(html).toContain("height: var(--calico-hit-area-size);");
+    expect(html).toContain("width: var(--calico-sprite-size);");
+    expect(html).toContain("height: var(--calico-sprite-size);");
+    expect(html).toContain("btn.addEventListener('pointerdown'");
+    expect(html).toContain("btn.addEventListener('pointerup'");
+    expect(html).toContain("btn.addEventListener('pointermove'");
+    expect(html).toContain("btn.addEventListener('pointerenter'");
+    expect(html).toContain("handleCalicoPointerEnter");
+    expect(html).toContain("calicoIdleDirector?.handleAttention();");
+    expect(html).not.toContain("body.addEventListener('pointerenter'");
+    expect(html).not.toContain("window.addEventListener('pointerenter'");
+  });
+
+  it("starts and pauses the Calico idle director from overlay events", () => {
+    const html = readFileSync("public/overlay.html", "utf8");
+
+    expect(html).toContain("let calicoIdleDirector = null;");
+    expect(html).toContain("calicoIdleDirector = createCalicoIdleDirector");
+    expect(html).toContain("calicoIdleDirector.start();");
+    expect(html).toContain("calicoIdleDirector?.pause");
+    expect(html).toContain("calicoIdleDirector?.resetIdleClock");
+    expect(html).toContain("calicoIdleDirector.resetToBaseline();");
+    expect(html).toContain("applyCalicoMotion(event.payload)");
+  });
+
+  it("keeps click-to-open neutral and separate from hover attention", () => {
+    const html = readFileSync("public/overlay.html", "utf8");
+    const clickBlock = html.slice(
+      html.indexOf("const sessionId = ++promptPickSessionId;"),
+      html.indexOf("start = null;", html.indexOf("const sessionId = ++promptPickSessionId;"))
+    );
+
+    expect(clickBlock).not.toContain("handleAttention");
+    expect(clickBlock).not.toContain("hover-attention");
+    expect(clickBlock).not.toContain("applyCalicoMotion");
   });
 
   it("hides the prompt popover when Calico dragging starts", () => {

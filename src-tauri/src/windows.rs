@@ -13,11 +13,17 @@ use tauri::{Emitter, Manager, WebviewUrl, WebviewWindowBuilder};
 pub const BUTTON_WINDOW_LABEL: &str = "prompt-button";
 pub const POPOVER_WINDOW_LABEL: &str = "prompt-popover";
 
-pub const BUTTON_WIDTH: f64 = 132.0;
-pub const BUTTON_HEIGHT: f64 = 132.0;
+pub const BUTTON_VISUAL_WIDTH: f64 = 132.0;
+pub const BUTTON_VISUAL_HEIGHT: f64 = 132.0;
+pub const BUTTON_WINDOW_WIDTH: f64 = 208.0;
+pub const BUTTON_WINDOW_HEIGHT: f64 = 208.0;
+pub const BUTTON_WINDOW_PADDING_X: f64 = (BUTTON_WINDOW_WIDTH - BUTTON_VISUAL_WIDTH) / 2.0;
+pub const BUTTON_WINDOW_PADDING_Y: f64 = (BUTTON_WINDOW_HEIGHT - BUTTON_VISUAL_HEIGHT) / 2.0;
 pub const BUTTON_WINDOW_TRANSPARENT: bool = true;
 pub const POPOVER_WIDTH: f64 = 280.0;
 pub const POPOVER_HEIGHT: f64 = 388.0;
+pub const BUTTON_CONTROLS_WIDTH: f64 = 156.0;
+pub const BUTTON_CONTROLS_HEIGHT: f64 = 72.0;
 pub const POPOVER_GAP: f64 = 4.0;
 
 static OUTSIDE_CLICK_MONITOR_ACTIVE: AtomicBool = AtomicBool::new(false);
@@ -36,6 +42,12 @@ struct MonitorBounds {
 struct WindowRect {
     x: f64,
     y: f64,
+    width: f64,
+    height: f64,
+}
+
+#[derive(Clone, Copy)]
+struct PopoverSize {
     width: f64,
     height: f64,
 }
@@ -68,8 +80,21 @@ fn bottom_left_to_top_left_point(point: (f64, f64), bounds: MonitorBounds) -> (f
     (point.0, bounds.y + bounds.height - point.1)
 }
 
-fn prompt_button_window_position(x: f64, y: f64) -> tauri::Position {
+fn logical_position(x: f64, y: f64) -> tauri::Position {
     tauri::Position::Logical(tauri::LogicalPosition { x, y })
+}
+
+fn prompt_button_visual_to_window_position(x: f64, y: f64) -> (f64, f64) {
+    (x - BUTTON_WINDOW_PADDING_X, y - BUTTON_WINDOW_PADDING_Y)
+}
+
+fn prompt_button_window_to_visual_position(x: f64, y: f64) -> (f64, f64) {
+    (x + BUTTON_WINDOW_PADDING_X, y + BUTTON_WINDOW_PADDING_Y)
+}
+
+fn prompt_button_position_from_visual(x: f64, y: f64) -> tauri::Position {
+    let (window_x, window_y) = prompt_button_visual_to_window_position(x, y);
+    logical_position(window_x, window_y)
 }
 
 fn monitor_bounds(monitor: &tauri::Monitor) -> MonitorBounds {
@@ -90,8 +115,8 @@ fn clamp_button_position_in_bounds(x: f64, y: f64, bounds: Option<MonitorBounds>
     let margin = 8.0;
     let min_x = bounds.x + margin;
     let min_y = bounds.y + margin;
-    let max_x = bounds.x + bounds.width - BUTTON_WIDTH - margin;
-    let max_y = bounds.y + bounds.height - BUTTON_HEIGHT - margin;
+    let max_x = bounds.x + bounds.width - BUTTON_VISUAL_WIDTH - margin;
+    let max_y = bounds.y + bounds.height - BUTTON_VISUAL_HEIGHT - margin;
 
     (x.clamp(min_x, max_x), y.clamp(min_y, max_y))
 }
@@ -139,6 +164,24 @@ fn should_close_prompt_popover_on_toggle(existing_mode: Option<&str>, is_visible
     existing_mode == Some("popover") && is_visible
 }
 
+fn popover_size_for_mode(mode: &str) -> PopoverSize {
+    if mode == "button-controls" {
+        return PopoverSize {
+            width: BUTTON_CONTROLS_WIDTH,
+            height: BUTTON_CONTROLS_HEIGHT,
+        };
+    }
+
+    PopoverSize {
+        width: POPOVER_WIDTH,
+        height: POPOVER_HEIGHT,
+    }
+}
+
+fn should_use_transparent_popover_window(mode: Option<&str>) -> bool {
+    matches!(mode, Some("popover" | "button-controls"))
+}
+
 fn emit_popover_opened(app: &tauri::AppHandle, mode: &str) {
     let _ = app.emit_to(POPOVER_WINDOW_LABEL, "prompt-popover-opened", mode);
 }
@@ -165,6 +208,16 @@ fn window_rect(app: &tauri::AppHandle, label: &str) -> Option<WindowRect> {
     })
 }
 
+fn visual_button_rect_from_window_rect(rect: WindowRect) -> WindowRect {
+    let (x, y) = prompt_button_window_to_visual_position(rect.x, rect.y);
+    WindowRect {
+        x,
+        y,
+        width: BUTTON_VISUAL_WIDTH,
+        height: BUTTON_VISUAL_HEIGHT,
+    }
+}
+
 #[cfg(target_os = "macos")]
 fn current_mouse_point_for_popover(app: &tauri::AppHandle) -> Option<(f64, f64)> {
     let popover = app.get_webview_window(POPOVER_WINDOW_LABEL)?;
@@ -184,7 +237,7 @@ fn handle_prompt_popover_outside_click(app: tauri::AppHandle) {
     if !OUTSIDE_CLICK_MONITOR_ACTIVE.load(Ordering::SeqCst) {
         return;
     }
-    if current_popover_mode().as_deref() != Some("popover") {
+    if !should_use_transparent_popover_window(current_popover_mode().as_deref()) {
         set_outside_click_monitor_active(false);
         return;
     }
@@ -201,11 +254,9 @@ fn handle_prompt_popover_outside_click(app: tauri::AppHandle) {
     let Some(point) = current_mouse_point_for_popover(&app) else {
         return;
     };
-    if should_dismiss_popover_for_click(
-        point,
-        window_rect(&app, BUTTON_WINDOW_LABEL),
-        window_rect(&app, POPOVER_WINDOW_LABEL),
-    ) {
+    let button = window_rect(&app, BUTTON_WINDOW_LABEL).map(visual_button_rect_from_window_rect);
+    let popover = window_rect(&app, POPOVER_WINDOW_LABEL);
+    if should_dismiss_popover_for_click(point, button, popover) {
         let _ = popover_window.hide();
         set_outside_click_monitor_active(false);
         emit_popover_dismissed(&app);
@@ -279,10 +330,11 @@ pub fn prompt_button_position_cmd(
     };
     let position = window.outer_position().map_err(|e| e.to_string())?;
     let scale = window.scale_factor().unwrap_or(1.0);
-    Ok(Some(PromptButtonPosition {
-        x: position.x as f64 / scale,
-        y: position.y as f64 / scale,
-    }))
+    let (x, y) = prompt_button_window_to_visual_position(
+        position.x as f64 / scale,
+        position.y as f64 / scale,
+    );
+    Ok(Some(PromptButtonPosition { x, y }))
 }
 
 #[tauri::command]
@@ -294,20 +346,27 @@ pub fn move_prompt_button_to(x: f64, y: f64, app: tauri::AppHandle) -> Result<()
             .or(app.primary_monitor().map_err(|e| e.to_string())?);
         let (x, y) = clamp_button_position_for_monitor(x, y, monitor.as_ref());
         window
-            .set_position(tauri::Position::Logical(tauri::LogicalPosition { x, y }))
+            .set_position(prompt_button_position_from_visual(x, y))
             .map_err(|e| e.to_string())?;
     }
     Ok(())
 }
 
 fn show_popover_mode(x: f64, y: f64, mode: &str, app: &tauri::AppHandle) -> Result<(), String> {
+    let popover_size = popover_size_for_mode(mode);
     if let Some(window) = app.get_webview_window(POPOVER_WINDOW_LABEL) {
         let existing_mode = current_popover_mode();
         if should_reuse_popover(existing_mode.as_deref(), mode) {
             window
-                .set_position(prompt_button_window_position(x, y))
+                .set_position(logical_position(x, y))
                 .map_err(|e| e.to_string())?;
-            if mode == "popover" {
+            window
+                .set_size(tauri::Size::Logical(tauri::LogicalSize {
+                    width: popover_size.width,
+                    height: popover_size.height,
+                }))
+                .map_err(|e| e.to_string())?;
+            if should_use_transparent_popover_window(Some(mode)) {
                 crate::macos_panels::configure_transparent_webview_window(&window)?;
                 enable_prompt_popover_outside_click_monitor(app);
             } else {
@@ -325,7 +384,7 @@ fn show_popover_mode(x: f64, y: f64, mode: &str, app: &tauri::AppHandle) -> Resu
     let url = format!("index.html?mode={}", mode);
     let window = WebviewWindowBuilder::new(app, POPOVER_WINDOW_LABEL, WebviewUrl::App(url.into()))
         .title("Prompt Picker")
-        .inner_size(POPOVER_WIDTH, POPOVER_HEIGHT)
+        .inner_size(popover_size.width, popover_size.height)
         .resizable(false)
         .decorations(false)
         .always_on_top(true)
@@ -334,7 +393,7 @@ fn show_popover_mode(x: f64, y: f64, mode: &str, app: &tauri::AppHandle) -> Resu
         .position(x, y)
         .build()
         .map_err(|e| e.to_string())?;
-    if mode == "popover" {
+    if should_use_transparent_popover_window(Some(mode)) {
         crate::macos_panels::configure_transparent_webview_window(&window)?;
         enable_prompt_popover_outside_click_monitor(app);
     } else {
@@ -356,12 +415,21 @@ pub fn show_prompt_button(x: f64, y: f64, app: tauri::AppHandle) -> Result<(), S
         let (x, y) = clamp_button_position_for_monitor(x, y, monitor.as_ref());
         let position = window.outer_position().map_err(|e| e.to_string())?;
         let scale = window.scale_factor().unwrap_or(1.0);
-        let current = (position.x as f64 / scale, position.y as f64 / scale);
+        let current = prompt_button_window_to_visual_position(
+            position.x as f64 / scale,
+            position.y as f64 / scale,
+        );
         let visible = window.is_visible().unwrap_or(false);
 
+        window
+            .set_size(tauri::Size::Logical(tauri::LogicalSize {
+                width: BUTTON_WINDOW_WIDTH,
+                height: BUTTON_WINDOW_HEIGHT,
+            }))
+            .map_err(|e| e.to_string())?;
         if !positions_are_close(current, (x, y)) {
             window
-                .set_position(prompt_button_window_position(x, y))
+                .set_position(prompt_button_position_from_visual(x, y))
                 .map_err(|e| e.to_string())?;
         }
         if !visible {
@@ -375,19 +443,20 @@ pub fn show_prompt_button(x: f64, y: f64, app: tauri::AppHandle) -> Result<(), S
     } else {
         let monitor = app.primary_monitor().map_err(|e| e.to_string())?;
         let (x, y) = clamp_button_position_for_monitor(x, y, monitor.as_ref());
+        let (window_x, window_y) = prompt_button_visual_to_window_position(x, y);
         let window = WebviewWindowBuilder::new(
             &app,
             BUTTON_WINDOW_LABEL,
             WebviewUrl::App("overlay.html".into()),
         )
         .title("Prompt Button")
-        .inner_size(BUTTON_WIDTH, BUTTON_HEIGHT)
+        .inner_size(BUTTON_WINDOW_WIDTH, BUTTON_WINDOW_HEIGHT)
         .resizable(false)
         .decorations(false)
         .always_on_top(true)
         .accept_first_mouse(true)
         .skip_taskbar(true)
-        .position(x, y)
+        .position(window_x, window_y)
         .build()
         .map_err(|e| e.to_string())?;
         if BUTTON_WINDOW_TRANSPARENT {
@@ -431,7 +500,12 @@ pub fn show_prompt_popover_from_button(
     app: tauri::AppHandle,
 ) -> Result<(), String> {
     session_state.begin(session_id);
-    let position = button_relative_popover_position(&app, BUTTON_WIDTH, BUTTON_HEIGHT);
+    let position = button_relative_popover_position(
+        &app,
+        BUTTON_VISUAL_WIDTH,
+        BUTTON_VISUAL_HEIGHT,
+        popover_size_for_mode("popover"),
+    );
     show_popover_mode(position.0, position.1, "popover", &app)
 }
 
@@ -453,14 +527,24 @@ pub fn toggle_prompt_popover_from_button(
     }
 
     session_state.begin(session_id);
-    let position = button_relative_popover_position(&app, BUTTON_WIDTH, BUTTON_HEIGHT);
+    let position = button_relative_popover_position(
+        &app,
+        BUTTON_VISUAL_WIDTH,
+        BUTTON_VISUAL_HEIGHT,
+        popover_size_for_mode("popover"),
+    );
     show_popover_mode(position.0, position.1, "popover", &app)?;
     Ok(PromptPopoverToggleOutcome { opened: true })
 }
 
 #[tauri::command]
 pub fn show_prompt_button_controls_from_button(app: tauri::AppHandle) -> Result<(), String> {
-    let position = button_relative_popover_position(&app, BUTTON_WIDTH, BUTTON_HEIGHT);
+    let position = button_relative_popover_position(
+        &app,
+        BUTTON_VISUAL_WIDTH,
+        BUTTON_VISUAL_HEIGHT,
+        popover_size_for_mode("button-controls"),
+    );
     show_popover_mode(position.0, position.1, "button-controls", &app)
 }
 
@@ -468,38 +552,43 @@ fn button_relative_popover_position(
     app: &tauri::AppHandle,
     button_width: f64,
     button_height: f64,
+    popover_size: PopoverSize,
 ) -> (f64, f64) {
     app.get_webview_window(BUTTON_WINDOW_LABEL)
         .and_then(|window| {
             let position = window.outer_position().ok()?;
             let scale = window.scale_factor().unwrap_or(1.0);
-            let button_x = position.x as f64 / scale;
-            let button_y = position.y as f64 / scale;
+            let native_x = position.x as f64 / scale;
+            let native_y = position.y as f64 / scale;
+            let (button_x, button_y) = prompt_button_window_to_visual_position(native_x, native_y);
             let monitor = window.current_monitor().ok().flatten();
-            Some(clamp_popover_position(
+            Some(clamp_popover_position_for_size(
                 button_x,
                 button_y,
                 button_width,
                 button_height,
+                popover_size,
                 monitor.as_ref(),
             ))
         })
         .unwrap_or((100.0, 100.0))
 }
 
-fn clamp_popover_position(
+fn clamp_popover_position_for_size(
     button_x: f64,
     button_y: f64,
     button_width: f64,
     button_height: f64,
+    popover_size: PopoverSize,
     monitor: Option<&tauri::Monitor>,
 ) -> (f64, f64) {
     let Some(monitor) = monitor else {
-        return clamp_popover_position_in_bounds(
+        return clamp_popover_position_in_bounds_for_size(
             button_x,
             button_y,
             button_width,
             button_height,
+            popover_size,
             None,
         );
     };
@@ -512,15 +601,17 @@ fn clamp_popover_position(
         height: monitor.size().height as f64 / scale,
     };
 
-    clamp_popover_position_in_bounds(
+    clamp_popover_position_in_bounds_for_size(
         button_x,
         button_y,
         button_width,
         button_height,
+        popover_size,
         Some(bounds),
     )
 }
 
+#[cfg(test)]
 fn clamp_popover_position_in_bounds(
     button_x: f64,
     button_y: f64,
@@ -528,8 +619,26 @@ fn clamp_popover_position_in_bounds(
     button_height: f64,
     bounds: Option<MonitorBounds>,
 ) -> (f64, f64) {
-    let centered_x = button_x + (button_width / 2.0) - (POPOVER_WIDTH / 2.0);
-    let above_y = button_y - POPOVER_HEIGHT - POPOVER_GAP;
+    clamp_popover_position_in_bounds_for_size(
+        button_x,
+        button_y,
+        button_width,
+        button_height,
+        popover_size_for_mode("popover"),
+        bounds,
+    )
+}
+
+fn clamp_popover_position_in_bounds_for_size(
+    button_x: f64,
+    button_y: f64,
+    button_width: f64,
+    button_height: f64,
+    popover_size: PopoverSize,
+    bounds: Option<MonitorBounds>,
+) -> (f64, f64) {
+    let centered_x = button_x + (button_width / 2.0) - (popover_size.width / 2.0);
+    let above_y = button_y - popover_size.height - POPOVER_GAP;
     let below_y = button_y + button_height + POPOVER_GAP;
 
     let Some(bounds) = bounds else {
@@ -540,9 +649,9 @@ fn clamp_popover_position_in_bounds(
     let monitor_right = bounds.x + bounds.width;
     let monitor_bottom = bounds.y + bounds.height;
     let min_x = bounds.x + margin;
-    let max_x = monitor_right - POPOVER_WIDTH - margin;
+    let max_x = monitor_right - popover_size.width - margin;
     let min_y = bounds.y + margin;
-    let max_y = monitor_bottom - POPOVER_HEIGHT - margin;
+    let max_y = monitor_bottom - popover_size.height - margin;
 
     let x = centered_x.clamp(min_x, max_x);
     let y = if above_y >= min_y {
@@ -569,12 +678,12 @@ mod tests {
         let position = clamp_popover_position_in_bounds(
             500.0,
             400.0,
-            BUTTON_WIDTH,
-            BUTTON_HEIGHT,
+            BUTTON_VISUAL_WIDTH,
+            BUTTON_VISUAL_HEIGHT,
             Some(bounds),
         );
 
-        let expected_x = 500.0 + (BUTTON_WIDTH / 2.0) - (POPOVER_WIDTH / 2.0);
+        let expected_x = 500.0 + (BUTTON_VISUAL_WIDTH / 2.0) - (POPOVER_WIDTH / 2.0);
         let expected_y = 400.0 - POPOVER_HEIGHT - POPOVER_GAP;
         assert_eq!(position, (expected_x, expected_y));
     }
@@ -582,6 +691,16 @@ mod tests {
     #[test]
     fn prompt_popover_height_supports_taller_prompt_list() {
         assert_eq!(POPOVER_HEIGHT, 388.0);
+    }
+
+    #[test]
+    fn button_controls_uses_compact_popover_size() {
+        let size = popover_size_for_mode("button-controls");
+
+        assert_eq!(size.width, BUTTON_CONTROLS_WIDTH);
+        assert_eq!(size.height, BUTTON_CONTROLS_HEIGHT);
+        assert_eq!(BUTTON_CONTROLS_WIDTH, 156.0);
+        assert_eq!(BUTTON_CONTROLS_HEIGHT, 72.0);
     }
 
     #[test]
@@ -600,12 +719,12 @@ mod tests {
         let position = clamp_popover_position_in_bounds(
             500.0,
             20.0,
-            BUTTON_WIDTH,
-            BUTTON_HEIGHT,
+            BUTTON_VISUAL_WIDTH,
+            BUTTON_VISUAL_HEIGHT,
             Some(bounds),
         );
 
-        assert_eq!(position.1, 20.0 + BUTTON_HEIGHT + POPOVER_GAP);
+        assert_eq!(position.1, 20.0 + BUTTON_VISUAL_HEIGHT + POPOVER_GAP);
     }
 
     #[test]
@@ -616,13 +735,18 @@ mod tests {
             width: 1440.0,
             height: 900.0,
         };
-        let left =
-            clamp_popover_position_in_bounds(4.0, 400.0, BUTTON_WIDTH, BUTTON_HEIGHT, Some(bounds));
+        let left = clamp_popover_position_in_bounds(
+            4.0,
+            400.0,
+            BUTTON_VISUAL_WIDTH,
+            BUTTON_VISUAL_HEIGHT,
+            Some(bounds),
+        );
         let right = clamp_popover_position_in_bounds(
             1390.0,
             400.0,
-            BUTTON_WIDTH,
-            BUTTON_HEIGHT,
+            BUTTON_VISUAL_WIDTH,
+            BUTTON_VISUAL_HEIGHT,
             Some(bounds),
         );
 
@@ -631,9 +755,51 @@ mod tests {
     }
 
     #[test]
+    fn button_controls_position_uses_compact_size() {
+        let bounds = MonitorBounds {
+            x: 0.0,
+            y: 0.0,
+            width: 1440.0,
+            height: 900.0,
+        };
+        let position = clamp_popover_position_in_bounds_for_size(
+            500.0,
+            400.0,
+            BUTTON_VISUAL_WIDTH,
+            BUTTON_VISUAL_HEIGHT,
+            popover_size_for_mode("button-controls"),
+            Some(bounds),
+        );
+
+        assert_eq!(
+            position,
+            (
+                500.0 + (BUTTON_VISUAL_WIDTH / 2.0) - (BUTTON_CONTROLS_WIDTH / 2.0),
+                400.0 - BUTTON_CONTROLS_HEIGHT - POPOVER_GAP
+            )
+        );
+    }
+
+    #[test]
     fn calico_button_window_uses_square_character_size() {
-        assert_eq!(BUTTON_WIDTH, 132.0);
-        assert_eq!(BUTTON_HEIGHT, 132.0);
+        assert_eq!(BUTTON_VISUAL_WIDTH, 132.0);
+        assert_eq!(BUTTON_VISUAL_HEIGHT, 132.0);
+    }
+
+    #[test]
+    fn calico_button_window_has_animation_padding() {
+        assert_eq!(BUTTON_VISUAL_WIDTH, 132.0);
+        assert_eq!(BUTTON_VISUAL_HEIGHT, 132.0);
+        assert_eq!(BUTTON_WINDOW_WIDTH, 208.0);
+        assert_eq!(BUTTON_WINDOW_HEIGHT, 208.0);
+        assert_eq!(BUTTON_WINDOW_PADDING_X, 38.0);
+        assert_eq!(BUTTON_WINDOW_PADDING_Y, 38.0);
+    }
+
+    #[test]
+    fn calico_button_window_uses_larger_native_transparent_size() {
+        assert!(BUTTON_WINDOW_WIDTH > BUTTON_VISUAL_WIDTH);
+        assert!(BUTTON_WINDOW_HEIGHT > BUTTON_VISUAL_HEIGHT);
     }
 
     #[test]
@@ -652,20 +818,73 @@ mod tests {
 
         let position = clamp_button_position_in_bounds(2000.0, -100.0, Some(bounds));
 
-        assert_eq!(position, (1440.0 - BUTTON_WIDTH - 8.0, 8.0));
+        assert_eq!(position, (1440.0 - BUTTON_VISUAL_WIDTH - 8.0, 8.0));
     }
 
     #[test]
-    fn prompt_button_set_position_uses_logical_coordinates() {
-        let position = prompt_button_window_position(320.0, 240.0);
+    fn calico_visual_and_window_positions_round_trip() {
+        let visual = (320.0, 240.0);
+        let window = prompt_button_visual_to_window_position(visual.0, visual.1);
 
-        match position {
+        assert_eq!(window, (282.0, 202.0));
+        assert_eq!(
+            prompt_button_window_to_visual_position(window.0, window.1),
+            visual
+        );
+    }
+
+    #[test]
+    fn calico_button_position_from_visual_subtracts_padding_without_affecting_generic_windows() {
+        let button_position = prompt_button_position_from_visual(320.0, 240.0);
+        let generic_position = logical_position(320.0, 240.0);
+
+        match button_position {
+            tauri::Position::Logical(logical) => {
+                assert_eq!(logical.x, 282.0);
+                assert_eq!(logical.y, 202.0);
+            }
+            _ => panic!("prompt button position must use logical coordinates"),
+        }
+
+        match generic_position {
             tauri::Position::Logical(logical) => {
                 assert_eq!(logical.x, 320.0);
                 assert_eq!(logical.y, 240.0);
             }
-            _ => panic!("prompt button position must use logical coordinates"),
+            _ => panic!("generic position must use logical coordinates"),
         }
+    }
+
+    #[test]
+    fn outside_click_uses_visual_button_rect_not_transparent_window_padding() {
+        let native_button = WindowRect {
+            x: 282.0,
+            y: 202.0,
+            width: BUTTON_WINDOW_WIDTH,
+            height: BUTTON_WINDOW_HEIGHT,
+        };
+        let visual_button = visual_button_rect_from_window_rect(native_button);
+        let popover = WindowRect {
+            x: 800.0,
+            y: 20.0,
+            width: POPOVER_WIDTH,
+            height: POPOVER_HEIGHT,
+        };
+
+        assert_eq!(visual_button.x, 320.0);
+        assert_eq!(visual_button.y, 240.0);
+        assert_eq!(visual_button.width, BUTTON_VISUAL_WIDTH);
+        assert_eq!(visual_button.height, BUTTON_VISUAL_HEIGHT);
+        assert!(should_dismiss_popover_for_click(
+            (300.0, 220.0),
+            Some(visual_button),
+            Some(popover)
+        ));
+        assert!(!should_dismiss_popover_for_click(
+            (340.0, 260.0),
+            Some(visual_button),
+            Some(popover)
+        ));
     }
 
     #[test]
@@ -673,8 +892,8 @@ mod tests {
         let button = WindowRect {
             x: 100.0,
             y: 500.0,
-            width: BUTTON_WIDTH,
-            height: BUTTON_HEIGHT,
+            width: BUTTON_VISUAL_WIDTH,
+            height: BUTTON_VISUAL_HEIGHT,
         };
         let popover = WindowRect {
             x: 20.0,
@@ -695,8 +914,8 @@ mod tests {
         let button = WindowRect {
             x: 100.0,
             y: 500.0,
-            width: BUTTON_WIDTH,
-            height: BUTTON_HEIGHT,
+            width: BUTTON_VISUAL_WIDTH,
+            height: BUTTON_VISUAL_HEIGHT,
         };
         let popover = WindowRect {
             x: 20.0,
@@ -722,8 +941,8 @@ mod tests {
         let button = WindowRect {
             x: 100.0,
             y: 500.0,
-            width: BUTTON_WIDTH,
-            height: BUTTON_HEIGHT,
+            width: BUTTON_VISUAL_WIDTH,
+            height: BUTTON_VISUAL_HEIGHT,
         };
 
         assert!(!should_dismiss_popover_for_click(
@@ -749,7 +968,7 @@ mod tests {
     }
 
     #[test]
-    fn prompt_list_mode_enables_outside_click_monitor() {
+    fn transparent_popover_modes_enable_outside_click_monitor() {
         let source = include_str!("windows.rs");
         let start = source
             .find("fn show_popover_mode")
@@ -759,7 +978,11 @@ mod tests {
             .expect("first popover command should follow show_popover_mode");
         let show_source = &source[start..start + end];
 
-        assert!(show_source.contains("if mode == \"popover\""));
+        assert!(should_use_transparent_popover_window(Some("popover")));
+        assert!(should_use_transparent_popover_window(Some(
+            "button-controls"
+        )));
+        assert!(show_source.contains("should_use_transparent_popover_window(Some(mode))"));
         assert!(show_source.contains("enable_prompt_popover_outside_click_monitor(app);"));
         assert!(show_source.contains("set_outside_click_monitor_active(false);"));
     }
@@ -854,13 +1077,13 @@ mod tests {
         let reuse_source = &source[start..start + end];
 
         assert!(reuse_source.contains("should_reuse_popover("));
-        assert!(reuse_source.contains("set_position(prompt_button_window_position(x, y))"));
+        assert!(reuse_source.contains("set_position(logical_position(x, y))"));
         assert!(reuse_source.contains("window.show().map_err"));
         assert!(reuse_source.contains("emit_popover_opened(app, mode)"));
     }
 
     #[test]
-    fn prompt_list_popover_uses_transparent_native_window() {
+    fn popover_modes_use_transparent_native_window() {
         let source = include_str!("windows.rs");
         let start = source
             .find("fn show_popover_mode")
@@ -870,7 +1093,7 @@ mod tests {
             .expect("show_prompt_button should follow show_popover_mode");
         let command_source = &source[start..start + end];
 
-        assert!(command_source.contains("if mode == \"popover\""));
+        assert!(command_source.contains("should_use_transparent_popover_window(Some(mode))"));
         assert!(command_source.contains("configure_transparent_webview_window(&window)?"));
         assert!(command_source.contains("configure_non_activating_panel(&window)?"));
     }
