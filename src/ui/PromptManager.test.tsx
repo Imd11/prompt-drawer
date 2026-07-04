@@ -73,6 +73,20 @@ describe("prompt manager", () => {
     expect(created).toEqual({ title: "New Single", body: "Single body" });
   });
 
+  it("shows localized success feedback after creating a single prompt", async () => {
+    renderManager({ messages: getMessages("en-US") });
+
+    fireEvent.change(screen.getByPlaceholderText("Title"), {
+      target: { value: "New Single" },
+    });
+    fireEvent.change(screen.getByPlaceholderText("Prompt body..."), {
+      target: { value: "Single body" },
+    });
+    fireEvent.click(screen.getByRole("button", { name: "Add Prompt" }));
+
+    expect(await screen.findByText("Prompt added")).toBeTruthy();
+  });
+
   it("creates a single prompt on the first click while the body field is focused", () => {
     let created: { title: string; body: string } | null = null;
     renderManager({ onCreate: (input) => { created = input; } });
@@ -140,6 +154,21 @@ describe("prompt manager", () => {
       ],
       intervalMs: 700,
     });
+  });
+
+  it("shows success feedback after creating a group", async () => {
+    renderManager();
+
+    fireEvent.click(screen.getByRole("button", { name: "群组" }));
+    fireEvent.change(screen.getByPlaceholderText("标题"), {
+      target: { value: "群组提示词" },
+    });
+    fireEvent.change(screen.getAllByLabelText(/提示词 \d+ 内容/i)[0], {
+      target: { value: "第一条" },
+    });
+    fireEvent.click(screen.getByRole("button", { name: "添加群组" }));
+
+    expect(await screen.findByText("已添加提示词组")).toBeTruthy();
   });
 
   it("inserts and removes group prompts from row controls", () => {

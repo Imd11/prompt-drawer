@@ -21,12 +21,12 @@ interface PromptManagerProps {
   prompts: PromptContainer[];
   messages: Messages;
   onOpenSettings: () => void;
-  onCreate: (input: { title: string; body: string }) => void;
+  onCreate: (input: { title: string; body: string }) => void | Promise<void>;
   onCreateGroup: (input: {
     title: string;
     prompts: Array<{ body: string }>;
     intervalMs: number;
-  }) => void;
+  }) => void | Promise<void>;
   onUpdate: (
     id: string,
     input: {
@@ -113,6 +113,7 @@ export function PromptManager({
   const [deleteConfirmId, setDeleteConfirmId] = useState<string | null>(null);
   const [draft, setDraft] = useState<Draft>(() => emptyDraft());
   const [editDraft, setEditDraft] = useState<Draft>(() => emptyDraft());
+  const [createToastMessage, setCreateToastMessage] = useState<string | null>(null);
   const titleInputRef = useRef<HTMLInputElement | null>(null);
   const bodyTextareaRef = useRef<HTMLTextAreaElement | null>(null);
   const groupPromptRefs = useRef<Array<HTMLTextAreaElement | null>>([]);
@@ -121,11 +122,15 @@ export function PromptManager({
   const editGroupPromptRefs = useRef<Array<HTMLTextAreaElement | null>>([]);
   const submitGuardRef = useRef(false);
   const submitGuardTimerRef = useRef<number | null>(null);
+  const createToastTimerRef = useRef<number | null>(null);
 
   useEffect(() => {
     return () => {
       if (submitGuardTimerRef.current !== null) {
         window.clearTimeout(submitGuardTimerRef.current);
+      }
+      if (createToastTimerRef.current !== null) {
+        window.clearTimeout(createToastTimerRef.current);
       }
     };
   }, []);
@@ -158,7 +163,7 @@ export function PromptManager({
     ),
   });
 
-  const runSubmitOnce = (callback: () => void) => {
+  const runSubmitOnce = (callback: () => void | Promise<void>) => {
     if (submitGuardRef.current) return;
     submitGuardRef.current = true;
     if (submitGuardTimerRef.current !== null) {
@@ -168,19 +173,34 @@ export function PromptManager({
       submitGuardRef.current = false;
       submitGuardTimerRef.current = null;
     }, 250);
-    callback();
+    Promise.resolve(callback()).catch((error) => {
+      console.error("Prompt manager action failed:", error);
+    });
   };
 
-  const handleCreate = (sourceDraft = draft) => {
+  const showCreateToast = (message: string) => {
+    setCreateToastMessage(message);
+    if (createToastTimerRef.current !== null) {
+      window.clearTimeout(createToastTimerRef.current);
+    }
+    createToastTimerRef.current = window.setTimeout(() => {
+      setCreateToastMessage(null);
+      createToastTimerRef.current = null;
+    }, 2200);
+  };
+
+  const handleCreate = async (sourceDraft = draft) => {
     if (!hasValidDraft(sourceDraft)) return;
     if (sourceDraft.type === "group") {
-      onCreateGroup({
+      await onCreateGroup({
         title: sourceDraft.title.trim(),
         prompts: cleanBodies(sourceDraft.prompts),
         intervalMs: sourceDraft.intervalMs,
       });
+      showCreateToast(messages.manager.groupAdded);
     } else {
-      onCreate({ title: sourceDraft.title.trim(), body: sourceDraft.body.trim() });
+      await onCreate({ title: sourceDraft.title.trim(), body: sourceDraft.body.trim() });
+      showCreateToast(messages.manager.promptAdded);
     }
     setDraft(emptyDraft());
   };
@@ -312,6 +332,12 @@ export function PromptManager({
         >
           {draft.type === "group" ? messages.manager.addGroup : messages.manager.addPrompt}
         </button>
+        {createToastMessage ? (
+          <div className="create-toast" role="status" aria-live="polite">
+            <span className="create-toast-icon" aria-hidden="true">✓</span>
+            <span>{createToastMessage}</span>
+          </div>
+        ) : null}
       </form>
 
       <section className="list-panel">

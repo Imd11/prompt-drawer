@@ -764,6 +764,7 @@ button {
 }
 
 .prompt-manager .editor-panel {
+  position: relative;
   gap: 12px;
   padding: 16px;
 }
@@ -802,6 +803,54 @@ button {
 .prompt-manager .button-ghost-danger {
   color: var(--pp-danger);
   border-color: #f0d1cc;
+}
+
+.prompt-manager .create-toast {
+  position: absolute;
+  right: 16px;
+  bottom: 58px;
+  z-index: 2;
+  display: inline-flex;
+  max-width: min(280px, calc(100% - 32px));
+  min-height: 32px;
+  align-items: center;
+  gap: 8px;
+  padding: 7px 11px;
+  color: #14532d;
+  background: rgba(240, 253, 244, 0.98);
+  border: 1px solid #bbf7d0;
+  border-radius: var(--pp-radius-md);
+  box-shadow: 0 10px 24px rgba(15, 23, 42, 0.12);
+  font-size: 12px;
+  font-weight: 680;
+  line-height: 1.25;
+  animation: create-toast-in 160ms ease-out;
+}
+
+.prompt-manager .create-toast-icon {
+  display: inline-flex;
+  width: 18px;
+  height: 18px;
+  flex: 0 0 auto;
+  align-items: center;
+  justify-content: center;
+  color: #ffffff;
+  background: #16a34a;
+  border-radius: 999px;
+  font-size: 12px;
+  font-weight: 800;
+}
+
+@keyframes create-toast-in {
+  from {
+    opacity: 0;
+    transform: translateY(4px);
+  }
+
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
 }
 
 .prompt-manager .field {
