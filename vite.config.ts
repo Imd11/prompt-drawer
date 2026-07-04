@@ -1,4 +1,4 @@
-import { defineConfig } from "vite";
+import { configDefaults, defineConfig } from "vitest/config";
 import react from "@vitejs/plugin-react";
 
 export default defineConfig({
@@ -15,6 +15,7 @@ export default defineConfig({
     sourcemap: !!process.env.TAURI_DEBUG,
   },
   test: {
+    exclude: [...configDefaults.exclude, ".worktrees/**"],
     globals: true,
     environment: "jsdom",
   },

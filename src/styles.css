@@ -495,21 +495,127 @@ button {
   text-align: center;
 }
 
-.settings-field {
-  display: grid;
-  max-width: 360px;
-  gap: 6px;
+.settings-panel {
+  width: min(760px, 100%);
+  margin: 0 auto;
+  gap: 14px;
 }
 
-.settings-field span {
+.settings-page-header {
+  margin-bottom: 2px;
+}
+
+.settings-page-header h1 {
+  font-size: 21px;
+  font-weight: 680;
+  line-height: 1.2;
+}
+
+.settings-card {
+  overflow: hidden;
+  background: var(--pp-surface);
+  border: 1px solid var(--pp-border);
+  border-radius: var(--pp-radius-sm);
+  box-shadow: var(--pp-shadow-soft);
+}
+
+.settings-card-heading {
+  display: flex;
+  min-height: 38px;
+  align-items: center;
+  padding: 0 14px;
+  background: var(--pp-surface-subtle);
+  border-bottom: 1px solid var(--pp-border);
+}
+
+.settings-card-heading h2 {
+  margin: 0;
   color: var(--pp-text);
-  font-size: 12px;
-  font-weight: 650;
+  font-size: 13px;
+  font-weight: 680;
+  line-height: 1.25;
+}
+
+.settings-row {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  min-height: 54px;
+  align-items: center;
+  gap: 16px;
+  padding: 10px 14px;
+  border-bottom: 1px solid var(--pp-border);
+}
+
+.settings-row:last-child {
+  border-bottom: 0;
+}
+
+.settings-row-main {
+  min-width: 0;
+}
+
+.settings-row-title {
+  display: block;
+  color: var(--pp-text);
+  font-size: 13px;
+  font-weight: 600;
+  line-height: 1.35;
+}
+
+.settings-row-control {
+  display: flex;
+  min-width: 0;
+  align-items: center;
+  justify-content: flex-end;
 }
 
 .settings-select {
-  min-height: 36px;
-  padding: 0 12px;
+  width: 156px;
+  min-height: 32px;
+  height: 32px;
+  padding: 0 30px 0 10px;
+}
+
+.settings-segmented-control {
+  height: 32px;
+}
+
+.settings-segmented-control button {
+  min-width: 78px;
+  padding: 0 11px;
+}
+
+.settings-empty-row {
+  min-height: 52px;
+  padding: 16px 14px;
+  color: var(--pp-muted);
+  font-size: 13px;
+}
+
+.settings-blacklist {
+  gap: 0;
+  margin: 0;
+}
+
+.settings-blacklist li {
+  background: transparent;
+  border: 0;
+  border-bottom: 1px solid var(--pp-border);
+  border-radius: 0;
+}
+
+.settings-blacklist li:last-child {
+  border-bottom: 0;
+}
+
+.settings-blacklist li > div {
+  min-width: 0;
+}
+
+.settings-blacklist span {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .blacklist {
@@ -731,14 +837,22 @@ button {
 }
 
 .app-window {
-  background:
-    radial-gradient(circle at 18% 0%, rgba(255, 255, 255, 0.92), transparent 28%),
-    var(--pp-bg);
+  --pp-bg: #f2f6f8;
+  --pp-surface: #fbfdff;
+  --pp-surface-subtle: #f7fafc;
+  --pp-border: #dbe5ec;
+  --pp-border-strong: #cfdbe5;
+  --pp-muted: #667085;
+  --pp-radius-sm: 8px;
+  --pp-radius-md: 8px;
+  --pp-radius-lg: 10px;
+  --pp-shadow-soft: 0 1px 2px rgba(15, 23, 42, 0.035);
+  background: var(--pp-bg);
   color: var(--pp-text);
 }
 
 .app-window-main {
-  padding: 30px 28px 38px;
+  padding: 22px 24px 30px;
 }
 
 .prompt-manager {

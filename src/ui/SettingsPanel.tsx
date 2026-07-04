@@ -18,83 +18,93 @@ export function SettingsPanel({
 
   return (
     <div className="settings-panel page-stack">
-      <header className="page-header">
+      <header className="page-header settings-page-header">
         <div>
           <h1>{t.settings.title}</h1>
-          <p>{t.settings.subtitle}</p>
         </div>
       </header>
 
-      <section className="list-panel settings-section">
-        <div className="section-heading">
+      <section className="settings-card">
+        <div className="settings-card-heading">
           <h2>{t.settings.languageTitle}</h2>
-          <p>{t.settings.languageDescription}</p>
         </div>
-        <label className="settings-field">
-          <span>{t.settings.languageField}</span>
-          <select
-            className="field settings-select"
-            value={settings.language}
-            onChange={(event) => onLanguageChange(event.target.value as AppLanguage)}
-          >
-            <option value="zh-CN">{LANGUAGE_LABELS["zh-CN"]}</option>
-            <option value="en-US">{LANGUAGE_LABELS["en-US"]}</option>
-          </select>
+        <label className="settings-row">
+          <span className="settings-row-main">
+            <span className="settings-row-title">{t.settings.languageField}</span>
+          </span>
+          <span className="settings-row-control">
+            <select
+              className="field settings-select"
+              value={settings.language}
+              onChange={(event) => onLanguageChange(event.target.value as AppLanguage)}
+            >
+              <option value="zh-CN">{LANGUAGE_LABELS["zh-CN"]}</option>
+              <option value="en-US">{LANGUAGE_LABELS["en-US"]}</option>
+            </select>
+          </span>
         </label>
       </section>
 
-      <section className="list-panel settings-section">
-        <div className="section-heading">
+      <section className="settings-card">
+        <div className="settings-card-heading">
           <h2>{t.settings.clickBehaviorTitle}</h2>
-          <p>{t.settings.clickBehaviorDescription}</p>
         </div>
-        <div className="segmented-control" aria-label={t.settings.clickBehaviorTitle}>
-          <button
-            className={settings.promptInsertion.mode === "paste_only" ? "is-selected" : ""}
-            type="button"
-            aria-pressed={settings.promptInsertion.mode === "paste_only"}
-            onClick={() => onPromptInsertionModeChange("paste_only")}
-          >
-            {t.settings.pasteOnly}
-          </button>
-          <button
-            className={
-              settings.promptInsertion.mode === "paste_and_submit" ? "is-selected" : ""
-            }
-            type="button"
-            aria-pressed={settings.promptInsertion.mode === "paste_and_submit"}
-            onClick={() => onPromptInsertionModeChange("paste_and_submit")}
-          >
-            {t.settings.pasteAndSubmit}
-          </button>
+        <div className="settings-row">
+          <div className="settings-row-main">
+            <div className="settings-row-title">{t.settings.clickBehaviorField}</div>
+          </div>
+          <div className="settings-row-control">
+            <div
+              className="segmented-control settings-segmented-control"
+              aria-label={t.settings.clickBehaviorTitle}
+            >
+              <button
+                className={settings.promptInsertion.mode === "paste_only" ? "is-selected" : ""}
+                type="button"
+                aria-pressed={settings.promptInsertion.mode === "paste_only"}
+                onClick={() => onPromptInsertionModeChange("paste_only")}
+              >
+                {t.settings.pasteOnly}
+              </button>
+              <button
+                className={
+                  settings.promptInsertion.mode === "paste_and_submit" ? "is-selected" : ""
+                }
+                type="button"
+                aria-pressed={settings.promptInsertion.mode === "paste_and_submit"}
+                onClick={() => onPromptInsertionModeChange("paste_and_submit")}
+              >
+                {t.settings.pasteAndSubmit}
+              </button>
+            </div>
+          </div>
         </div>
       </section>
 
-      <section className="list-panel">
-        <div className="section-heading">
+      <section className="settings-card">
+        <div className="settings-card-heading">
           <h2>{t.settings.blacklistedAppsTitle}</h2>
-          <p>{t.settings.blacklistedAppsDescription}</p>
         </div>
-      {settings.blacklistedApps.length === 0 ? (
-        <p className="empty-state-block">{t.settings.noBlacklistedApps}</p>
-      ) : (
-        <ul className="blacklist">
-          {settings.blacklistedApps.map((app) => (
-            <li key={app.bundleId}>
-              <div>
-                <strong>{app.name}</strong>
-                <span>{app.bundleId}</span>
-              </div>
-              <button
-                className="button button-ghost-danger"
-                onClick={() => onRemove(app.bundleId)}
-              >
-                {t.common.remove}
-              </button>
-            </li>
-          ))}
-        </ul>
-      )}
+        {settings.blacklistedApps.length === 0 ? (
+          <div className="settings-empty-row">{t.settings.noBlacklistedApps}</div>
+        ) : (
+          <ul className="blacklist settings-blacklist">
+            {settings.blacklistedApps.map((app) => (
+              <li key={app.bundleId}>
+                <div>
+                  <strong>{app.name}</strong>
+                  <span>{app.bundleId}</span>
+                </div>
+                <button
+                  className="button button-ghost-danger"
+                  onClick={() => onRemove(app.bundleId)}
+                >
+                  {t.common.remove}
+                </button>
+              </li>
+            ))}
+          </ul>
+        )}
       </section>
     </div>
   );

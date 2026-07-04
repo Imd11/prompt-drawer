@@ -88,6 +88,36 @@ describe("settings panel", () => {
     expect(screen.getByLabelText("界面语言")).toBeTruthy();
   });
 
+  it("renders language selection as a right-aligned settings row", () => {
+    renderPanel();
+
+    const languageSelect = screen.getByLabelText("界面语言");
+    const row = languageSelect.closest(".settings-row");
+
+    expect(row).toBeTruthy();
+    expect(row?.querySelector(".settings-row-main")).toBeTruthy();
+    expect(row?.querySelector(".settings-row-control")?.contains(languageSelect)).toBe(true);
+  });
+
+  it("does not render instructional settings descriptions", () => {
+    renderPanel();
+
+    expect(screen.queryByText("控制 Calico 如何填入提示词。")).toBeNull();
+    expect(screen.queryByText("选择应用界面使用的语言。")).toBeNull();
+    expect(screen.queryByText("选择点击提示词后，只填入输入框，还是填入并发送。")).toBeNull();
+    expect(screen.queryByText("在这些应用中隐藏小猫。")).toBeNull();
+  });
+
+  it("renders prompt click behavior as a compact settings row", () => {
+    renderPanel();
+
+    const selectedButton = screen.getByRole("button", { name: "填入并发送" });
+    const row = selectedButton.closest(".settings-row");
+
+    expect(row).toBeTruthy();
+    expect(row?.querySelector(".settings-row-control")?.contains(selectedButton)).toBe(true);
+  });
+
   it("changes language", () => {
     let selectedLanguage: AppLanguage | null = null;
     renderPanel(mockSettings, () => {}, (language) => { selectedLanguage = language; });
