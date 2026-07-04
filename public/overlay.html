@@ -159,6 +159,7 @@ body {
   <img id="calicoSprite" class="calico-sprite" src="/calico/calico-idle-follow.svg" alt="" draggable="false" />
 </button>
 <script type="module">
+import { createCalicoIdleDirector } from '/calico/idle-director.js';
 import { createCalicoMotionRuntime } from '/calico/motion-runtime.js';
 
 const btn = document.getElementById('btn');
@@ -182,6 +183,7 @@ let dragPopoverHidden = false;
 let motionResetTimer = 0;
 let statusTimer = 0;
 let calicoMotion = null;
+let calicoIdleDirector = null;
 
 function clearMotionTimers() {
   window.clearTimeout(motionResetTimer);
@@ -194,8 +196,9 @@ function applyFallbackMotion(payload = {}) {
 }
 
 function applyCalicoMotion(payload = {}) {
-  if (calicoMotion?.apply(payload)) return;
+  if (calicoMotion) return calicoMotion.apply(payload);
   applyFallbackMotion(payload);
+  return true;
 }
 
 function resetCalicoMotion() {
@@ -204,12 +207,28 @@ function resetCalicoMotion() {
   applyFallbackMotion({ state: 'idle-follow' });
 }
 
+function pauseIdleForExternalMotion(payload = {}) {
+  const durationMs = Number.isFinite(payload.durationMs) ? payload.durationMs : 3_600;
+  calicoIdleDirector?.pause(durationMs + 1_000);
+}
+
+function pauseIdleForPointerInteraction(durationMs = 5_000) {
+  calicoIdleDirector?.pause(durationMs);
+}
+
 async function initializeCalicoMotion() {
   try {
     const response = await fetch('/calico/manifest.json');
     const manifest = await response.json();
     calicoMotion = createCalicoMotionRuntime({ image: sprite, host: btn, manifest });
     resetCalicoMotion();
+    calicoIdleDirector = createCalicoIdleDirector({
+      applyMotion: applyCalicoMotion,
+      resetMotion: resetCalicoMotion,
+      getCurrentState: () => btn.dataset.motionState,
+      isUserActive: () => dragging || Boolean(start) || contextMenuOpened
+    });
+    calicoIdleDirector.start();
   } catch (error) {
     console.error('Failed to initialize Calico motion runtime', error);
     resetCalicoMotion();
@@ -278,6 +297,7 @@ function listenForAutosendStatus() {
 function listenForCalicoMotion() {
   if (!tauri?.event?.listen) return;
   tauri.event.listen('calico-motion', (event) => {
+    pauseIdleForExternalMotion(event.payload);
     applyCalicoMotion(event.payload);
   }).catch((error) => {
     console.error('Tauri event listen failed: calico-motion', error);
@@ -301,6 +321,7 @@ async function openButtonControls(event) {
   lastMove = null;
   btn.classList.remove('is-pressing', 'is-dragging');
   resetCalicoMotion();
+  pauseIdleForPointerInteraction(6_000);
   await invoke('show_prompt_button_controls_from_button');
 }
 
@@ -319,6 +340,7 @@ btn.addEventListener('pointerdown', (event) => {
     return;
   }
 
+  pauseIdleForPointerInteraction(5_000);
   const sequence = ++pointerSequence;
   start = {
     screenX: event.screenX,
@@ -366,6 +388,7 @@ btn.addEventListener('pointermove', (event) => {
   dragging = true;
   btn.classList.remove('is-pressing');
   btn.classList.add('is-dragging');
+  calicoIdleDirector?.pause(4_000);
   if (btn.dataset.motionState !== 'react-drag') {
     applyCalicoMotion({ state: 'react-drag', reason: 'drag' });
   }
@@ -401,6 +424,7 @@ btn.addEventListener('pointerup', async (event) => {
     }
   } else {
     const sessionId = ++promptPickSessionId;
+    pauseIdleForPointerInteraction(6_000);
     const toggleResult = await invoke('toggle_prompt_popover_from_button', { sessionId });
     if (toggleResult?.opened) {
       const sessionPromise = invoke('begin_prompt_pick_session', { sessionId });
@@ -415,7 +439,11 @@ btn.addEventListener('pointerup', async (event) => {
   dragStartedEmitted = false;
   btn.classList.remove('is-pressing', 'is-dragging');
   if (wasDragging) {
-    resetCalicoMotion();
+    if (calicoIdleDirector) {
+      calicoIdleDirector.resetToBaseline();
+    } else {
+      resetCalicoMotion();
+    }
   }
 });
 

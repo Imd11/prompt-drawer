@@ -1,6 +1,10 @@
 import { existsSync, readFileSync } from "fs";
 import { describe, expect, it } from "vitest";
 
+function readOverlayHtml(): string {
+  return readFileSync("public/overlay.html", "utf8");
+}
+
 describe("overlay button html", () => {
   it("enables global Tauri for the vanilla overlay html", () => {
     const config = JSON.parse(readFileSync("src-tauri/tauri.conf.json", "utf8"));
@@ -9,7 +13,7 @@ describe("overlay button html", () => {
   });
 
   it("opens Tauri button controls on right click instead of an inline menu", () => {
-    const html = readFileSync("public/overlay.html", "utf8");
+    const html = readOverlayHtml();
 
     expect(html).toContain("window.__TAURI__");
     expect(html).toContain("contextmenu");
@@ -27,7 +31,7 @@ describe("overlay button html", () => {
   });
 
   it("renders the floating entry as an animated Calico character", () => {
-    const html = readFileSync("public/overlay.html", "utf8");
+    const html = readOverlayHtml();
 
     expect(html).toContain("calico-entry");
     expect(html).toContain("calico-sprite");
@@ -45,7 +49,7 @@ describe("overlay button html", () => {
   });
 
   it("loads the Calico motion runtime and manifest", () => {
-    const html = readFileSync("public/overlay.html", "utf8");
+    const html = readOverlayHtml();
 
     expect(html).toContain("/calico/motion-runtime.js");
     expect(html).toContain("createCalicoMotionRuntime");
@@ -54,8 +58,47 @@ describe("overlay button html", () => {
     expect(html).toContain("calico-motion");
   });
 
+  it("loads and starts the Calico idle director after the motion runtime is ready", () => {
+    const html = readOverlayHtml();
+
+    expect(html).toContain("/calico/idle-director.js");
+    expect(html).toContain("createCalicoIdleDirector");
+    expect(html).toContain("let calicoIdleDirector = null;");
+    expect(html).toContain("calicoIdleDirector = createCalicoIdleDirector");
+    expect(html).toContain("applyMotion: applyCalicoMotion");
+    expect(html).toContain("resetMotion: resetCalicoMotion");
+    expect(html).toContain("getCurrentState: () => btn.dataset.motionState");
+    expect(html).toContain("isUserActive: () => dragging || Boolean(start) || contextMenuOpened");
+    expect(html).toContain("calicoIdleDirector.start();");
+    expect(html.indexOf("calicoMotion = createCalicoMotionRuntime")).toBeLessThan(
+      html.indexOf("calicoIdleDirector = createCalicoIdleDirector")
+    );
+  });
+
+  it("pauses idle motions around deliberate pointer and semantic actions", () => {
+    const html = readOverlayHtml();
+
+    expect(html).toContain("pauseIdleForExternalMotion(event.payload);");
+    expect(html).toContain("pauseIdleForPointerInteraction(5_000);");
+    expect(html).toContain("pauseIdleForPointerInteraction(6_000);");
+    expect(html).toContain("calicoIdleDirector?.pause(4_000);");
+    expect(html).toContain("calicoIdleDirector.resetToBaseline();");
+  });
+
+  it("opens the prompt list without changing Calico motion state on click", () => {
+    const html = readOverlayHtml();
+    const clickBlock = html.slice(
+      html.indexOf("const sessionId = ++promptPickSessionId;"),
+      html.indexOf("start = null;", html.indexOf("const sessionId = ++promptPickSessionId;"))
+    );
+
+    expect(clickBlock).toContain("toggle_prompt_popover_from_button");
+    expect(clickBlock).toContain("pauseIdleForPointerInteraction(6_000);");
+    expect(clickBlock).not.toContain("applyCalicoMotion");
+  });
+
   it("keeps existing drag and click commands for the Calico entry", () => {
-    const html = readFileSync("public/overlay.html", "utf8");
+    const html = readOverlayHtml();
 
     expect(html).toContain("prompt_button_position_cmd");
     expect(html).toContain("move_prompt_button_to");
@@ -67,7 +110,7 @@ describe("overlay button html", () => {
   });
 
   it("hides the prompt popover when Calico dragging starts", () => {
-    const html = readFileSync("public/overlay.html", "utf8");
+    const html = readOverlayHtml();
 
     expect(html).toContain("hidePromptPopoverForDrag");
     expect(html).toContain("await invoke('hide_prompt_popover')");
@@ -77,7 +120,7 @@ describe("overlay button html", () => {
   });
 
   it("opens the prompt list without awaiting target session capture", () => {
-    const html = readFileSync("public/overlay.html", "utf8");
+    const html = readOverlayHtml();
 
     expect(html).toContain("let promptPickSessionId = 0;");
     expect(html).toContain("const sessionId = ++promptPickSessionId;");
@@ -94,7 +137,7 @@ describe("overlay button html", () => {
   });
 
   it("requires deliberate pointer movement before treating a click as drag", () => {
-    const html = readFileSync("public/overlay.html", "utf8");
+    const html = readOverlayHtml();
 
     expect(html).toContain("const DRAG_START_DISTANCE_PX = 10;");
     expect(html).toContain("distance(start, current) < DRAG_START_DISTANCE_PX");
@@ -103,7 +146,7 @@ describe("overlay button html", () => {
   });
 
   it("listens for prompt autosend status and renders a Calico status bubble", () => {
-    const html = readFileSync("public/overlay.html", "utf8");
+    const html = readOverlayHtml();
 
     expect(html).toContain("prompt-autosend-status");
     expect(html).toContain("calico-status-bubble");
@@ -113,13 +156,13 @@ describe("overlay button html", () => {
   });
 
   it("does not use manual paste as the default failure copy", () => {
-    const html = readFileSync("public/overlay.html", "utf8");
+    const html = readOverlayHtml();
 
     expect(html).not.toContain("可手动 Cmd+V");
   });
 
   it("requests Accessibility permission from actionable autosend status bubbles", () => {
-    const html = readFileSync("public/overlay.html", "utf8");
+    const html = readOverlayHtml();
 
     expect(html).toContain("request_accessibility_permission");
     expect(html).toContain("request_accessibility_permission_cmd");
@@ -131,7 +174,7 @@ describe("overlay button html", () => {
   });
 
   it("opens prompts without switching Calico into a throw-ready pose", () => {
-    const html = readFileSync("public/overlay.html", "utf8");
+    const html = readOverlayHtml();
 
     expect(html).toContain("toggle_prompt_popover_from_button");
     expect(html).not.toContain("setMotionState('ready'");
@@ -142,7 +185,7 @@ describe("overlay button html", () => {
   });
 
   it("does not listen for paper-plane throw events", () => {
-    const html = readFileSync("public/overlay.html", "utf8");
+    const html = readOverlayHtml();
 
     expect(html).not.toContain("prompt-throw-send");
     expect(html).not.toContain("playCalicoThrow");
@@ -155,7 +198,7 @@ describe("overlay button html", () => {
   });
 
   it("resets Calico when the popover is dismissed without sending", () => {
-    const html = readFileSync("public/overlay.html", "utf8");
+    const html = readOverlayHtml();
 
     expect(html).toContain("prompt-popover-dismissed");
     expect(html).toContain("resetCalicoMotion");
