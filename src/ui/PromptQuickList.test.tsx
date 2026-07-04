@@ -8,6 +8,7 @@ import { PromptQuickList } from "./PromptQuickList";
 const prompts: PromptContainer[] = [
   {
     id: "1",
+    categoryId: "category-default",
     title: "讨论方案",
     type: "single",
     prompts: [
@@ -24,6 +25,7 @@ const prompts: PromptContainer[] = [
   },
   {
     id: "2",
+    categoryId: "category-default",
     title: "修复流程",
     type: "group",
     prompts: [
@@ -92,6 +94,50 @@ describe("PromptQuickList", () => {
     expect(screen.getByText("讨论方案")).toBeTruthy();
     expect(screen.getByText(/brainstorming skill/)).toBeTruthy();
     expect(screen.queryByText("Single · 1 prompt")).toBeNull();
+  });
+
+  it("renders category tabs and switches active category", () => {
+    const onSelectCategory = vi.fn();
+    renderQuickList({
+      categories: [
+        { id: "cat-dev", name: "开发代码", order: 0, createdAt: "", updatedAt: "" },
+        { id: "cat-writing", name: "写作", order: 1, createdAt: "", updatedAt: "" },
+      ],
+      activeCategoryId: "cat-dev",
+      onSelectCategory,
+    });
+
+    expect(screen.getByRole("tab", { name: "开发代码" }).getAttribute("aria-selected"))
+      .toBe("true");
+    fireEvent.click(screen.getByRole("tab", { name: "写作" }));
+    expect(onSelectCategory).toHaveBeenCalledWith("cat-writing");
+  });
+
+  it("renders category tabs before the scrollable prompt list", () => {
+    renderQuickList({
+      categories: [
+        { id: "cat-dev", name: "开发代码", order: 0, createdAt: "", updatedAt: "" },
+        { id: "cat-writing", name: "写作", order: 1, createdAt: "", updatedAt: "" },
+      ],
+      activeCategoryId: "cat-dev",
+    });
+
+    const shell = document.querySelector(".prompt-quick-shell");
+    const tabs = document.querySelector(".prompt-category-tabs");
+    const list = document.querySelector(".prompt-quick-list");
+
+    expect(shell?.firstElementChild).toBe(tabs);
+    expect(tabs?.nextElementSibling).toBe(list);
+  });
+
+  it("shows category-aware empty state in quick picker", () => {
+    renderQuickList({
+      prompts: [],
+      categories: [{ id: "cat-writing", name: "写作", order: 0, createdAt: "", updatedAt: "" }],
+      activeCategoryId: "cat-writing",
+    });
+
+    expect(screen.getByText("这个分类还没有提示词")).toBeTruthy();
   });
 
   it("renders group containers with two one-line preview entries", () => {

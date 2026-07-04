@@ -1,7 +1,7 @@
 import { describe, expect, it, vi, beforeEach, afterEach } from "vitest";
 import { render, screen, waitFor, act, fireEvent } from "@testing-library/react";
 import { App } from "../App";
-import type { PromptContainer, PromptItem } from "../shared/promptTypes";
+import type { PromptCategory, PromptContainer, PromptItem } from "../shared/promptTypes";
 
 const inputTargetPollingMock = vi.hoisted(() => vi.fn());
 const emitMock = vi.hoisted(() => vi.fn().mockResolvedValue(undefined));
@@ -53,6 +53,37 @@ const mockPrompts: PromptItem[] = [
     updatedAt: "2026-05-26T00:00:00.000Z",
   },
 ];
+
+const devCategory: PromptCategory = {
+  id: "cat-dev",
+  name: "开发代码",
+  order: 0,
+  createdAt: "2026-05-26T00:00:00.000Z",
+  updatedAt: "2026-05-26T00:00:00.000Z",
+};
+
+const writingCategory: PromptCategory = {
+  id: "cat-writing",
+  name: "写作",
+  order: 1,
+  createdAt: "2026-05-26T00:00:00.000Z",
+  updatedAt: "2026-05-26T00:00:00.000Z",
+};
+
+function makeContainer(overrides: Partial<PromptContainer>): PromptContainer {
+  return {
+    id: "container",
+    categoryId: "cat-dev",
+    title: "Prompt",
+    type: "single",
+    prompts: [{ id: "entry", body: "body", order: 0 }],
+    intervalMs: 700,
+    order: 0,
+    createdAt: "2026-05-26T00:00:00.000Z",
+    updatedAt: "2026-05-26T00:00:00.000Z",
+    ...overrides,
+  };
+}
 
 describe("app", () => {
   beforeEach(() => {
@@ -165,6 +196,70 @@ describe("app", () => {
     return files;
   }
 
+  async function renderMainPromptManagerWithStore(promptData: unknown) {
+    currentWindowLabel = "main";
+    window.history.pushState({}, "", "/");
+    const files = new Map<string, string>([
+      ["prompts.json", JSON.stringify(promptData)],
+      [
+        "settings.json",
+        JSON.stringify({
+          version: 1,
+          language: "zh-CN",
+          blacklistedApps: [],
+          overlayPlacement: { buttonOffset: null, buttonPosition: null },
+          floatingButton: { visible: true },
+          promptInsertion: { mode: "paste_and_submit" },
+        }),
+      ],
+    ]);
+    const { readTextFile, writeTextFile } = await import("@tauri-apps/plugin-fs");
+    (readTextFile as ReturnType<typeof vi.fn>).mockImplementation(
+      async (path: string) => {
+        const value = files.get(path);
+        if (!value) throw new Error("missing file: " + path);
+        return value;
+      }
+    );
+    (writeTextFile as ReturnType<typeof vi.fn>).mockImplementation(
+      async (path: string, value: string) => {
+        files.set(path, value);
+      }
+    );
+
+    await act(async () => {
+      render(<App />);
+    });
+    await screen.findByRole("heading", { name: "管理提示词" });
+    return files;
+  }
+
+  async function renderPromptPopoverWithStore(promptData: unknown) {
+    currentWindowLabel = "prompt-popover";
+    window.history.pushState({}, "", "/?mode=popover");
+    const { readTextFile } = await import("@tauri-apps/plugin-fs");
+    (readTextFile as ReturnType<typeof vi.fn>).mockImplementation(
+      async (path: string) => {
+        if (path.includes("prompts")) return JSON.stringify(promptData);
+        if (path.includes("settings")) {
+          return JSON.stringify({
+            version: 1,
+            language: "zh-CN",
+            blacklistedApps: [],
+            overlayPlacement: { buttonOffset: null, buttonPosition: null },
+            floatingButton: { visible: true },
+            promptInsertion: { mode: "paste_and_submit" },
+          });
+        }
+        throw new Error("missing file: " + path);
+      }
+    );
+
+    await act(async () => {
+      render(<App />);
+    });
+  }
+
   it("shows prompt list in popover mode by default", async () => {
     const { readTextFile } = await import("@tauri-apps/plugin-fs");
     (readTextFile as ReturnType<typeof vi.fn>).mockResolvedValueOnce(
@@ -188,7 +283,7 @@ describe("app", () => {
     expect(document.body.classList.contains("popover-transparent-page")).toBe(true);
   });
 
-  it("does not use the transparent prompt-list shell for button controls", async () => {
+  it("uses the transparent page shell for button controls", async () => {
     currentWindowLabel = "prompt-popover";
     window.history.pushState({}, "", "/?mode=button-controls");
 
@@ -198,8 +293,8 @@ describe("app", () => {
 
     expect(document.querySelector(".button-controls")).toBeTruthy();
     expect(document.querySelector(".popover-root")).toBeNull();
-    expect(document.documentElement.classList.contains("popover-transparent-page")).toBe(false);
-    expect(document.body.classList.contains("popover-transparent-page")).toBe(false);
+    expect(document.documentElement.classList.contains("popover-transparent-page")).toBe(true);
+    expect(document.body.classList.contains("popover-transparent-page")).toBe(true);
   });
 
   it("refreshes prompt data when a reused popover is opened", async () => {
@@ -415,7 +510,7 @@ describe("app", () => {
       render(<App />);
     });
 
-    await screen.findByRole("button", { name: "隐藏 Calico" });
+    await screen.findByRole("button", { name: "关闭小猫" });
     expect(inputTargetPollingMock).not.toHaveBeenCalled();
   });
 
@@ -538,6 +633,98 @@ describe("app", () => {
     expect(document.querySelector(".app-window-main")).toBeTruthy();
     expect(document.querySelector(".prompt-manager")).toBeTruthy();
     expect(document.querySelector(".panel-heading-with-actions")).toBeTruthy();
+  });
+
+  it("renders manager categories and filters prompts by active category", async () => {
+    await renderMainPromptManagerWithStore({
+      version: 3,
+      categories: [devCategory, writingCategory],
+      activeCategoryId: "cat-dev",
+      containers: [
+        makeContainer({ id: "dev-1", categoryId: "cat-dev", title: "Code Review" }),
+        makeContainer({ id: "writing-1", categoryId: "cat-writing", title: "Blog Draft" }),
+      ],
+    });
+
+    expect(screen.getByRole("button", { name: /开发代码/ })).toBeTruthy();
+    expect(screen.getByText("Code Review")).toBeTruthy();
+    expect(screen.queryByText("Blog Draft")).toBeNull();
+
+    fireEvent.click(screen.getByRole("button", { name: /写作/ }));
+
+    expect(await screen.findByText("Blog Draft")).toBeTruthy();
+    expect(screen.queryByText("Code Review")).toBeNull();
+  });
+
+  it("creates a category from the manager rail and selects it", async () => {
+    const files = await renderMainPromptManager();
+
+    fireEvent.click(screen.getByRole("button", { name: /\+ 新建/ }));
+    fireEvent.change(screen.getByRole("textbox", { name: /分类名称/ }), {
+      target: { value: "写作" },
+    });
+    fireEvent.keyDown(screen.getByRole("textbox", { name: /分类名称/ }), { key: "Enter" });
+
+    await waitFor(() => {
+      expect(screen.getByRole("button", { name: /写作/ }).getAttribute("aria-current"))
+        .toBe("true");
+    });
+
+    const saved = JSON.parse(files.get("prompts.json") ?? "{}");
+    expect(saved.categories.some((category: { name: string }) => category.name === "写作"))
+      .toBe(true);
+  });
+
+  it("shows a visible error when deleting a non-empty category", async () => {
+    await renderMainPromptManagerWithStore({
+      version: 3,
+      categories: [devCategory],
+      activeCategoryId: "cat-dev",
+      containers: [makeContainer({ id: "dev-1", categoryId: "cat-dev", title: "Code Review" })],
+    });
+
+    fireEvent.click(screen.getByRole("button", { name: /删除分类/ }));
+
+    expect(await screen.findByRole("status")).toBeTruthy();
+    expect(screen.getByRole("status").textContent).toContain("未能删除分类");
+  });
+
+  it("shows the localized default category name without changing stored data", async () => {
+    const files = await renderMainPromptManagerWithStore({
+      version: 3,
+      categories: [{
+        id: "category-default",
+        name: "Default",
+        order: 0,
+        createdAt: "2026-05-26T00:00:00.000Z",
+        updatedAt: "2026-05-26T00:00:00.000Z",
+      }],
+      activeCategoryId: "category-default",
+      containers: [],
+    });
+
+    expect(screen.getByRole("button", { name: /默认/ })).toBeTruthy();
+    expect(files.get("prompts.json")).toContain("\"name\":\"Default\"");
+  });
+
+  it("quick picker switches prompt categories with tabs", async () => {
+    await renderPromptPopoverWithStore({
+      version: 3,
+      categories: [devCategory, writingCategory],
+      activeCategoryId: "cat-dev",
+      containers: [
+        makeContainer({ id: "dev-1", categoryId: "cat-dev", title: "Code Review" }),
+        makeContainer({ id: "writing-1", categoryId: "cat-writing", title: "Blog Draft" }),
+      ],
+    });
+
+    expect(await screen.findByText("Code Review")).toBeTruthy();
+    expect(screen.queryByText("Blog Draft")).toBeNull();
+
+    fireEvent.click(screen.getByRole("tab", { name: "写作" }));
+
+    expect(await screen.findByText("Blog Draft")).toBeTruthy();
+    expect(screen.queryByText("Code Review")).toBeNull();
   });
 
   it("autosends selected prompt into the backend last input target", async () => {
@@ -1235,6 +1422,7 @@ describe("app", () => {
     await renderMainPromptManager([
       {
         id: "delete-1",
+        categoryId: "category-default",
         title: "Delete Me",
         type: "single",
         prompts: [{ id: "delete-1-entry", body: "Body", order: 0 }],
@@ -1259,6 +1447,7 @@ describe("app", () => {
     const files = await renderMainPromptManager([
       {
         id: "first",
+        categoryId: "category-default",
         title: "First",
         type: "single",
         prompts: [{ id: "first-entry", body: "First body", order: 0 }],
@@ -1269,6 +1458,7 @@ describe("app", () => {
       },
       {
         id: "second",
+        categoryId: "category-default",
         title: "Second",
         type: "single",
         prompts: [{ id: "second-entry", body: "Second body", order: 0 }],
@@ -1343,17 +1533,11 @@ describe("app", () => {
     });
 
     expect(
-      await screen.findByRole("button", { name: "隐藏 Calico" })
+      await screen.findByRole("button", { name: "关闭小猫" })
     ).toBeTruthy();
-    expect(
-      screen.getByRole("button", { name: "管理提示词..." })
-    ).toBeTruthy();
-    expect(
-      screen.getByRole("button", { name: "打开辅助功能设置" })
-    ).toBeTruthy();
-    expect(
-      screen.getByRole("button", { name: "退出 Prompt Picker" })
-    ).toBeTruthy();
+    expect(screen.queryByRole("button", { name: "管理提示词..." })).toBeNull();
+    expect(screen.queryByRole("button", { name: "打开辅助功能设置" })).toBeNull();
+    expect(screen.queryByRole("button", { name: "退出 Prompt Picker" })).toBeNull();
     expect(screen.queryByText("导入")).toBeNull();
     expect(screen.queryByText("导出")).toBeNull();
   });
@@ -1378,8 +1562,8 @@ describe("app", () => {
       render(<App />);
     });
 
-    await screen.findByRole("button", { name: "隐藏 Calico" });
-    fireEvent.click(screen.getByRole("button", { name: "隐藏 Calico" }));
+    await screen.findByRole("button", { name: "关闭小猫" });
+    fireEvent.click(screen.getByRole("button", { name: "关闭小猫" }));
 
     await waitFor(() => {
       expect(vi.mocked(invoke)).toHaveBeenCalledWith("hide_prompt_button");
@@ -1389,6 +1573,8 @@ describe("app", () => {
     expect(allCalls).toContain("hide_prompt_button");
     expect(allCalls).toContain("hide_prompt_popover");
     expect(allCalls).not.toContain("open_main_window");
+    expect(allCalls).not.toContain("open_accessibility_settings");
+    expect(allCalls).not.toContain("quit_prompt_picker");
   });
 
   it("does not manually emit prompt-popover-dismissed when hiding Calico from button controls", async () => {
@@ -1413,7 +1599,7 @@ describe("app", () => {
       render(<App />);
     });
 
-    fireEvent.click(await screen.findByRole("button", { name: "隐藏 Calico" }));
+    fireEvent.click(await screen.findByRole("button", { name: "关闭小猫" }));
 
     await waitFor(() => {
       expect(vi.mocked(invoke)).toHaveBeenCalledWith("hide_prompt_popover");
@@ -1421,62 +1607,7 @@ describe("app", () => {
     expect(emitMock).not.toHaveBeenCalledWith("prompt-popover-dismissed");
   });
 
-  it("manage prompts from button controls calls open_main_window", async () => {
-    const { invoke } = await import("@tauri-apps/api/core");
-    vi.mocked(invoke).mockResolvedValue(undefined);
-    currentWindowLabel = "prompt-popover";
-    window.history.pushState({}, "", "/?mode=button-controls");
-    const { readTextFile, writeTextFile } = await import("@tauri-apps/plugin-fs");
-    (readTextFile as ReturnType<typeof vi.fn>).mockImplementation(async (path: string) => {
-      if (path.includes("prompts")) return JSON.stringify({ version: 1, prompts: mockPrompts });
-      if (path.includes("settings")) return JSON.stringify({ version: 1, blacklistedApps: [], overlayPlacement: { buttonOffset: null }, floatingButton: { visible: true } });
-      throw new Error("missing file");
-    });
-    (writeTextFile as ReturnType<typeof vi.fn>).mockImplementation(async (_path: string, _value: string) => {});
-
-    await act(async () => { render(<App />); });
-
-    await screen.findByRole("button", { name: "管理提示词..." });
-    fireEvent.click(screen.getByRole("button", { name: "管理提示词..." }));
-
-    await waitFor(() => {
-      expect(vi.mocked(invoke)).toHaveBeenCalledWith("open_main_window");
-    });
-  });
-
-  it("does not manually emit prompt-popover-dismissed when button controls open the manager without sending", async () => {
-    const { invoke } = await import("@tauri-apps/api/core");
-    currentWindowLabel = "prompt-popover";
-    window.history.pushState({}, "", "/?mode=button-controls");
-    const { readTextFile } = await import("@tauri-apps/plugin-fs");
-    (readTextFile as ReturnType<typeof vi.fn>).mockImplementation(async (path: string) => {
-      if (path.includes("prompts")) return JSON.stringify({ version: 1, prompts: mockPrompts });
-      if (path.includes("settings")) {
-        return JSON.stringify({
-          version: 1,
-          blacklistedApps: [],
-          overlayPlacement: { buttonOffset: null },
-          floatingButton: { visible: true },
-        });
-      }
-      throw new Error("unexpected path: " + path);
-    });
-
-    await act(async () => {
-      render(<App />);
-    });
-
-    fireEvent.click(await screen.findByRole("button", { name: "管理提示词..." }));
-
-    await waitFor(() => {
-      expect(vi.mocked(invoke)).toHaveBeenCalledWith("hide_prompt_popover");
-    });
-    expect(emitMock).not.toHaveBeenCalledWith("prompt-popover-dismissed");
-  });
-
-  it("button controls can open Accessibility settings", async () => {
-    const { invoke } = await import("@tauri-apps/api/core");
-    vi.mocked(invoke).mockResolvedValue(undefined);
+  it("button controls mode only renders the close pet action", async () => {
     currentWindowLabel = "prompt-popover";
     window.history.pushState({}, "", "/?mode=button-controls");
     const { readTextFile } = await import("@tauri-apps/plugin-fs");
@@ -1488,54 +1619,10 @@ describe("app", () => {
 
     await act(async () => { render(<App />); });
 
-    await screen.findByRole("button", { name: "打开辅助功能设置" });
-    fireEvent.click(screen.getByRole("button", { name: "打开辅助功能设置" }));
-
-    await waitFor(() => {
-      expect(vi.mocked(invoke)).toHaveBeenCalledWith("open_accessibility_settings");
-    });
-    expect(vi.mocked(invoke)).toHaveBeenCalledWith("hide_prompt_popover");
-    expect(emitMock).not.toHaveBeenCalledWith("prompt-popover-dismissed");
-  });
-
-  it("button controls can quit Prompt Picker", async () => {
-    const { invoke } = await import("@tauri-apps/api/core");
-    vi.mocked(invoke).mockResolvedValue(undefined);
-    currentWindowLabel = "prompt-popover";
-    window.history.pushState({}, "", "/?mode=button-controls");
-    const { readTextFile } = await import("@tauri-apps/plugin-fs");
-    (readTextFile as ReturnType<typeof vi.fn>).mockImplementation(async (path: string) => {
-      if (path.includes("prompts")) return JSON.stringify({ version: 1, prompts: mockPrompts });
-      if (path.includes("settings")) return JSON.stringify({ version: 1, blacklistedApps: [], overlayPlacement: { buttonOffset: null }, floatingButton: { visible: true } });
-      throw new Error("missing file");
-    });
-
-    await act(async () => { render(<App />); });
-
-    await screen.findByRole("button", { name: "退出 Prompt Picker" });
-    fireEvent.click(screen.getByRole("button", { name: "退出 Prompt Picker" }));
-
-    await waitFor(() => {
-      expect(vi.mocked(invoke)).toHaveBeenCalledWith("quit_prompt_picker");
-    });
-  });
-
-  it("button controls mode does not render manager actions", async () => {
-    currentWindowLabel = "prompt-popover";
-    window.history.pushState({}, "", "/?mode=button-controls");
-    const { readTextFile } = await import("@tauri-apps/plugin-fs");
-    (readTextFile as ReturnType<typeof vi.fn>).mockImplementation(async (path: string) => {
-      if (path.includes("prompts")) return JSON.stringify({ version: 1, prompts: mockPrompts });
-      if (path.includes("settings")) return JSON.stringify({ version: 1, blacklistedApps: [], overlayPlacement: { buttonOffset: null }, floatingButton: { visible: true } });
-      throw new Error("missing file");
-    });
-
-    await act(async () => { render(<App />); });
-
-    expect(screen.queryByRole("button", { name: "隐藏 Calico" })).not.toBeNull();
-    expect(screen.queryByRole("button", { name: "管理提示词..." })).not.toBeNull();
-    expect(screen.queryByRole("button", { name: "打开辅助功能设置" })).not.toBeNull();
-    expect(screen.queryByRole("button", { name: "退出 Prompt Picker" })).not.toBeNull();
+    expect(screen.queryByRole("button", { name: "关闭小猫" })).not.toBeNull();
+    expect(screen.queryByRole("button", { name: "管理提示词..." })).toBeNull();
+    expect(screen.queryByRole("button", { name: "打开辅助功能设置" })).toBeNull();
+    expect(screen.queryByRole("button", { name: "退出 Prompt Picker" })).toBeNull();
     expect(screen.queryByText("设置")).toBeNull();
   });
 });

@@ -24,6 +24,7 @@ describe("prompt model helpers", () => {
   it("creates a preview from a single prompt container", () => {
     const container: PromptContainer = {
       id: "single-1",
+      categoryId: "category-default",
       title: "Single",
       type: "single",
       prompts: [{ id: "entry-1", body: "Use writing-plans skill.", order: 0 }],
@@ -40,6 +41,7 @@ describe("prompt model helpers", () => {
   it("creates a numbered preview from a group container without workflow wording", () => {
     const container: PromptContainer = {
       id: "group-1",
+      categoryId: "category-default",
       title: "Repair flow",
       type: "group",
       prompts: [
@@ -61,6 +63,7 @@ describe("prompt model helpers", () => {
   it("returns one preview line for a single prompt container", () => {
     const container: PromptContainer = {
       id: "single-lines",
+      categoryId: "category-default",
       title: "Single lines",
       type: "single",
       prompts: [{ id: "entry-1", body: "Use brainstorming skill.\nDiscuss first.", order: 0 }],
@@ -78,6 +81,7 @@ describe("prompt model helpers", () => {
   it("returns the first two ordered preview lines for a group prompt container", () => {
     const container: PromptContainer = {
       id: "group-lines",
+      categoryId: "category-default",
       title: "Group lines",
       type: "group",
       prompts: [

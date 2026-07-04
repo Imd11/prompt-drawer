@@ -2,12 +2,13 @@ import { describe, expect, it } from "vitest";
 import { render, screen, fireEvent } from "@testing-library/react";
 import { PromptManager } from "./PromptManager";
 import { getMessages } from "../shared/i18n";
-import type { PromptContainer } from "../shared/promptTypes";
+import type { PromptCategory, PromptContainer } from "../shared/promptTypes";
 
 describe("prompt manager", () => {
   const mockPrompts: PromptContainer[] = [
     {
       id: "1",
+      categoryId: "category-default",
       title: "Code Review",
       type: "single",
       prompts: [{ id: "1-entry", body: "Review this code for bugs.", order: 0 }],
@@ -18,6 +19,7 @@ describe("prompt manager", () => {
     },
     {
       id: "2",
+      categoryId: "category-default",
       title: "Repair Group",
       type: "group",
       prompts: [
@@ -31,22 +33,55 @@ describe("prompt manager", () => {
     }
   ];
 
+  const defaultCategory: PromptCategory = {
+    id: "category-default",
+    name: "Default",
+    order: 0,
+    createdAt: "2026-05-26T00:00:00.000Z",
+    updatedAt: "2026-05-26T00:00:00.000Z",
+  };
+
   function renderManager(overrides: Partial<Parameters<typeof PromptManager>[0]> = {}) {
     const props = {
       prompts: mockPrompts,
+      categories: [defaultCategory],
+      activeCategoryId: defaultCategory.id,
+      categoryCounts: { [defaultCategory.id]: mockPrompts.length },
+      totalPromptCount: mockPrompts.length,
       onCreate: () => {},
       onCreateGroup: () => {},
       onUpdate: () => {},
       onDelete: () => {},
       onReorder: () => {},
+      onSelectCategory: () => {},
+      onCreateCategory: () => {},
+      onRenameCategory: () => {},
+      onDeleteCategory: () => {},
+      getCategoryDisplayName: (category: PromptCategory) =>
+        category.id === "category-default" && category.name === "Default" ? "默认" : category.name,
       onImport: () => {},
       onExport: () => {},
       messages: getMessages("zh-CN"),
       onOpenSettings: () => {},
       ...overrides,
     };
-    render(<PromptManager {...props} />);
-    return props;
+    const result = render(<PromptManager {...props} />);
+    return { props, ...result };
+  }
+
+  function makePrompt(overrides: Partial<PromptContainer>): PromptContainer {
+    return {
+      id: "prompt",
+      categoryId: "category-default",
+      title: "Prompt",
+      type: "single",
+      prompts: [{ id: "entry", body: "Body", order: 0 }],
+      intervalMs: 700,
+      order: 0,
+      createdAt: "2026-05-26T00:00:00.000Z",
+      updatedAt: "2026-05-26T00:00:00.000Z",
+      ...overrides,
+    };
   }
 
   it("renders prompt containers with group distinction", () => {
@@ -99,6 +134,48 @@ describe("prompt manager", () => {
 
     expect(list).toBeTruthy();
     expect(list?.querySelectorAll(".prompt-item").length).toBe(2);
+  });
+
+  it("renders a left category rail without changing create and list panels", () => {
+    renderManager({
+      categories: [
+        { id: "cat-dev", name: "开发代码", order: 0, createdAt: "", updatedAt: "" },
+        { id: "cat-writing", name: "写作", order: 1, createdAt: "", updatedAt: "" },
+      ],
+      activeCategoryId: "cat-dev",
+      categoryCounts: { "cat-dev": 2, "cat-writing": 0 },
+    });
+
+    expect(screen.getByRole("heading", { name: "分类" })).toBeTruthy();
+    expect(screen.getByRole("button", { name: /开发代码.*2/ })).toBeTruthy();
+    expect(screen.getByRole("heading", { name: "新建提示词容器" })).toBeTruthy();
+    expect(screen.getByRole("heading", { name: "提示词列表" })).toBeTruthy();
+  });
+
+  it("clears transient edit and delete state when the active category changes", () => {
+    const categories = [
+      { id: "cat-dev", name: "开发代码", order: 0, createdAt: "", updatedAt: "" },
+      { id: "cat-writing", name: "写作", order: 1, createdAt: "", updatedAt: "" },
+    ];
+    const { rerender, props } = renderManager({
+      categories,
+      activeCategoryId: "cat-dev",
+      categoryCounts: { "cat-dev": 1, "cat-writing": 1 },
+      prompts: [makePrompt({ id: "dev-1", categoryId: "cat-dev", title: "Code Review" })],
+    });
+
+    fireEvent.click(screen.getByRole("button", { name: "编辑" }));
+    expect(screen.getByDisplayValue("Code Review")).toBeTruthy();
+
+    rerender(
+      <PromptManager
+        {...props}
+        activeCategoryId="cat-writing"
+        prompts={[makePrompt({ id: "writing-1", categoryId: "cat-writing", title: "Blog Draft" })]}
+      />
+    );
+
+    expect(screen.queryByDisplayValue("Code Review")).toBeNull();
   });
 
   it("creates a single prompt container", () => {

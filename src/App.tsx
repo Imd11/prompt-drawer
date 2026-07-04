@@ -1,25 +1,22 @@
-import { useState, useEffect, useRef, useCallback } from "react";
+import { useState, useEffect, useRef, useCallback, useMemo } from "react";
 import { emit, listen } from "@tauri-apps/api/event";
 import { getCurrentWindow } from "@tauri-apps/api/window";
 import { save, open } from "@tauri-apps/plugin-dialog";
 import { writeTextFile, readTextFile } from "@tauri-apps/plugin-fs";
-import type { PromptContainer } from "./shared/promptTypes";
+import type { PromptCategory, PromptContainer } from "./shared/promptTypes";
 import { getPromptContainerBodies } from "./shared/promptTypes";
 import type { AppLanguage, PromptInsertionMode, Settings } from "./shared/settingsStore";
 import { createSettingsStore } from "./shared/settingsStore";
 import { getMessages, type Messages } from "./shared/i18n";
-import { createPromptStore } from "./shared/promptStore";
+import { DEFAULT_CATEGORY_ID, createPromptStore } from "./shared/promptStore";
 import { createTauriPromptStorage } from "./storage/tauriPromptStorage";
 import { createTauriSettingsStorage } from "./storage/tauriSettingsStorage";
 import {
   hidePromptButton,
   hidePromptPopover,
-  openAccessibilitySettings,
-  openMainWindow,
   pastePromptToLastTarget,
   pastePromptAndSubmitToLastTarget,
   pastePromptSequenceAndSubmitToLastTarget,
-  quitPromptPicker,
   setMenuLanguage,
 } from "./platform/platformApi";
 import type { AutosendOutcome, AutosendSequenceOutcome } from "./platform/platformApi";
@@ -197,6 +194,9 @@ export function App({
   });
   const [windowLabel, setWindowLabel] = useState(currentWindowLabel);
   const [prompts, setPrompts] = useState<PromptContainer[]>([]);
+  const [categories, setCategories] = useState<PromptCategory[]>([]);
+  const [activeCategoryId, setActiveCategoryId] = useState<string | null>(null);
+  const [categoryActionError, setCategoryActionError] = useState<string | null>(null);
   const [submittingPromptId, setSubmittingPromptId] = useState<string | null>(null);
   const [activeSettings, setActiveSettings] = useState<Settings>(settings);
   const [settingsLoaded, setSettingsLoaded] = useState(false);
@@ -206,16 +206,48 @@ export function App({
   const settingsStoreRef = useRef(createSettingsStore(createTauriSettingsStorage()));
   const promptListRefreshingRef = useRef(false);
   const t = getMessages(activeSettings.language);
-  const reloadPrompts = useCallback(async () => {
-    setPrompts(await storeRef.current.list());
+  const reloadPromptData = useCallback(async () => {
+    const data = await storeRef.current.getData();
+    setPrompts(data.containers);
+    setCategories(data.categories);
+    setActiveCategoryId(data.activeCategoryId);
   }, []);
   const resetPromptHoverPreview = useCallback(() => {
     setHoverResetKey((key) => key + 1);
   }, []);
 
+  const activeCategory = useMemo(() => (
+    categories.find((category) => category.id === activeCategoryId) ?? categories[0] ?? null
+  ), [activeCategoryId, categories]);
+
+  const activePrompts = useMemo(() => (
+    activeCategory
+      ? prompts.filter((prompt) => prompt.categoryId === activeCategory.id)
+      : prompts
+  ), [activeCategory, prompts]);
+
+  const categoryCounts = useMemo(() => {
+    const counts: Record<string, number> = {};
+    categories.forEach((category) => {
+      counts[category.id] = 0;
+    });
+    prompts.forEach((prompt) => {
+      counts[prompt.categoryId] = (counts[prompt.categoryId] ?? 0) + 1;
+    });
+    return counts;
+  }, [categories, prompts]);
+
+  const getCategoryDisplayName = useCallback((category: PromptCategory) => {
+    if (category.id === DEFAULT_CATEGORY_ID && category.name === "Default") {
+      return t.manager.defaultCategoryName;
+    }
+    return category.name;
+  }, [t.manager.defaultCategoryName]);
+
   useEffect(() => {
     const className = "popover-transparent-page";
-    const enabled = windowLabel === "prompt-popover" && mode === "popover";
+    const enabled = windowLabel === "prompt-popover"
+      && (mode === "popover" || mode === "button-controls");
     document.documentElement.classList.toggle(className, enabled);
     document.body.classList.toggle(className, enabled);
     return () => {
@@ -226,8 +258,8 @@ export function App({
 
   useEffect(() => {
     let active = true;
-    storeRef.current.list().then((items) => {
-      if (active) setPrompts(items);
+    reloadPromptData().catch((error) => {
+      console.warn("Failed to load prompt data:", error);
     });
     settingsStoreRef.current.get().then((loadedSettings) => {
       if (!active) return;
@@ -243,7 +275,7 @@ export function App({
     return () => {
       active = false;
     };
-  }, []);
+  }, [reloadPromptData]);
 
   useEffect(() => {
     let active = true;
@@ -298,7 +330,7 @@ export function App({
       resetPromptHoverPreview();
       promptListRefreshingRef.current = true;
       try {
-        await reloadPrompts();
+        await reloadPromptData();
       } finally {
         promptListRefreshingRef.current = false;
       }
@@ -333,7 +365,7 @@ export function App({
       active = false;
       disposers.forEach((dispose) => dispose());
     };
-  }, [reloadPrompts, resetPromptHoverPreview, windowLabel]);
+  }, [reloadPromptData, resetPromptHoverPreview, windowLabel]);
 
   const handleSelect = async (prompt: PromptContainer) => {
     if (submittingPromptId || promptListRefreshingRef.current) return;
@@ -387,6 +419,46 @@ export function App({
 
   const handleBackToPopover = () => setMode("popover");
 
+  const handleSelectCategory = async (categoryId: string) => {
+    setCategoryActionError(null);
+    await storeRef.current.setActiveCategoryId(categoryId);
+    setActiveCategoryId(categoryId);
+  };
+
+  const handleCreateCategory = async (name: string) => {
+    setCategoryActionError(null);
+    try {
+      const category = await storeRef.current.createCategory(name);
+      await storeRef.current.setActiveCategoryId(category.id);
+      await reloadPromptData();
+    } catch (error) {
+      console.warn("Failed to create category:", error);
+      setCategoryActionError(t.manager.categoryCreateFailed);
+    }
+  };
+
+  const handleRenameCategory = async (categoryId: string, name: string) => {
+    setCategoryActionError(null);
+    try {
+      await storeRef.current.renameCategory(categoryId, name);
+      await reloadPromptData();
+    } catch (error) {
+      console.warn("Failed to rename category:", error);
+      setCategoryActionError(t.manager.categoryRenameFailed);
+    }
+  };
+
+  const handleDeleteCategory = async (categoryId: string) => {
+    setCategoryActionError(null);
+    try {
+      await storeRef.current.removeCategory(categoryId);
+      await reloadPromptData();
+    } catch (error) {
+      console.warn("Failed to delete category:", error);
+      setCategoryActionError(t.manager.categoryDeleteFailed);
+    }
+  };
+
   const handleButtonDragEnd = useCallback(
     async (
       position: { x: number; y: number },
@@ -427,22 +499,32 @@ export function App({
         {pollingController}
         <div className="app-window app-window-main">
           <PromptManager
-            prompts={prompts}
+            prompts={activePrompts}
+            categories={categories}
+            activeCategoryId={activeCategory?.id ?? null}
+            categoryCounts={categoryCounts}
+            totalPromptCount={prompts.length}
             messages={t}
+            onSelectCategory={handleSelectCategory}
+            onCreateCategory={handleCreateCategory}
+            onRenameCategory={handleRenameCategory}
+            onDeleteCategory={handleDeleteCategory}
+            getCategoryDisplayName={getCategoryDisplayName}
+            categoryActionError={categoryActionError}
             onOpenSettings={() => {
               setSettingsReturnTarget("manager");
               setMode("settings");
             }}
             onCreate={async (input) => {
               emitCalicoMotion("working-typing", "create-prompt");
-              await storeRef.current.create(input);
-              setPrompts(await storeRef.current.list());
+              await storeRef.current.create({ ...input, categoryId: activeCategory?.id });
+              await reloadPromptData();
               emitCalicoMotion("happy", "create-prompt-success", 3000);
             }}
             onCreateGroup={async (input) => {
               emitCalicoMotion("working-building", "create-group");
-              await storeRef.current.createGroup(input);
-              setPrompts(await storeRef.current.list());
+              await storeRef.current.createGroup({ ...input, categoryId: activeCategory?.id });
+              await reloadPromptData();
               emitCalicoMotion("happy", "create-group-success", 3000);
             }}
             onUpdate={async (id, input) => {
@@ -451,19 +533,19 @@ export function App({
                 "update-prompt"
               );
               await storeRef.current.update(id, input);
-              setPrompts(await storeRef.current.list());
+              await reloadPromptData();
               emitCalicoMotion("happy", "update-prompt-success", 3000);
             }}
             onDelete={async (id) => {
               emitCalicoMotion("working-sweeping", "delete-prompt");
               await storeRef.current.remove(id);
-              setPrompts(await storeRef.current.list());
+              await reloadPromptData();
               emitCalicoMotion("happy", "delete-prompt-success", 2200);
             }}
             onReorder={async (ids) => {
               emitCalicoMotion("working-carrying", "reorder-prompts", 1600);
-              await storeRef.current.reorder(ids);
-              setPrompts(await storeRef.current.list());
+              await storeRef.current.reorder(ids, activeCategory?.id);
+              await reloadPromptData();
             }}
             onImport={async () => {
               try {
@@ -475,7 +557,7 @@ export function App({
                   emitCalicoMotion("working-carrying", "import-prompts");
                   const content = await readTextFile(file as string);
                   await storeRef.current.importJson(content);
-                  setPrompts(await storeRef.current.list());
+                  await reloadPromptData();
                   emitCalicoMotion("happy", "import-prompts-success", 3000);
                 }
               } catch (e) {
@@ -549,16 +631,7 @@ export function App({
         {pollingController}
         <div className="button-controls">
           <button
-            className="button button-primary"
-            onClick={async () => {
-              await openMainWindow();
-              await hidePromptPopover();
-            }}
-          >
-              {t.buttonControls.managePrompts}
-          </button>
-          <button
-            className="button button-secondary"
+            className="button-controls-close"
             onClick={async () => {
               await settingsStoreRef.current.setFloatingButtonVisible(false);
               setActiveSettings(await settingsStoreRef.current.get());
@@ -566,24 +639,7 @@ export function App({
               await hidePromptPopover();
             }}
           >
-            {t.buttonControls.hideCalico}
-          </button>
-          <button
-            className="button button-secondary"
-            onClick={async () => {
-              await openAccessibilitySettings();
-              await hidePromptPopover();
-            }}
-          >
-            {t.buttonControls.openAccessibilitySettings}
-          </button>
-          <button
-            className="button button-danger"
-            onClick={async () => {
-              await quitPromptPicker();
-            }}
-          >
-            {t.buttonControls.quit}
+            {t.buttonControls.closePet}
           </button>
         </div>
       </>
@@ -596,7 +652,11 @@ export function App({
       {pollingController}
       <div className="popover-window">
         <PromptQuickList
-          prompts={prompts}
+          prompts={activePrompts}
+          categories={categories}
+          activeCategoryId={activeCategory?.id ?? null}
+          getCategoryDisplayName={getCategoryDisplayName}
+          onSelectCategory={handleSelectCategory}
           messages={t.quickList}
           groupMeta={t.manager.groupMeta}
           onSelect={handleSelect}

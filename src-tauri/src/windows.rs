@@ -21,7 +21,7 @@ pub const BUTTON_WINDOW_PADDING_X: f64 = (BUTTON_WINDOW_WIDTH - BUTTON_VISUAL_WI
 pub const BUTTON_WINDOW_PADDING_Y: f64 = (BUTTON_WINDOW_HEIGHT - BUTTON_VISUAL_HEIGHT) / 2.0;
 pub const BUTTON_WINDOW_TRANSPARENT: bool = true;
 pub const POPOVER_WIDTH: f64 = 280.0;
-pub const POPOVER_HEIGHT: f64 = 388.0;
+pub const POPOVER_HEIGHT: f64 = 432.0;
 pub const BUTTON_CONTROLS_WIDTH: f64 = 156.0;
 pub const BUTTON_CONTROLS_HEIGHT: f64 = 72.0;
 pub const POPOVER_GAP: f64 = 4.0;
@@ -677,20 +677,20 @@ mod tests {
         };
         let position = clamp_popover_position_in_bounds(
             500.0,
-            400.0,
+            600.0,
             BUTTON_VISUAL_WIDTH,
             BUTTON_VISUAL_HEIGHT,
             Some(bounds),
         );
 
         let expected_x = 500.0 + (BUTTON_VISUAL_WIDTH / 2.0) - (POPOVER_WIDTH / 2.0);
-        let expected_y = 400.0 - POPOVER_HEIGHT - POPOVER_GAP;
+        let expected_y = 600.0 - POPOVER_HEIGHT - POPOVER_GAP;
         assert_eq!(position, (expected_x, expected_y));
     }
 
     #[test]
-    fn prompt_popover_height_supports_taller_prompt_list() {
-        assert_eq!(POPOVER_HEIGHT, 388.0);
+    fn prompt_popover_height_supports_category_tabs_and_prompt_list() {
+        assert_eq!(POPOVER_HEIGHT, 432.0);
     }
 
     #[test]
@@ -725,6 +725,26 @@ mod tests {
         );
 
         assert_eq!(position.1, 20.0 + BUTTON_VISUAL_HEIGHT + POPOVER_GAP);
+    }
+
+    #[test]
+    fn taller_popover_stays_inside_monitor_near_bottom_edge() {
+        let bounds = MonitorBounds {
+            x: 0.0,
+            y: 0.0,
+            width: 1440.0,
+            height: 900.0,
+        };
+        let position = clamp_popover_position_in_bounds(
+            500.0,
+            760.0,
+            BUTTON_VISUAL_WIDTH,
+            BUTTON_VISUAL_HEIGHT,
+            Some(bounds),
+        );
+
+        assert!(position.1 >= 8.0);
+        assert!(position.1 + POPOVER_HEIGHT <= 892.0);
     }
 
     #[test]

@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState, type DragEvent } from "react";
-import type { PromptContainer } from "../shared/promptTypes";
+import type { PromptCategory, PromptContainer } from "../shared/promptTypes";
 import {
   DEFAULT_GROUP_INTERVAL_MS,
   MAX_GROUP_INTERVAL_MS,
@@ -8,6 +8,7 @@ import {
   getPromptContainerPreviewLines,
 } from "../shared/promptTypes";
 import type { Messages } from "../shared/i18n";
+import { CategoryRail } from "./CategoryRail";
 
 type EditorMode = "single" | "group";
 
@@ -21,8 +22,18 @@ type Draft = {
 
 interface PromptManagerProps {
   prompts: PromptContainer[];
+  categories: PromptCategory[];
+  activeCategoryId: string | null;
+  categoryCounts: Record<string, number>;
+  totalPromptCount: number;
   messages: Messages;
   onOpenSettings: () => void;
+  onSelectCategory: (categoryId: string) => void;
+  onCreateCategory: (name: string) => void | Promise<void>;
+  onRenameCategory: (categoryId: string, name: string) => void | Promise<void>;
+  onDeleteCategory: (categoryId: string) => void | Promise<void>;
+  getCategoryDisplayName: (category: PromptCategory) => string;
+  categoryActionError?: string | null;
   onCreate: (input: { title: string; body: string }) => void | Promise<void>;
   onCreateGroup: (input: {
     title: string;
@@ -115,8 +126,18 @@ function PromptKindBadge({ prompt, messages }: { prompt: PromptContainer; messag
 
 export function PromptManager({
   prompts,
+  categories,
+  activeCategoryId,
+  categoryCounts,
+  totalPromptCount,
   messages,
   onOpenSettings,
+  onSelectCategory,
+  onCreateCategory,
+  onRenameCategory,
+  onDeleteCategory,
+  getCategoryDisplayName,
+  categoryActionError = null,
   onCreate,
   onCreateGroup,
   onUpdate,
@@ -150,6 +171,11 @@ export function PromptManager({
       }
     };
   }, []);
+
+  useEffect(() => {
+    setEditingId(null);
+    setDeleteConfirmId(null);
+  }, [activeCategoryId]);
 
   const setDraftPrompt = (index: number, value: string) => {
     const next = [...draft.prompts];
@@ -260,7 +286,7 @@ export function PromptManager({
       <header className="page-header">
         <div>
           <h1>{messages.manager.title}</h1>
-          <p>{messages.manager.count(prompts.length)}</p>
+          <p>{messages.manager.count(totalPromptCount)}</p>
         </div>
         <div className="toolbar">
           <button className="button button-secondary" onClick={onOpenSettings}>
@@ -275,13 +301,35 @@ export function PromptManager({
         </div>
       </header>
 
-      <form
-        className="editor-panel editor-panel-stacked"
-        onSubmit={(event) => {
-          event.preventDefault();
-          runSubmitOnce(() => handleCreate(draftFromCreateDom()));
-        }}
-      >
+      <div className="prompt-manager-body">
+        <CategoryRail
+          categories={categories}
+          activeCategoryId={activeCategoryId}
+          counts={categoryCounts}
+          messages={{
+            title: messages.manager.categoriesTitle,
+            newCategory: messages.manager.newCategory,
+            newCategoryName: messages.manager.newCategoryName,
+            renameCategory: messages.manager.renameCategory,
+            deleteCategory: messages.manager.deleteCategory,
+            saveCategory: messages.manager.saveCategory,
+            cancelCategory: messages.manager.cancelCategory,
+          }}
+          getCategoryDisplayName={getCategoryDisplayName}
+          actionError={categoryActionError}
+          onSelect={onSelectCategory}
+          onCreate={onCreateCategory}
+          onRename={onRenameCategory}
+          onDelete={onDeleteCategory}
+        />
+        <div className="prompt-manager-content">
+          <form
+            className="editor-panel editor-panel-stacked"
+            onSubmit={(event) => {
+              event.preventDefault();
+              runSubmitOnce(() => handleCreate(draftFromCreateDom()));
+            }}
+          >
         <div className="section-heading panel-heading-with-actions">
           <div>
             <h2>{messages.manager.newContainerTitle}</h2>
@@ -357,9 +405,9 @@ export function PromptManager({
             <span>{createToastMessage}</span>
           </div>
         ) : null}
-      </form>
+          </form>
 
-      <section className="list-panel">
+          <section className="list-panel">
         <div className="section-heading panel-heading-with-actions">
           <div>
             <h2>{messages.manager.promptListTitle}</h2>
@@ -367,7 +415,9 @@ export function PromptManager({
         </div>
         <div className="prompt-list">
           {prompts.length === 0 ? (
-            <div className="empty-state-block">{messages.manager.noPrompts}</div>
+            <div className="empty-state-block">
+              {activeCategoryId ? messages.manager.emptyCategory : messages.manager.noPrompts}
+            </div>
           ) : prompts.map((prompt, index) => (
             <div
               key={prompt.id}
@@ -529,7 +579,9 @@ export function PromptManager({
             </div>
           ))}
         </div>
-      </section>
+          </section>
+        </div>
+      </div>
     </div>
   );
 }

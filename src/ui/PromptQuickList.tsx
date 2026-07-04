@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from "react";
-import type { PromptContainer } from "../shared/promptTypes";
+import type { PromptCategory, PromptContainer } from "../shared/promptTypes";
 import {
   getPromptContainerBodies,
   getPromptContainerPreviewLines,
@@ -8,6 +8,10 @@ import type { Messages } from "../shared/i18n";
 
 interface PromptQuickListProps {
   prompts: PromptContainer[];
+  categories?: PromptCategory[];
+  activeCategoryId?: string | null;
+  getCategoryDisplayName?: (category: PromptCategory) => string;
+  onSelectCategory?: (categoryId: string) => void;
   messages: Messages["quickList"];
   groupMeta: Messages["manager"]["groupMeta"];
   onSelect: (prompt: PromptContainer) => void;
@@ -40,6 +44,10 @@ function clamp(value: number, min: number, max: number): number {
 
 export function PromptQuickList({
   prompts,
+  categories,
+  activeCategoryId = null,
+  getCategoryDisplayName,
+  onSelectCategory,
   messages,
   groupMeta,
   onSelect,
@@ -167,6 +175,22 @@ export function PromptQuickList({
 
   return (
     <div className="prompt-quick-shell">
+      {categories && categories.length > 1 ? (
+        <div className="prompt-category-tabs" role="tablist" aria-label={messages.categoriesLabel}>
+          {categories.map((category) => (
+            <button
+              key={category.id}
+              className={`prompt-category-tab ${category.id === activeCategoryId ? "is-active" : ""}`}
+              type="button"
+              role="tab"
+              aria-selected={category.id === activeCategoryId}
+              onClick={() => onSelectCategory?.(category.id)}
+            >
+              {getCategoryDisplayName?.(category) ?? category.name}
+            </button>
+          ))}
+        </div>
+      ) : null}
       <div
         className="prompt-quick-list"
         role="listbox"
@@ -175,8 +199,16 @@ export function PromptQuickList({
       >
         {prompts.length === 0 ? (
           <div className="prompt-quick-empty">
-            <strong>{messages.noPromptsTitle}</strong>
-            <span>{messages.noPromptsDescription}</span>
+            <strong>
+              {categories || activeCategoryId
+                ? messages.noPromptsInCategoryTitle
+                : messages.noPromptsTitle}
+            </strong>
+            <span>
+              {categories || activeCategoryId
+                ? messages.noPromptsInCategoryDescription
+                : messages.noPromptsDescription}
+            </span>
           </div>
         ) : (
           prompts.map((prompt) => (

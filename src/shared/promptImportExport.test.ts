@@ -17,8 +17,10 @@ describe("prompt import export", () => {
     const json = await store.exportJson();
     const data = JSON.parse(json);
 
-    expect(data.version).toBe(2);
+    expect(data.version).toBe(3);
+    expect(Array.isArray(data.categories)).toBe(true);
     expect(Array.isArray(data.containers)).toBe(true);
+    expect(data.activeCategoryId).toBe("category-default");
   });
 
   it("import rejects malformed JSON", async () => {
@@ -67,5 +69,63 @@ describe("prompt import export", () => {
     const list = await store.list();
     expect(list[0].type).toBe("single");
     expect(list[0].prompts[0].body).toBe("legacy body");
+  });
+
+  it("import preserves v3 categories", async () => {
+    const store = createTestStore();
+
+    await store.importJson(JSON.stringify({
+      version: 3,
+      categories: [
+        {
+          id: "cat-dev",
+          name: "开发代码",
+          order: 0,
+          createdAt: "2026-05-26T00:00:00.000Z",
+          updatedAt: "2026-05-26T00:00:00.000Z"
+        }
+      ],
+      activeCategoryId: "cat-dev",
+      containers: [
+        {
+          id: "container-1",
+          categoryId: "cat-dev",
+          title: "Review",
+          type: "single",
+          prompts: [{ id: "entry-1", body: "review", order: 0 }],
+          intervalMs: 700,
+          order: 0,
+          createdAt: "2026-05-26T00:00:00.000Z",
+          updatedAt: "2026-05-26T00:00:00.000Z"
+        }
+      ]
+    }));
+
+    expect((await store.listCategories())[0].name).toBe("开发代码");
+    expect((await store.list())[0].categoryId).toBe("cat-dev");
+  });
+
+  it("importing v2 data creates a default category", async () => {
+    const store = createTestStore();
+
+    await store.importJson(JSON.stringify({
+      version: 2,
+      containers: [
+        {
+          id: "container-1",
+          title: "Legacy V2",
+          type: "single",
+          prompts: [{ id: "entry-1", body: "body", order: 0 }],
+          intervalMs: 700,
+          order: 0,
+          createdAt: "2026-05-26T00:00:00.000Z",
+          updatedAt: "2026-05-26T00:00:00.000Z"
+        }
+      ]
+    }));
+
+    const [category] = await store.listCategories();
+    expect(category.name).toBe("Default");
+    expect((await store.list())[0].categoryId).toBe(category.id);
   });
 });

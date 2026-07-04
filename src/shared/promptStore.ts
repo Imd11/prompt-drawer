@@ -1,4 +1,5 @@
 import type {
+  PromptCategory,
   PromptContainer,
   PromptContainerInput,
   PromptEntry,
@@ -20,15 +21,61 @@ type PromptStoreDataV1 = {
   prompts: PromptItem[];
 };
 
-type PromptStoreDataV2 = {
-  version: 2;
-  containers: PromptContainer[];
+type LegacyPromptContainer = Omit<PromptContainer, "categoryId"> & {
+  categoryId?: string;
 };
 
-type PromptStoreData = PromptStoreDataV1 | PromptStoreDataV2;
+type PromptStoreDataV2 = {
+  version: 2;
+  containers: LegacyPromptContainer[];
+};
+
+type PromptStoreDataV3 = {
+  version: 3;
+  categories: PromptCategory[];
+  containers: PromptContainer[];
+  activeCategoryId: string | null;
+};
+
+type PromptStoreData = PromptStoreDataV1 | PromptStoreDataV2 | PromptStoreDataV3;
+
+type NormalizedPromptStore = {
+  categories: PromptCategory[];
+  containers: PromptContainer[];
+  activeCategoryId: string;
+};
+
+export const DEFAULT_CATEGORY_ID = "category-default";
+const DEFAULT_CATEGORY_NAME = "Default";
 
 function generateId(prefix: string): string {
   return `${prefix}-${Date.now()}-${Math.random().toString(36).slice(2, 9)}`;
+}
+
+function nowIso(): string {
+  return new Date().toISOString();
+}
+
+function defaultCategory(now: string): PromptCategory {
+  return {
+    id: DEFAULT_CATEGORY_ID,
+    name: DEFAULT_CATEGORY_NAME,
+    order: 0,
+    createdAt: now,
+    updatedAt: now,
+  };
+}
+
+function sortCategories(categories: PromptCategory[]): PromptCategory[] {
+  return [...categories].sort((a, b) => a.order - b.order);
+}
+
+function sortContainers(containers: PromptContainer[]): PromptContainer[] {
+  return [...containers].sort((a, b) => a.order - b.order);
+}
+
+function sortEntries(entries: PromptEntry[]): PromptEntry[] {
+  return [...entries].sort((a, b) => a.order - b.order);
 }
 
 function entryFromBody(
@@ -41,14 +88,6 @@ function entryFromBody(
     body: body.trim(),
     order,
   };
-}
-
-function sortContainers(containers: PromptContainer[]): PromptContainer[] {
-  return [...containers].sort((a, b) => a.order - b.order);
-}
-
-function sortEntries(entries: PromptEntry[]): PromptEntry[] {
-  return [...entries].sort((a, b) => a.order - b.order);
 }
 
 function normalizeEntries(
@@ -65,7 +104,8 @@ function normalizeContainer(
   input: PromptContainerInput,
   order: number,
   now: string,
-  existing?: PromptContainer
+  categoryId: string,
+  existing?: PromptContainer | LegacyPromptContainer
 ): PromptContainer {
   const title = normalizePromptTitle(input.title);
   const prompts = normalizeEntries(input.prompts);
@@ -78,6 +118,7 @@ function normalizeContainer(
 
   return {
     id: existing?.id ?? generateId("container"),
+    categoryId,
     title,
     type,
     prompts: usablePrompts.map((prompt, index) => ({ ...prompt, order: index })),
@@ -88,9 +129,43 @@ function normalizeContainer(
   };
 }
 
-function legacyPromptToContainer(prompt: PromptItem): PromptContainer {
+function normalizeCategory(
+  category: Partial<PromptCategory>,
+  order: number,
+  now: string
+): PromptCategory {
+  const name = String(category.name ?? "").trim();
+  if (!name) throw new Error("Invalid category name");
+  return {
+    id: category.id || generateId("category"),
+    name,
+    order,
+    createdAt: category.createdAt || now,
+    updatedAt: category.updatedAt || now,
+  };
+}
+
+function containerToInput(container: PromptContainer | LegacyPromptContainer): PromptContainerInput {
+  return {
+    title: container.title,
+    type: container.type,
+    prompts: sortEntries(container.prompts).map((prompt) => ({
+      id: prompt.id,
+      body: prompt.body,
+      order: prompt.order,
+    })),
+    intervalMs: container.intervalMs,
+    categoryId: container.categoryId,
+  };
+}
+
+function legacyPromptToContainer(
+  prompt: PromptItem,
+  categoryId: string
+): PromptContainer {
   return {
     id: prompt.id,
+    categoryId,
     title: prompt.title,
     type: "single",
     prompts: [entryFromBody(prompt.body, 0, `${prompt.id}-entry`)],
@@ -101,109 +176,319 @@ function legacyPromptToContainer(prompt: PromptItem): PromptContainer {
   };
 }
 
-function containerToInput(container: PromptContainer): PromptContainerInput {
+function normalizeStore(raw: Partial<NormalizedPromptStore>): NormalizedPromptStore {
+  const now = nowIso();
+  const fallback = defaultCategory(now);
+  const categories = sortCategories(
+    (raw.categories && raw.categories.length > 0 ? raw.categories : [fallback])
+      .map((category, index) =>
+        normalizeCategory(category, Number.isFinite(category.order) ? category.order : index, now)
+      )
+  ).map((category, index) => ({ ...category, order: index }));
+
+  const categoryIds = new Set(categories.map((category) => category.id));
+  const fallbackCategoryId = categories[0]?.id ?? DEFAULT_CATEGORY_ID;
+  const containers = sortContainers(
+    (raw.containers ?? []).map((container, index) => {
+      const categoryId = categoryIds.has(container.categoryId)
+        ? container.categoryId
+        : fallbackCategoryId;
+      return normalizeContainer(
+        containerToInput(container),
+        Number.isFinite(container.order) ? container.order : index,
+        container.updatedAt || now,
+        categoryId,
+        {
+          ...container,
+          categoryId,
+          createdAt: container.createdAt || now,
+          updatedAt: container.updatedAt || now,
+        }
+      );
+    })
+  );
+
+  const activeCategoryId =
+    raw.activeCategoryId && categoryIds.has(raw.activeCategoryId)
+      ? raw.activeCategoryId
+      : fallbackCategoryId;
+
   return {
-    title: container.title,
-    type: container.type,
-    prompts: sortEntries(container.prompts).map((prompt) => ({
-      id: prompt.id,
-      body: prompt.body,
-      order: prompt.order,
-    })),
-    intervalMs: container.intervalMs,
+    categories,
+    containers,
+    activeCategoryId,
   };
 }
 
-function parseContainers(data: string | null): PromptContainer[] {
-  if (!data) return [];
+function parseStore(data: string | null): NormalizedPromptStore {
+  const now = nowIso();
+  const fallback = defaultCategory(now);
+  if (!data) {
+    return {
+      categories: [fallback],
+      containers: [],
+      activeCategoryId: fallback.id,
+    };
+  }
+
   try {
     const parsed = JSON.parse(data) as PromptStoreData;
     if (parsed.version === 1 && Array.isArray(parsed.prompts)) {
-      return sortContainers(parsed.prompts.map(legacyPromptToContainer));
+      return normalizeStore({
+        categories: [fallback],
+        containers: parsed.prompts.map((prompt) =>
+          legacyPromptToContainer(prompt, fallback.id)
+        ),
+        activeCategoryId: fallback.id,
+      });
     }
     if (parsed.version === 2 && Array.isArray(parsed.containers)) {
-      return sortContainers(
-        parsed.containers.map((container, index) =>
-          normalizeContainer(
-            containerToInput(container),
-            Number.isFinite(container.order) ? container.order : index,
-            container.updatedAt || new Date().toISOString(),
-            {
-              ...container,
-              createdAt: container.createdAt || new Date().toISOString(),
-              updatedAt: container.updatedAt || new Date().toISOString(),
-            }
-          )
-        )
-      );
+      return normalizeStore({
+        categories: [fallback],
+        containers: parsed.containers.map((container) => ({
+          ...container,
+          categoryId: fallback.id,
+        })),
+        activeCategoryId: fallback.id,
+      });
+    }
+    if (
+      parsed.version === 3 &&
+      Array.isArray(parsed.categories) &&
+      Array.isArray(parsed.containers)
+    ) {
+      return normalizeStore({
+        categories: parsed.categories,
+        containers: parsed.containers,
+        activeCategoryId: parsed.activeCategoryId ?? undefined,
+      });
     }
   } catch {
-    return [];
+    return {
+      categories: [fallback],
+      containers: [],
+      activeCategoryId: fallback.id,
+    };
   }
-  return [];
+
+  return {
+    categories: [fallback],
+    containers: [],
+    activeCategoryId: fallback.id,
+  };
 }
 
-function validateImportedContainers(json: string): PromptContainer[] {
+function validateImportedData(json: string): NormalizedPromptStore {
   const parsed = JSON.parse(json) as PromptStoreData;
+  const now = nowIso();
+  const fallback = defaultCategory(now);
+
   if (parsed.version === 1 && Array.isArray(parsed.prompts)) {
-    const containers = parsed.prompts.map(legacyPromptToContainer);
-    containers.forEach((container) => {
-      normalizeContainer(containerToInput(container), container.order, container.updatedAt, container);
+    const store = normalizeStore({
+      categories: [fallback],
+      containers: parsed.prompts.map((prompt) =>
+        legacyPromptToContainer(prompt, fallback.id)
+      ),
+      activeCategoryId: fallback.id,
     });
-    return sortContainers(containers);
+    store.containers.forEach((container) => {
+      normalizeContainer(
+        containerToInput(container),
+        container.order,
+        container.updatedAt,
+        container.categoryId,
+        container
+      );
+    });
+    return store;
   }
 
   if (parsed.version === 2 && Array.isArray(parsed.containers)) {
-    return sortContainers(
-      parsed.containers.map((container, index) =>
-        normalizeContainer(
-          containerToInput(container),
-          Number.isFinite(container.order) ? container.order : index,
-          container.updatedAt || new Date().toISOString(),
-          {
-            ...container,
-            createdAt: container.createdAt || new Date().toISOString(),
-            updatedAt: container.updatedAt || new Date().toISOString(),
-          }
-        )
-      )
-    );
+    const store = normalizeStore({
+      categories: [fallback],
+      containers: parsed.containers.map((container) => ({
+        ...container,
+        categoryId: fallback.id,
+      })),
+      activeCategoryId: fallback.id,
+    });
+    store.containers.forEach((container) => {
+      normalizeContainer(
+        containerToInput(container),
+        container.order,
+        container.updatedAt,
+        container.categoryId,
+        container
+      );
+    });
+    return store;
+  }
+
+  if (
+    parsed.version === 3 &&
+    Array.isArray(parsed.categories) &&
+    Array.isArray(parsed.containers)
+  ) {
+    return normalizeStore({
+      categories: parsed.categories,
+      containers: parsed.containers,
+      activeCategoryId: parsed.activeCategoryId ?? undefined,
+    });
   }
 
   throw new Error("Invalid format");
 }
 
+function serializeStore(store: NormalizedPromptStore): string {
+  const data: PromptStoreDataV3 = {
+    version: 3,
+    categories: sortCategories(store.categories),
+    containers: sortContainers(store.containers),
+    activeCategoryId: store.activeCategoryId,
+  };
+  return JSON.stringify(data, null, 2);
+}
+
 export function createPromptStore(adapter: StorageAdapter) {
-  async function load(): Promise<PromptContainer[]> {
-    return parseContainers(await adapter.read());
+  async function load(): Promise<NormalizedPromptStore> {
+    return parseStore(await adapter.read());
   }
 
-  async function save(containers: PromptContainer[]): Promise<void> {
-    const data: PromptStoreDataV2 = { version: 2, containers: sortContainers(containers) };
-    await adapter.write(JSON.stringify(data, null, 2));
+  async function save(store: NormalizedPromptStore): Promise<void> {
+    await adapter.write(serializeStore(normalizeStore(store)));
+  }
+
+  async function resolveCategoryId(
+    store: NormalizedPromptStore,
+    categoryId?: string
+  ): Promise<string> {
+    if (categoryId && store.categories.some((category) => category.id === categoryId)) {
+      return categoryId;
+    }
+    if (store.categories.some((category) => category.id === store.activeCategoryId)) {
+      return store.activeCategoryId;
+    }
+    return store.categories[0]?.id ?? DEFAULT_CATEGORY_ID;
   }
 
   return {
-    async list(): Promise<PromptContainer[]> {
+    async getData(): Promise<NormalizedPromptStore> {
       return load();
     },
 
-    async create(input: { title: string; body: string }): Promise<PromptContainer> {
-      const containers = await load();
-      const maxOrder = containers.reduce((max, p) => Math.max(max, p.order), -1);
-      const now = new Date().toISOString();
+    async list(): Promise<PromptContainer[]> {
+      return sortContainers((await load()).containers);
+    },
+
+    async listCategories(): Promise<PromptCategory[]> {
+      return sortCategories((await load()).categories);
+    },
+
+    async getActiveCategoryId(): Promise<string> {
+      return (await load()).activeCategoryId;
+    },
+
+    async setActiveCategoryId(categoryId: string): Promise<void> {
+      const store = await load();
+      if (!store.categories.some((category) => category.id === categoryId)) {
+        throw new Error("Unknown category");
+      }
+      await save({ ...store, activeCategoryId: categoryId });
+    },
+
+    async createCategory(name: string): Promise<PromptCategory> {
+      const trimmedName = name.trim();
+      if (!trimmedName) throw new Error("Invalid category name");
+      const store = await load();
+      const now = nowIso();
+      const maxOrder = store.categories.reduce(
+        (max, category) => Math.max(max, category.order),
+        -1
+      );
+      const category: PromptCategory = {
+        id: generateId("category"),
+        name: trimmedName,
+        order: maxOrder + 1,
+        createdAt: now,
+        updatedAt: now,
+      };
+      await save({
+        ...store,
+        categories: [...store.categories, category],
+        activeCategoryId: category.id,
+      });
+      return category;
+    },
+
+    async renameCategory(id: string, name: string): Promise<PromptCategory | null> {
+      const trimmedName = name.trim();
+      if (!trimmedName) throw new Error("Invalid category name");
+      const store = await load();
+      let updatedCategory: PromptCategory | null = null;
+      const now = nowIso();
+      const categories = store.categories.map((category) => {
+        if (category.id !== id) return category;
+        updatedCategory = {
+          ...category,
+          name: trimmedName,
+          updatedAt: now,
+        };
+        return updatedCategory;
+      });
+      if (!updatedCategory) return null;
+      await save({ ...store, categories });
+      return updatedCategory;
+    },
+
+    async removeCategory(id: string): Promise<void> {
+      const store = await load();
+      if (store.categories.length <= 1) {
+        throw new Error("Cannot remove last category");
+      }
+      if (store.containers.some((container) => container.categoryId === id)) {
+        throw new Error("Cannot remove category with prompts");
+      }
+      const categories = store.categories
+        .filter((category) => category.id !== id)
+        .map((category, index) => ({ ...category, order: index }));
+      if (categories.length === store.categories.length) return;
+      await save({
+        ...store,
+        categories,
+        activeCategoryId:
+          store.activeCategoryId === id
+            ? categories[0]?.id ?? DEFAULT_CATEGORY_ID
+            : store.activeCategoryId,
+      });
+    },
+
+    async create(input: {
+      title: string;
+      body: string;
+      categoryId?: string;
+    }): Promise<PromptContainer> {
+      const store = await load();
+      const categoryId = await resolveCategoryId(store, input.categoryId);
+      const maxOrder = store.containers
+        .filter((container) => container.categoryId === categoryId)
+        .reduce((max, p) => Math.max(max, p.order), -1);
+      const now = nowIso();
       const container = normalizeContainer(
         {
           title: input.title,
           type: "single",
           prompts: [{ body: input.body }],
           intervalMs: DEFAULT_GROUP_INTERVAL_MS,
+          categoryId,
         },
         maxOrder + 1,
-        now
+        now,
+        categoryId
       );
-      containers.push(container);
-      await save(containers);
+      await save({
+        ...store,
+        containers: [...store.containers, container],
+      });
       return container;
     },
 
@@ -211,22 +496,30 @@ export function createPromptStore(adapter: StorageAdapter) {
       title: string;
       prompts: Array<{ body: string }>;
       intervalMs?: number;
+      categoryId?: string;
     }): Promise<PromptContainer> {
-      const containers = await load();
-      const maxOrder = containers.reduce((max, p) => Math.max(max, p.order), -1);
-      const now = new Date().toISOString();
+      const store = await load();
+      const categoryId = await resolveCategoryId(store, input.categoryId);
+      const maxOrder = store.containers
+        .filter((container) => container.categoryId === categoryId)
+        .reduce((max, p) => Math.max(max, p.order), -1);
+      const now = nowIso();
       const container = normalizeContainer(
         {
           title: input.title,
           type: "group",
           prompts: input.prompts,
           intervalMs: input.intervalMs,
+          categoryId,
         },
         maxOrder + 1,
-        now
+        now,
+        categoryId
       );
-      containers.push(container);
-      await save(containers);
+      await save({
+        ...store,
+        containers: [...store.containers, container],
+      });
       return container;
     },
 
@@ -240,11 +533,11 @@ export function createPromptStore(adapter: StorageAdapter) {
         intervalMs?: number;
       }
     ): Promise<PromptContainer | null> {
-      const containers = await load();
-      const idx = containers.findIndex((p) => p.id === id);
+      const store = await load();
+      const idx = store.containers.findIndex((p) => p.id === id);
       if (idx === -1) return null;
-      const existing = containers[idx];
-      const now = new Date().toISOString();
+      const existing = store.containers[idx];
+      const now = nowIso();
       const updated = normalizeContainer(
         {
           title: input.title ?? existing.title,
@@ -255,48 +548,63 @@ export function createPromptStore(adapter: StorageAdapter) {
               : [{ id: existing.prompts[0]?.id, body: input.body, order: 0 }]
           ),
           intervalMs: input.intervalMs ?? existing.intervalMs,
+          categoryId: existing.categoryId,
         },
         existing.order,
         now,
+        existing.categoryId,
         existing
       );
+      const containers = [...store.containers];
       containers[idx] = updated;
-      await save(containers);
+      await save({ ...store, containers });
       return updated;
     },
 
     async remove(id: string): Promise<void> {
-      const containers = await load();
-      await save(containers.filter((p) => p.id !== id));
+      const store = await load();
+      await save({
+        ...store,
+        containers: store.containers.filter((p) => p.id !== id),
+      });
     },
 
-    async reorder(orderedIds: string[]): Promise<void> {
-      const containers = await load();
-      const map = new Map(containers.map((p) => [p.id, p]));
+    async reorder(orderedIds: string[], categoryId?: string): Promise<void> {
+      const store = await load();
+      const targetCategoryId = categoryId ?? store.activeCategoryId;
+      const target = store.containers.filter(
+        (container) => container.categoryId === targetCategoryId
+      );
+      const untouched = store.containers.filter(
+        (container) => container.categoryId !== targetCategoryId
+      );
+      const map = new Map(target.map((p) => [p.id, p]));
       const reordered: PromptContainer[] = [];
       for (const id of orderedIds) {
         const p = map.get(id);
         if (p) reordered.push(p);
       }
-      for (const p of containers) {
+      for (const p of target) {
         if (!orderedIds.includes(p.id)) reordered.push(p);
       }
-      const now = new Date().toISOString();
-      reordered.forEach((p, i) => {
-        p.order = i;
-        p.updatedAt = now;
+      const now = nowIso();
+      const normalizedTarget = reordered.map((p, i) => ({
+        ...p,
+        order: i,
+        updatedAt: now,
+      }));
+      await save({
+        ...store,
+        containers: [...untouched, ...normalizedTarget],
       });
-      await save(reordered);
     },
 
     async exportJson(): Promise<string> {
-      const containers = await load();
-      const data: PromptStoreDataV2 = { version: 2, containers };
-      return JSON.stringify(data, null, 2);
+      return serializeStore(await load());
     },
 
     async importJson(json: string): Promise<void> {
-      await save(validateImportedContainers(json));
-    }
+      await save(validateImportedData(json));
+    },
   };
 }

@@ -11,6 +11,16 @@ function createTestStore() {
   });
 }
 
+function createTestStoreWithState(initial: string | null) {
+  let state = initial;
+  return createPromptStore({
+    read: async () => state,
+    write: async (value) => {
+      state = value;
+    }
+  });
+}
+
 describe("prompt store", () => {
   it("creates and lists prompt containers in manual order", async () => {
     const store = createTestStore();
@@ -25,6 +35,7 @@ describe("prompt store", () => {
     const prompt = await store.create({ title: "Test", body: "body" });
 
     expect(prompt.id).toBeDefined();
+    expect(prompt.categoryId).toBe("category-default");
     expect(typeof prompt.order).toBe("number");
     expect(prompt.title).toBe("Test");
     expect(prompt.type).toBe("single");
@@ -108,8 +119,10 @@ describe("prompt store", () => {
     const json = await store.exportJson();
     const data = JSON.parse(json);
 
-    expect(data.version).toBe(2);
+    expect(data.version).toBe(3);
+    expect(Array.isArray(data.categories)).toBe(true);
     expect(Array.isArray(data.containers)).toBe(true);
+    expect(data.activeCategoryId).toBe("category-default");
   });
 
   it("import replaces containers with valid imported v2 data", async () => {
@@ -158,5 +171,81 @@ describe("prompt store", () => {
     const list = await store.list();
     expect(list[0].type).toBe("single");
     expect(list[0].prompts[0].body).toBe("legacy body");
+  });
+
+  it("migrates v2 containers into a default category", async () => {
+    const store = createTestStoreWithState(JSON.stringify({
+      version: 2,
+      containers: [
+        {
+          id: "container-1",
+          title: "Code Review",
+          type: "single",
+          prompts: [{ id: "entry-1", body: "Review this", order: 0 }],
+          intervalMs: 700,
+          order: 0,
+          createdAt: "2026-05-26T00:00:00.000Z",
+          updatedAt: "2026-05-26T00:00:00.000Z"
+        }
+      ]
+    }));
+
+    const categories = await store.listCategories();
+    const prompts = await store.list();
+
+    expect(categories).toHaveLength(1);
+    expect(categories[0].name).toBe("Default");
+    expect(prompts[0].categoryId).toBe(categories[0].id);
+  });
+
+  it("creates, renames, and removes empty categories", async () => {
+    const store = createTestStore();
+    const created = await store.createCategory("Writing");
+
+    expect((await store.listCategories()).map((category) => category.name)).toContain("Writing");
+
+    await store.renameCategory(created.id, "Drafting");
+    expect((await store.listCategories()).find((category) => category.id === created.id)?.name)
+      .toBe("Drafting");
+
+    await store.removeCategory(created.id);
+    expect((await store.listCategories()).some((category) => category.id === created.id)).toBe(false);
+  });
+
+  it("does not remove the last category", async () => {
+    const store = createTestStore();
+    const [category] = await store.listCategories();
+
+    await expect(store.removeCategory(category.id)).rejects.toThrow("Cannot remove last category");
+  });
+
+  it("does not remove categories that contain prompts", async () => {
+    const store = createTestStore();
+    const [category] = await store.listCategories();
+    await store.createCategory("Other");
+    await store.create({ title: "A", body: "a", categoryId: category.id });
+
+    await expect(store.removeCategory(category.id)).rejects.toThrow("Cannot remove category with prompts");
+  });
+
+  it("reorders prompts only inside the selected category", async () => {
+    const store = createTestStore();
+    const dev = await store.createCategory("开发代码");
+    const writing = await store.createCategory("写作");
+    const devFirst = await store.create({ title: "Dev First", body: "a", categoryId: dev.id });
+    const devSecond = await store.create({ title: "Dev Second", body: "b", categoryId: dev.id });
+    const writingOnly = await store.create({ title: "Writing Only", body: "c", categoryId: writing.id });
+
+    await store.reorder([devSecond.id, devFirst.id], dev.id);
+
+    const devTitles = (await store.list())
+      .filter((prompt) => prompt.categoryId === dev.id)
+      .map((prompt) => prompt.title);
+    const writingTitles = (await store.list())
+      .filter((prompt) => prompt.categoryId === writing.id)
+      .map((prompt) => prompt.title);
+
+    expect(devTitles).toEqual(["Dev Second", "Dev First"]);
+    expect(writingTitles).toEqual([writingOnly.title]);
   });
 });

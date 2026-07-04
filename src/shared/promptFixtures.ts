@@ -4,6 +4,7 @@ import { DEFAULT_GROUP_INTERVAL_MS } from "./promptTypes";
 export const samplePrompts: PromptContainer[] = [
   {
     id: "sample-code-review",
+    categoryId: "category-default",
     title: "Code Review",
     type: "single",
     prompts: [

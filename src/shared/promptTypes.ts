@@ -9,6 +9,14 @@ export type PromptItem = {
 
 export type PromptContainerType = "single" | "group";
 
+export type PromptCategory = {
+  id: string;
+  name: string;
+  order: number;
+  createdAt: string;
+  updatedAt: string;
+};
+
 export type PromptEntry = {
   id: string;
   body: string;
@@ -17,6 +25,7 @@ export type PromptEntry = {
 
 export type PromptContainer = {
   id: string;
+  categoryId: string;
   title: string;
   type: PromptContainerType;
   prompts: PromptEntry[];
@@ -31,6 +40,7 @@ export type PromptContainerInput = {
   type: PromptContainerType;
   prompts: Array<{ id?: string; body: string; order?: number }>;
   intervalMs?: number;
+  categoryId?: string;
 };
 
 export const DEFAULT_GROUP_INTERVAL_MS = 700;
