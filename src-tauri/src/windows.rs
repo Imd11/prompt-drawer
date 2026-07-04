@@ -82,8 +82,16 @@ fn should_reuse_popover(existing_mode: Option<&str>, requested_mode: &str) -> bo
     existing_mode == Some(requested_mode)
 }
 
+fn should_close_prompt_popover_on_toggle(existing_mode: Option<&str>, is_visible: bool) -> bool {
+    existing_mode == Some("popover") && is_visible
+}
+
 fn emit_popover_opened(app: &tauri::AppHandle, mode: &str) {
     let _ = app.emit_to(POPOVER_WINDOW_LABEL, "prompt-popover-opened", mode);
+}
+
+fn emit_popover_dismissed(app: &tauri::AppHandle) {
+    let _ = app.emit("prompt-popover-dismissed", ());
 }
 
 fn paper_flight_points(
@@ -105,6 +113,11 @@ fn paper_flight_points(
 pub struct PromptButtonPosition {
     pub x: f64,
     pub y: f64,
+}
+
+#[derive(serde::Serialize)]
+pub struct PromptPopoverToggleOutcome {
+    pub opened: bool,
 }
 
 #[tauri::command]
@@ -253,6 +266,28 @@ pub fn show_prompt_popover_from_button(
     session_state.begin(session_id);
     let position = button_relative_popover_position(&app, BUTTON_WIDTH, BUTTON_HEIGHT);
     show_popover_mode(position.0, position.1, "popover", &app)
+}
+
+#[tauri::command]
+pub fn toggle_prompt_popover_from_button(
+    session_id: u64,
+    session_state: tauri::State<crate::PromptPickSessionState>,
+    app: tauri::AppHandle,
+) -> Result<PromptPopoverToggleOutcome, String> {
+    if let Some(window) = app.get_webview_window(POPOVER_WINDOW_LABEL) {
+        let visible = window.is_visible().unwrap_or(false);
+        if should_close_prompt_popover_on_toggle(current_popover_mode().as_deref(), visible) {
+            session_state.begin(session_id);
+            window.hide().map_err(|e| e.to_string())?;
+            emit_popover_dismissed(&app);
+            return Ok(PromptPopoverToggleOutcome { opened: false });
+        }
+    }
+
+    session_state.begin(session_id);
+    let position = button_relative_popover_position(&app, BUTTON_WIDTH, BUTTON_HEIGHT);
+    show_popover_mode(position.0, position.1, "popover", &app)?;
+    Ok(PromptPopoverToggleOutcome { opened: true })
 }
 
 #[tauri::command]
@@ -586,6 +621,39 @@ mod tests {
         ));
         assert!(!should_reuse_popover(Some("button-controls"), "popover"));
         assert!(!should_reuse_popover(None, "popover"));
+    }
+
+    #[test]
+    fn prompt_popover_toggle_closes_only_visible_prompt_lists() {
+        assert!(should_close_prompt_popover_on_toggle(Some("popover"), true));
+        assert!(!should_close_prompt_popover_on_toggle(
+            Some("popover"),
+            false
+        ));
+        assert!(!should_close_prompt_popover_on_toggle(
+            Some("button-controls"),
+            true
+        ));
+        assert!(!should_close_prompt_popover_on_toggle(None, true));
+    }
+
+    #[test]
+    fn prompt_popover_toggle_invalidates_session_and_emits_dismissal_when_closing() {
+        let source = include_str!("windows.rs");
+        let start = source
+            .find("pub fn toggle_prompt_popover_from_button")
+            .expect("toggle command should exist");
+        let end = source[start..]
+            .find("pub fn show_prompt_button_controls_from_button")
+            .expect("button controls command should follow toggle command");
+        let command_source = &source[start..start + end];
+
+        assert!(command_source.contains("should_close_prompt_popover_on_toggle"));
+        assert!(command_source.contains("session_state.begin(session_id);"));
+        assert!(command_source.contains("window.hide().map_err"));
+        assert!(command_source.contains("emit_popover_dismissed(&app)"));
+        assert!(command_source.contains("PromptPopoverToggleOutcome { opened: false }"));
+        assert!(command_source.contains("PromptPopoverToggleOutcome { opened: true }"));
     }
 
     #[test]

@@ -485,6 +485,23 @@ button {
   text-align: center;
 }
 
+.settings-field {
+  display: grid;
+  max-width: 360px;
+  gap: 6px;
+}
+
+.settings-field span {
+  color: var(--pp-text);
+  font-size: 12px;
+  font-weight: 650;
+}
+
+.settings-select {
+  min-height: 36px;
+  padding: 0 12px;
+}
+
 .blacklist {
   display: flex;
   flex-direction: column;
@@ -634,10 +651,8 @@ button {
 
 .prompt-hover-preview {
   position: absolute;
-  right: 10px;
-  left: 10px;
   z-index: 20;
-  max-height: 180px;
+  max-height: 220px;
   overflow: auto;
   padding: 12px;
   color: var(--pp-text);
@@ -653,30 +668,14 @@ button {
   transform: none;
 }
 
-.prompt-hover-preview-header {
-  display: flex;
-  flex-wrap: wrap;
-  align-items: center;
-  gap: 6px;
-  padding-bottom: 8px;
-  border-bottom: 1px solid var(--pp-border);
-}
-
-.prompt-hover-preview-header strong {
-  font-size: 13px;
-  line-height: 1.25;
-}
-
-.prompt-hover-preview-header span {
-  color: var(--pp-muted);
-  font-size: 11px;
+.prompt-hover-preview-floating.is-above {
+  transform: translateY(-100%);
 }
 
 .prompt-hover-preview-body {
   display: flex;
   flex-direction: column;
   gap: 8px;
-  padding-top: 9px;
 }
 
 .prompt-hover-preview-body p {

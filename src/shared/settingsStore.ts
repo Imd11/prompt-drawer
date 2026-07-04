@@ -9,9 +9,11 @@ export type OverlayButtonPosition = {
 };
 
 export type PromptInsertionMode = "paste_only" | "paste_and_submit";
+export type AppLanguage = "zh-CN" | "en-US";
 
 export type Settings = {
   version: 1;
+  language: AppLanguage;
   blacklistedApps: Array<{ bundleId: string; name: string }>;
   overlayPlacement: {
     buttonOffset: OverlayButtonOffset | null;
@@ -34,6 +36,7 @@ export function createSettingsStore(adapter: SettingsAdapter) {
   function defaultSettings(): Settings {
     return {
       version: 1,
+      language: "zh-CN",
       blacklistedApps: [],
       overlayPlacement: { buttonOffset: null, buttonPosition: null },
       floatingButton: { visible: true },
@@ -59,6 +62,7 @@ export function createSettingsStore(adapter: SettingsAdapter) {
     }
     return {
       version: 1,
+      language: candidate.language === "en-US" ? "en-US" : "zh-CN",
       blacklistedApps: candidate.blacklistedApps
         .filter((app) => app && typeof app.bundleId === "string" && typeof app.name === "string")
         .map((app) => ({ bundleId: app.bundleId, name: app.name })),
@@ -138,6 +142,12 @@ export function createSettingsStore(adapter: SettingsAdapter) {
     async setPromptInsertionMode(mode: PromptInsertionMode): Promise<void> {
       const settings = await load();
       settings.promptInsertion.mode = mode;
+      await save(settings);
+    },
+
+    async setLanguage(language: AppLanguage): Promise<void> {
+      const settings = await load();
+      settings.language = language;
       await save(settings);
     }
   };

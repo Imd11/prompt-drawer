@@ -1,9 +1,8 @@
 use tauri::{
-    Emitter,
     image::Image,
     menu::{Menu, MenuItem, PredefinedMenuItem},
     tray::TrayIconBuilder,
-    Manager, WindowEvent,
+    Emitter, Manager, WindowEvent,
 };
 use tauri_plugin_clipboard_manager::ClipboardExt;
 
@@ -19,6 +18,7 @@ pub use windows::{
     hide_paper_plane_flight, hide_prompt_button, hide_prompt_popover, move_prompt_button_to,
     prompt_button_position_cmd, show_paper_plane_flight_from_button, show_prompt_button,
     show_prompt_button_controls_from_button, show_prompt_popover, show_prompt_popover_from_button,
+    toggle_prompt_popover_from_button,
 };
 mod macos_panels;
 pub use macos_panels::{activate_main_window, configure_non_activating_panel};
@@ -394,7 +394,8 @@ fn open_main_window(app: tauri::AppHandle) -> Result<(), String> {
         activate_main_window(&window)?;
         window.set_focus().map_err(|e| e.to_string())?;
     }
-    app.emit("open-manager-window", ()).map_err(|e| e.to_string())?;
+    app.emit("open-manager-window", ())
+        .map_err(|e| e.to_string())?;
     Ok(())
 }
 
@@ -405,13 +406,23 @@ fn open_settings_window(app: tauri::AppHandle) -> Result<(), String> {
         activate_main_window(&window)?;
         window.set_focus().map_err(|e| e.to_string())?;
     }
-    app.emit("open-settings-window", ()).map_err(|e| e.to_string())?;
+    app.emit("open-settings-window", ())
+        .map_err(|e| e.to_string())?;
     Ok(())
 }
 
 #[tauri::command]
 fn quit_prompt_picker(app: tauri::AppHandle) {
     app.exit(0);
+}
+
+#[tauri::command]
+fn set_menu_language(app: tauri::AppHandle, language: String) -> Result<(), String> {
+    let menu = build_menu_bar_menu(&app, &language)?;
+    let Some(tray) = app.tray_by_id(TRAY_ID) else {
+        return Err("Prompt Picker tray icon is not available.".to_string());
+    };
+    tray.set_menu(Some(menu)).map_err(|e| e.to_string())
 }
 
 #[derive(Clone, Debug, serde::Serialize)]
@@ -700,6 +711,37 @@ const MENUBAR_TEMPLATE_ICON: &[u8] = include_bytes!("../icons/menubar-template.r
 const MENUBAR_TEMPLATE_ICON_SIZE: u32 = 22;
 
 #[derive(Debug, PartialEq, Eq)]
+struct MenuLabels {
+    open_main: &'static str,
+    open_settings: &'static str,
+    show_button: &'static str,
+    hide_button: &'static str,
+    open_accessibility: &'static str,
+    quit: &'static str,
+}
+
+fn menu_labels_for_language(language: &str) -> MenuLabels {
+    match language {
+        "zh-CN" => MenuLabels {
+            open_main: "管理提示词...",
+            open_settings: "设置...",
+            show_button: "显示 Calico",
+            hide_button: "隐藏 Calico",
+            open_accessibility: "打开辅助功能设置",
+            quit: "退出 Prompt Picker",
+        },
+        _ => MenuLabels {
+            open_main: "Manage Prompts...",
+            open_settings: "Settings...",
+            show_button: "Show Calico",
+            hide_button: "Hide Calico",
+            open_accessibility: "Open Accessibility Settings",
+            quit: "Quit Prompt Picker",
+        },
+    }
+}
+
+#[derive(Debug, PartialEq, Eq)]
 enum TrayMenuAction {
     OpenMainWindow,
     ShowFloatingButton,
@@ -754,7 +796,8 @@ fn default_settings_value() -> serde_json::Value {
         },
         "promptInsertion": {
             "mode": "paste_and_submit"
-        }
+        },
+        "language": "zh-CN"
     })
 }
 
@@ -773,6 +816,13 @@ fn read_settings_value(app: &tauri::AppHandle) -> serde_json::Value {
         return default_settings_value();
     };
     serde_json::from_str(&contents).unwrap_or_else(|_| default_settings_value())
+}
+
+fn settings_language(settings: &serde_json::Value) -> &str {
+    match settings.get("language").and_then(serde_json::Value::as_str) {
+        Some("en-US") => "en-US",
+        _ => "zh-CN",
+    }
 }
 
 fn write_settings_value(
@@ -801,6 +851,70 @@ fn set_saved_floating_button_visible(app: &tauri::AppHandle, visible: bool) -> R
     write_settings_value(app, &settings)
 }
 
+fn build_menu_bar_menu(
+    app_handle: &tauri::AppHandle,
+    language: &str,
+) -> Result<Menu<tauri::Wry>, String> {
+    let labels = menu_labels_for_language(language);
+    let open_main = MenuItem::with_id(
+        app_handle,
+        TRAY_OPEN_MAIN_ID,
+        labels.open_main,
+        true,
+        None::<&str>,
+    )
+    .map_err(|e| e.to_string())?;
+    let open_settings = MenuItem::with_id(
+        app_handle,
+        TRAY_OPEN_SETTINGS_ID,
+        labels.open_settings,
+        true,
+        None::<&str>,
+    )
+    .map_err(|e| e.to_string())?;
+    let show_button = MenuItem::with_id(
+        app_handle,
+        TRAY_SHOW_BUTTON_ID,
+        labels.show_button,
+        true,
+        None::<&str>,
+    )
+    .map_err(|e| e.to_string())?;
+    let hide_button = MenuItem::with_id(
+        app_handle,
+        TRAY_HIDE_BUTTON_ID,
+        labels.hide_button,
+        true,
+        None::<&str>,
+    )
+    .map_err(|e| e.to_string())?;
+    let open_accessibility = MenuItem::with_id(
+        app_handle,
+        TRAY_OPEN_ACCESSIBILITY_ID,
+        labels.open_accessibility,
+        true,
+        None::<&str>,
+    )
+    .map_err(|e| e.to_string())?;
+    let separator = PredefinedMenuItem::separator(app_handle).map_err(|e| e.to_string())?;
+    let quit = MenuItem::with_id(app_handle, TRAY_QUIT_ID, labels.quit, true, None::<&str>)
+        .map_err(|e| e.to_string())?;
+
+    Menu::with_items(
+        app_handle,
+        &[
+            &open_main,
+            &open_settings,
+            &show_button,
+            &hide_button,
+            &open_accessibility,
+            &separator,
+            &quit,
+        ],
+    )
+    .map_err(|e| e.to_string())
+}
+
 fn startup_prompt_button_position(app: &tauri::AppHandle) -> (f64, f64) {
     let fallback = (960.0, 700.0);
     let Ok(app_data_dir) = app.path().app_data_dir() else {
@@ -814,68 +928,10 @@ fn startup_prompt_button_position(app: &tauri::AppHandle) -> (f64, f64) {
 }
 
 fn setup_menu_bar_app(app_handle: &tauri::AppHandle) -> Result<(), String> {
-    let open_main = MenuItem::with_id(
+    let menu = build_menu_bar_menu(
         app_handle,
-        TRAY_OPEN_MAIN_ID,
-        "Manage Prompts...",
-        true,
-        None::<&str>,
-    )
-    .map_err(|e| e.to_string())?;
-    let open_settings = MenuItem::with_id(
-        app_handle,
-        TRAY_OPEN_SETTINGS_ID,
-        "Settings...",
-        true,
-        None::<&str>,
-    )
-    .map_err(|e| e.to_string())?;
-    let show_button = MenuItem::with_id(
-        app_handle,
-        TRAY_SHOW_BUTTON_ID,
-        "Show Calico",
-        true,
-        None::<&str>,
-    )
-    .map_err(|e| e.to_string())?;
-    let hide_button = MenuItem::with_id(
-        app_handle,
-        TRAY_HIDE_BUTTON_ID,
-        "Hide Calico",
-        true,
-        None::<&str>,
-    )
-    .map_err(|e| e.to_string())?;
-    let open_accessibility = MenuItem::with_id(
-        app_handle,
-        TRAY_OPEN_ACCESSIBILITY_ID,
-        "Open Accessibility Settings",
-        true,
-        None::<&str>,
-    )
-    .map_err(|e| e.to_string())?;
-    let separator = PredefinedMenuItem::separator(app_handle).map_err(|e| e.to_string())?;
-    let quit = MenuItem::with_id(
-        app_handle,
-        TRAY_QUIT_ID,
-        "Quit Prompt Picker",
-        true,
-        None::<&str>,
-    )
-    .map_err(|e| e.to_string())?;
-    let menu = Menu::with_items(
-        app_handle,
-        &[
-            &open_main,
-            &open_settings,
-            &show_button,
-            &hide_button,
-            &open_accessibility,
-            &separator,
-            &quit,
-        ],
-    )
-    .map_err(|e| e.to_string())?;
+        settings_language(&read_settings_value(app_handle)),
+    )?;
 
     let tray_builder = TrayIconBuilder::with_id(TRAY_ID)
         .menu(&menu)
@@ -940,6 +996,7 @@ pub fn run() {
             show_prompt_popover,
             hide_prompt_popover,
             show_prompt_popover_from_button,
+            toggle_prompt_popover_from_button,
             show_prompt_button_controls_from_button,
             show_paper_plane_flight_from_button,
             hide_paper_plane_flight,
@@ -947,6 +1004,7 @@ pub fn run() {
             move_prompt_button_to,
             open_main_window,
             open_settings_window,
+            set_menu_language,
             quit_prompt_picker
         ])
         .setup(|app| {
@@ -1018,6 +1076,17 @@ mod last_input_target_tests {
         }"#;
 
         assert_eq!(parse_saved_button_position(settings), None);
+    }
+
+    #[test]
+    fn resolves_menu_labels_by_language() {
+        assert_eq!(menu_labels_for_language("zh-CN").open_main, "管理提示词...");
+        assert_eq!(menu_labels_for_language("zh-CN").open_settings, "设置...");
+        assert_eq!(
+            menu_labels_for_language("en-US").open_main,
+            "Manage Prompts..."
+        );
+        assert_eq!(menu_labels_for_language("bad").quit, "Quit Prompt Picker");
     }
 
     #[test]

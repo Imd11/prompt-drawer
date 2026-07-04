@@ -1,79 +1,154 @@
-import { useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import type { PromptContainer } from "../shared/promptTypes";
 import {
   getPromptContainerBodies,
-  getPromptContainerMeta,
   getPromptContainerPreviewLines,
 } from "../shared/promptTypes";
+import type { Messages } from "../shared/i18n";
 
 interface PromptQuickListProps {
   prompts: PromptContainer[];
+  messages: Messages["quickList"];
+  groupMeta: Messages["manager"]["groupMeta"];
   onSelect: (prompt: PromptContainer) => void;
   submittingPromptId?: string | null;
 }
 
 type HoverPreviewState = {
   promptId: string;
+  left: number;
   top: number;
+  width: number;
   placement: "above" | "below";
 };
 
-const HOVER_PREVIEW_MAX_HEIGHT = 180;
+type HoverPreviewAnchor = {
+  prompt: PromptContainer;
+  target: HTMLElement;
+};
+
 const HOVER_PREVIEW_MIN_USEFUL_SPACE = 120;
 const HOVER_PREVIEW_GAP = 8;
 const HOVER_PREVIEW_MARGIN = 10;
-
+const HOVER_PREVIEW_DELAY_MS = 1500;
 function clamp(value: number, min: number, max: number): number {
+  if (max < min) return min;
   return Math.min(Math.max(value, min), max);
 }
 
 export function PromptQuickList({
   prompts,
+  messages,
+  groupMeta,
   onSelect,
   submittingPromptId = null,
 }: PromptQuickListProps) {
   const [hoverPreview, setHoverPreview] = useState<HoverPreviewState | null>(null);
+  const hoverPreviewTimerRef = useRef<number | null>(null);
+  const hoverPreviewAnchorRef = useRef<HoverPreviewAnchor | null>(null);
   const hoveredPrompt = prompts.find((prompt) => prompt.id === hoverPreview?.promptId) ?? null;
 
-  function showHoverPreview(prompt: PromptContainer, target: HTMLElement) {
+  useEffect(() => {
+    return () => {
+      clearHoverPreviewTimer();
+    };
+  }, []);
+
+  function clearHoverPreviewTimer() {
+    if (hoverPreviewTimerRef.current !== null) {
+      window.clearTimeout(hoverPreviewTimerRef.current);
+      hoverPreviewTimerRef.current = null;
+    }
+  }
+
+  function createHoverPreviewState(
+    prompt: PromptContainer,
+    target: HTMLElement
+  ): HoverPreviewState {
     const shell = target.closest(".prompt-quick-shell") as HTMLElement | null;
-    const targetRect = target.getBoundingClientRect();
     const shellRect = shell?.getBoundingClientRect();
+    const targetRect = target.getBoundingClientRect();
+    const shellWidth = Math.max(
+      shellRect?.width ?? 0,
+      shell?.clientWidth ?? 0,
+      targetRect.width + (HOVER_PREVIEW_MARGIN * 2)
+    );
     const shellHeight = Math.max(
       shellRect?.height ?? 0,
       shell?.clientHeight ?? 0,
       320
     );
+    const localLeft = shellRect ? targetRect.left - shellRect.left : target.offsetLeft;
     const localTop = shellRect ? targetRect.top - shellRect.top : target.offsetTop;
+    const width = Math.min(
+      targetRect.width,
+      shellWidth - (HOVER_PREVIEW_MARGIN * 2)
+    );
+    const maxLeft = Math.max(
+      HOVER_PREVIEW_MARGIN,
+      shellWidth - width - HOVER_PREVIEW_MARGIN
+    );
     const targetBottom = localTop + targetRect.height;
     const availableBelow = shellHeight - targetBottom - HOVER_PREVIEW_GAP - HOVER_PREVIEW_MARGIN;
     const availableAbove = localTop - HOVER_PREVIEW_GAP - HOVER_PREVIEW_MARGIN;
     const placement =
-      availableBelow >= HOVER_PREVIEW_MIN_USEFUL_SPACE || availableBelow >= availableAbove
-        ? "below"
-        : "above";
-    const idealTop = placement === "below"
-      ? targetBottom + HOVER_PREVIEW_GAP
-      : localTop - HOVER_PREVIEW_GAP - HOVER_PREVIEW_MAX_HEIGHT;
-    const maxTop = Math.max(
-      HOVER_PREVIEW_MARGIN,
-      shellHeight - HOVER_PREVIEW_MAX_HEIGHT - HOVER_PREVIEW_MARGIN
-    );
+      availableAbove >= HOVER_PREVIEW_MIN_USEFUL_SPACE || availableAbove >= availableBelow
+        ? "above"
+        : "below";
+    const top = placement === "above"
+      ? Math.max(HOVER_PREVIEW_MARGIN, localTop - HOVER_PREVIEW_GAP)
+      : Math.min(
+        targetBottom + HOVER_PREVIEW_GAP,
+        Math.max(HOVER_PREVIEW_MARGIN, shellHeight - HOVER_PREVIEW_MARGIN)
+      );
 
-    setHoverPreview({
+    return {
       promptId: prompt.id,
-      top: clamp(idealTop, HOVER_PREVIEW_MARGIN, maxTop),
+      left: clamp(localLeft, HOVER_PREVIEW_MARGIN, maxLeft),
+      top,
+      width,
       placement,
-    });
+    };
+  }
+
+  function scheduleHoverPreview(
+    prompt: PromptContainer,
+    target: HTMLElement
+  ) {
+    clearHoverPreviewTimer();
+    hoverPreviewAnchorRef.current = {
+      prompt,
+      target,
+    };
+    hoverPreviewTimerRef.current = window.setTimeout(() => {
+      hoverPreviewTimerRef.current = null;
+      const anchor = hoverPreviewAnchorRef.current;
+      if (!anchor || !document.contains(anchor.target)) return;
+      setHoverPreview(createHoverPreviewState(
+        anchor.prompt,
+        anchor.target
+      ));
+    }, HOVER_PREVIEW_DELAY_MS);
+  }
+
+  function hideHoverPreview() {
+    clearHoverPreviewTimer();
+    hoverPreviewAnchorRef.current = null;
+    setHoverPreview(null);
   }
 
   return (
     <div className="prompt-quick-shell">
-      <div className="prompt-quick-list" role="listbox" aria-label="Prompts">
+      <div
+        className="prompt-quick-list"
+        role="listbox"
+        aria-label={messages.ariaLabel}
+        onScroll={hideHoverPreview}
+      >
         {prompts.length === 0 ? (
           <div className="prompt-quick-empty">
-            <strong>No prompts yet</strong>
-            <span>Open Prompt Picker to create your first prompt.</span>
+            <strong>{messages.noPromptsTitle}</strong>
+            <span>{messages.noPromptsDescription}</span>
           </div>
         ) : (
           prompts.map((prompt) => (
@@ -86,16 +161,18 @@ export function PromptQuickList({
               role="option"
               aria-selected="false"
               disabled={submittingPromptId === prompt.id}
-              onMouseEnter={(event) => showHoverPreview(prompt, event.currentTarget)}
-              onMouseLeave={() => setHoverPreview(null)}
-              onFocus={(event) => showHoverPreview(prompt, event.currentTarget)}
-              onBlur={() => setHoverPreview(null)}
+              onMouseEnter={(event) => scheduleHoverPreview(prompt, event.currentTarget)}
+              onMouseLeave={hideHoverPreview}
+              onFocus={(event) => scheduleHoverPreview(prompt, event.currentTarget)}
+              onBlur={hideHoverPreview}
               onClick={() => onSelect(prompt)}
             >
               <span className="prompt-quick-title-row">
                 <span className="prompt-quick-title">{prompt.title}</span>
                 {prompt.type === "group" ? (
-                  <span className="prompt-quick-meta">{getPromptContainerMeta(prompt)}</span>
+                  <span className="prompt-quick-meta">
+                    {groupMeta(getPromptContainerBodies(prompt).length, prompt.intervalMs)}
+                  </span>
                 ) : null}
               </span>
               <span className="prompt-quick-preview-lines">
@@ -112,7 +189,9 @@ export function PromptQuickList({
       {hoveredPrompt && hoverPreview ? (
         <PromptHoverPreview
           prompt={hoveredPrompt}
+          left={hoverPreview.left}
           top={hoverPreview.top}
+          width={hoverPreview.width}
           placement={hoverPreview.placement}
         />
       ) : null}
@@ -122,11 +201,15 @@ export function PromptQuickList({
 
 function PromptHoverPreview({
   prompt,
+  left,
   top,
+  width,
   placement,
 }: {
   prompt: PromptContainer;
+  left: number;
   top: number;
+  width: number;
   placement: "above" | "below";
 }) {
   const bodies = getPromptContainerBodies(prompt);
@@ -137,12 +220,8 @@ function PromptHoverPreview({
         placement === "above" ? "is-above" : "is-below"
       }`}
       role="tooltip"
-      style={{ top }}
+      style={{ left, top, width }}
     >
-      <div className="prompt-hover-preview-header">
-        <strong>{prompt.title}</strong>
-        {prompt.type === "group" ? <span>{getPromptContainerMeta(prompt)}</span> : null}
-      </div>
       <div className="prompt-hover-preview-body">
         {prompt.type === "group" ? (
           bodies.map((body, index) => (

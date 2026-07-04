@@ -5,8 +5,9 @@ import { save, open } from "@tauri-apps/plugin-dialog";
 import { writeTextFile, readTextFile } from "@tauri-apps/plugin-fs";
 import type { PromptContainer } from "./shared/promptTypes";
 import { getPromptContainerBodies } from "./shared/promptTypes";
-import type { PromptInsertionMode, Settings } from "./shared/settingsStore";
+import type { AppLanguage, PromptInsertionMode, Settings } from "./shared/settingsStore";
 import { createSettingsStore } from "./shared/settingsStore";
+import { getMessages, type Messages } from "./shared/i18n";
 import { createPromptStore } from "./shared/promptStore";
 import { createTauriPromptStorage } from "./storage/tauriPromptStorage";
 import { createTauriSettingsStorage } from "./storage/tauriSettingsStorage";
@@ -19,6 +20,7 @@ import {
   pastePromptAndSubmitToLastTarget,
   pastePromptSequenceAndSubmitToLastTarget,
   quitPromptPicker,
+  setMenuLanguage,
 } from "./platform/platformApi";
 import type { AutosendOutcome, AutosendSequenceOutcome } from "./platform/platformApi";
 import { useInputTargetPolling } from "./overlay/useInputTargetPolling";
@@ -39,6 +41,7 @@ const DEFAULT_SETTINGS: Settings = {
   overlayPlacement: { buttonOffset: null, buttonPosition: null },
   floatingButton: { visible: true },
   promptInsertion: { mode: "paste_and_submit" },
+  language: "zh-CN",
 };
 
 const waitForWindowHide = () => new Promise((resolve) => window.setTimeout(resolve, 260));
@@ -59,14 +62,6 @@ async function emitAutosendStatus(
   }
 }
 
-async function emitPromptThrowSend(kind: "single" | "group") {
-  try {
-    await emit("prompt-throw-send", { kind });
-  } catch (error) {
-    console.warn("Failed to emit prompt throw animation:", error);
-  }
-}
-
 async function emitPromptPopoverDismissed() {
   try {
     await emit("prompt-popover-dismissed");
@@ -80,58 +75,58 @@ function pasteOnlyBody(prompt: PromptContainer, bodies: string[]): string {
   return bodies[0] ?? "";
 }
 
-function statusForAutosendOutcome(outcome: AutosendOutcome): {
+function statusForAutosendOutcome(outcome: AutosendOutcome, t: Messages): {
   kind: AutosendStatusKind;
   message: string;
   action?: AutosendStatusAction;
 } {
   if (outcome.sent) {
-    return { kind: "sent", message: "已粘贴并回车" };
+    return { kind: "sent", message: t.autosend.sent };
   }
 
   switch (outcome.reason) {
     case "missing_accessibility_permission":
       return {
         kind: "failed",
-        message: "点击授权",
+        message: t.autosend.clickToAuthorize,
         action: "request_accessibility_permission",
       };
     case "no_safe_target":
-      return { kind: "failed", message: "已复制，未发送" };
+      return { kind: "failed", message: t.autosend.copiedNotSent };
     case "copy_failed":
-      return { kind: "failed", message: "未能复制" };
+      return { kind: "failed", message: t.autosend.copyFailed };
     case "paste_event_failed":
-      return { kind: "failed", message: "未能粘贴" };
+      return { kind: "failed", message: t.autosend.pasteFailed };
     case "return_event_failed":
-      return { kind: "failed", message: "已粘贴，未发送" };
+      return { kind: "failed", message: t.autosend.pastedNotSent };
     case "target_focus_failed":
-      return { kind: "failed", message: "请先切到输入页" };
+      return { kind: "failed", message: t.autosend.targetFocusFailed };
     default:
       return {
         kind: "failed",
-        message: outcome.copied ? "未能自动发送" : "未能复制",
+        message: outcome.copied ? t.autosend.automaticFailed : t.autosend.copyFailed,
       };
   }
 }
 
-function statusForAutosendSequenceOutcome(outcome: AutosendSequenceOutcome): {
+function statusForAutosendSequenceOutcome(outcome: AutosendSequenceOutcome, t: Messages): {
   kind: AutosendStatusKind;
   message: string;
   action?: AutosendStatusAction;
 } {
   if (outcome.sent) {
-    return { kind: "sent", message: "已粘贴并回车" };
+    return { kind: "sent", message: t.autosend.sent };
   }
   if (outcome.reason === "missing_accessibility_permission") {
     return {
       kind: "failed",
-      message: "点击授权",
+      message: t.autosend.clickToAuthorize,
       action: "request_accessibility_permission",
     };
   }
   return {
     kind: "failed",
-    message: `第 ${outcome.failed_index ?? 1} 条失败`,
+    message: t.autosend.sequenceFailed(outcome.failed_index ?? 1),
   };
 }
 
@@ -189,6 +184,7 @@ export function App({
   const storeRef = useRef(createPromptStore(createTauriPromptStorage()));
   const settingsStoreRef = useRef(createSettingsStore(createTauriSettingsStorage()));
   const promptListRefreshingRef = useRef(false);
+  const t = getMessages(activeSettings.language);
   const reloadPrompts = useCallback(async () => {
     setPrompts(await storeRef.current.list());
   }, []);
@@ -202,6 +198,9 @@ export function App({
       if (!active) return;
       setActiveSettings(loadedSettings);
       setSettingsLoaded(true);
+      setMenuLanguage(loadedSettings.language).catch((error) => {
+        console.warn("Failed to update menu language:", error);
+      });
     });
     const label = currentWindowLabel();
     setWindowLabel(label);
@@ -289,28 +288,29 @@ export function App({
     try {
       await hidePromptPopover();
       await waitForWindowHide();
-      await emitPromptThrowSend(prompt.type === "group" ? "group" : "single");
       const bodies = getPromptContainerBodies(prompt);
       if (bodies.length === 0) {
-        await emitAutosendStatus("failed", "未能发送，请重试");
+        await emitAutosendStatus("failed", t.autosend.genericFailed);
         return;
       }
       if (activeSettings.promptInsertion.mode === "paste_only") {
         await pastePromptToLastTarget(pasteOnlyBody(prompt, bodies));
-        await emitAutosendStatus("sent", "已粘贴");
+        await emitAutosendStatus("sent", t.autosend.insertedIntoInput);
         return;
       }
       const status = prompt.type === "group"
         ? statusForAutosendSequenceOutcome(
-          await pastePromptSequenceAndSubmitToLastTarget(bodies, prompt.intervalMs)
+          await pastePromptSequenceAndSubmitToLastTarget(bodies, prompt.intervalMs),
+          t
         )
         : statusForAutosendOutcome(
-          await pastePromptAndSubmitToLastTarget(bodies[0])
+          await pastePromptAndSubmitToLastTarget(bodies[0]),
+          t
         );
       await emitAutosendStatus(status.kind, status.message, status.action);
     } catch (e) {
       console.warn("Prompt autosend failed without blocking the picker:", e);
-      await emitAutosendStatus("failed", "未能发送，请重试");
+      await emitAutosendStatus("failed", t.autosend.genericFailed);
     } finally {
       setSubmittingPromptId(null);
     }
@@ -339,6 +339,15 @@ export function App({
     setActiveSettings(await settingsStoreRef.current.get());
   };
 
+  const updateLanguage = async (language: AppLanguage) => {
+    await settingsStoreRef.current.setLanguage(language);
+    const nextSettings = await settingsStoreRef.current.get();
+    setActiveSettings(nextSettings);
+    setMenuLanguage(language).catch((error) => {
+      console.warn("Failed to update menu language:", error);
+    });
+  };
+
   const pollingController =
     windowLabel === "main" && settingsLoaded ? (
       <InputTargetPollingController
@@ -355,6 +364,8 @@ export function App({
         <div className="app-window app-window-main">
           <PromptManager
             prompts={prompts}
+            messages={t}
+            onOpenSettings={() => setMode("settings")}
             onCreate={async (input) => {
               await storeRef.current.create(input);
               setPrompts(await storeRef.current.list());
@@ -388,7 +399,7 @@ export function App({
                 }
               } catch (e) {
                 console.error("Import failed:", e);
-                alert("Failed to import prompts. Please check the file format.");
+                alert(t.manager.importFailed);
               }
             }}
             onExport={async () => {
@@ -403,14 +414,14 @@ export function App({
                 }
               } catch (e) {
                 console.error("Export failed:", e);
-                alert("Failed to export prompts. Please try again.");
+                alert(t.manager.exportFailed);
               }
             }}
           />
           {windowLabel !== "main" ? (
             <div className="page-footer">
               <button className="button button-secondary" onClick={handleBackToPopover}>
-                Back
+                {t.common.back}
               </button>
             </div>
           ) : null}
@@ -428,12 +439,13 @@ export function App({
           <SettingsPanel
             settings={activeSettings}
             onRemove={removeBlacklistedApp}
+            onLanguageChange={updateLanguage}
             onPromptInsertionModeChange={updatePromptInsertionMode}
           />
           {windowLabel !== "main" ? (
             <div className="page-footer">
               <button className="button button-secondary" onClick={handleBackToPopover}>
-                Back
+                {t.common.back}
               </button>
             </div>
           ) : null}
@@ -456,7 +468,7 @@ export function App({
               await emitPromptPopoverDismissed();
             }}
           >
-            Manage Prompts...
+              {t.buttonControls.managePrompts}
           </button>
           <button
             className="button button-secondary"
@@ -468,7 +480,7 @@ export function App({
               await emitPromptPopoverDismissed();
             }}
           >
-            Hide Calico
+            {t.buttonControls.hideCalico}
           </button>
           <button
             className="button button-secondary"
@@ -478,7 +490,7 @@ export function App({
               await emitPromptPopoverDismissed();
             }}
           >
-            Open Accessibility Settings
+            {t.buttonControls.openAccessibilitySettings}
           </button>
           <button
             className="button button-danger"
@@ -486,7 +498,7 @@ export function App({
               await quitPromptPicker();
             }}
           >
-            Quit Prompt Picker
+            {t.buttonControls.quit}
           </button>
         </div>
       </>
@@ -500,6 +512,8 @@ export function App({
       <div className="popover-window">
         <PromptQuickList
           prompts={prompts}
+          messages={t.quickList}
+          groupMeta={t.manager.groupMeta}
           onSelect={handleSelect}
           submittingPromptId={submittingPromptId}
         />

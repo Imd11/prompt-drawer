@@ -1,10 +1,11 @@
-import { useState, type DragEvent } from "react";
+import { useEffect, useRef, useState, type DragEvent } from "react";
 import type { PromptContainer } from "../shared/promptTypes";
 import {
   DEFAULT_GROUP_INTERVAL_MS,
-  getPromptContainerMeta,
+  getPromptContainerBodies,
   getPromptContainerPreviewLines,
 } from "../shared/promptTypes";
+import type { Messages } from "../shared/i18n";
 
 type EditorMode = "single" | "group";
 
@@ -18,6 +19,8 @@ type Draft = {
 
 interface PromptManagerProps {
   prompts: PromptContainer[];
+  messages: Messages;
+  onOpenSettings: () => void;
   onCreate: (input: { title: string; body: string }) => void;
   onCreateGroup: (input: {
     title: string;
@@ -84,14 +87,20 @@ function moveArrayItem<T>(items: T[], from: number, to: number): T[] {
   return next;
 }
 
-function PromptKindBadge({ prompt }: { prompt: PromptContainer }) {
-  const meta = getPromptContainerMeta(prompt);
-  if (!meta) return null;
-  return <span className="prompt-kind-badge">{meta}</span>;
+function PromptKindBadge({ prompt, messages }: { prompt: PromptContainer; messages: Messages }) {
+  if (prompt.type !== "group") return null;
+  const count = getPromptContainerBodies(prompt).length;
+  return (
+    <span className="prompt-kind-badge">
+      {messages.manager.groupMeta(count, prompt.intervalMs)}
+    </span>
+  );
 }
 
 export function PromptManager({
   prompts,
+  messages,
+  onOpenSettings,
   onCreate,
   onCreateGroup,
   onUpdate,
@@ -104,6 +113,22 @@ export function PromptManager({
   const [deleteConfirmId, setDeleteConfirmId] = useState<string | null>(null);
   const [draft, setDraft] = useState<Draft>(() => emptyDraft());
   const [editDraft, setEditDraft] = useState<Draft>(() => emptyDraft());
+  const titleInputRef = useRef<HTMLInputElement | null>(null);
+  const bodyTextareaRef = useRef<HTMLTextAreaElement | null>(null);
+  const groupPromptRefs = useRef<Array<HTMLTextAreaElement | null>>([]);
+  const editTitleInputRef = useRef<HTMLInputElement | null>(null);
+  const editBodyTextareaRef = useRef<HTMLTextAreaElement | null>(null);
+  const editGroupPromptRefs = useRef<Array<HTMLTextAreaElement | null>>([]);
+  const submitGuardRef = useRef(false);
+  const submitGuardTimerRef = useRef<number | null>(null);
+
+  useEffect(() => {
+    return () => {
+      if (submitGuardTimerRef.current !== null) {
+        window.clearTimeout(submitGuardTimerRef.current);
+      }
+    };
+  }, []);
 
   const setDraftPrompt = (index: number, value: string) => {
     const next = [...draft.prompts];
@@ -117,34 +142,63 @@ export function PromptManager({
     setEditDraft({ ...editDraft, prompts: next });
   };
 
-  const handleCreate = () => {
-    if (!hasValidDraft(draft)) return;
-    if (draft.type === "group") {
+  const draftFromCreateDom = (): Draft => ({
+    ...draft,
+    title: titleInputRef.current?.value ?? draft.title,
+    body: bodyTextareaRef.current?.value ?? draft.body,
+    prompts: draft.prompts.map((value, index) => groupPromptRefs.current[index]?.value ?? value),
+  });
+
+  const draftFromEditDom = (): Draft => ({
+    ...editDraft,
+    title: editTitleInputRef.current?.value ?? editDraft.title,
+    body: editBodyTextareaRef.current?.value ?? editDraft.body,
+    prompts: editDraft.prompts.map((value, index) =>
+      editGroupPromptRefs.current[index]?.value ?? value
+    ),
+  });
+
+  const runSubmitOnce = (callback: () => void) => {
+    if (submitGuardRef.current) return;
+    submitGuardRef.current = true;
+    if (submitGuardTimerRef.current !== null) {
+      window.clearTimeout(submitGuardTimerRef.current);
+    }
+    submitGuardTimerRef.current = window.setTimeout(() => {
+      submitGuardRef.current = false;
+      submitGuardTimerRef.current = null;
+    }, 250);
+    callback();
+  };
+
+  const handleCreate = (sourceDraft = draft) => {
+    if (!hasValidDraft(sourceDraft)) return;
+    if (sourceDraft.type === "group") {
       onCreateGroup({
-        title: draft.title.trim(),
-        prompts: cleanBodies(draft.prompts),
-        intervalMs: draft.intervalMs,
+        title: sourceDraft.title.trim(),
+        prompts: cleanBodies(sourceDraft.prompts),
+        intervalMs: sourceDraft.intervalMs,
       });
     } else {
-      onCreate({ title: draft.title.trim(), body: draft.body.trim() });
+      onCreate({ title: sourceDraft.title.trim(), body: sourceDraft.body.trim() });
     }
     setDraft(emptyDraft());
   };
 
-  const handleSaveEdit = (id: string) => {
-    if (!hasValidDraft(editDraft)) return;
-    if (editDraft.type === "group") {
+  const handleSaveEdit = (id: string, sourceDraft = editDraft) => {
+    if (!hasValidDraft(sourceDraft)) return;
+    if (sourceDraft.type === "group") {
       onUpdate(id, {
-        title: editDraft.title.trim(),
+        title: sourceDraft.title.trim(),
         type: "group",
-        prompts: cleanBodies(editDraft.prompts),
-        intervalMs: editDraft.intervalMs,
+        prompts: cleanBodies(sourceDraft.prompts),
+        intervalMs: sourceDraft.intervalMs,
       });
     } else {
       onUpdate(id, {
-        title: editDraft.title.trim(),
+        title: sourceDraft.title.trim(),
         type: "single",
-        body: editDraft.body.trim(),
+        body: sourceDraft.body.trim(),
       });
     }
     setEditingId(null);
@@ -169,51 +223,62 @@ export function PromptManager({
     <div className="prompt-manager page-stack">
       <header className="page-header">
         <div>
-          <h1>Manage Prompts</h1>
-          <p>{prompts.length} prompt containers in your local library.</p>
+          <h1>{messages.manager.title}</h1>
+          <p>{messages.manager.count(prompts.length)}</p>
         </div>
         <div className="toolbar">
+          <button className="button button-secondary" onClick={onOpenSettings}>
+            {messages.common.settings}
+          </button>
           <button className="button button-secondary" onClick={onImport}>
-            Import
+            {messages.common.import}
           </button>
           <button className="button button-secondary" onClick={onExport}>
-            Export
+            {messages.common.export}
           </button>
         </div>
       </header>
 
-      <section className="editor-panel editor-panel-stacked">
+      <form
+        className="editor-panel editor-panel-stacked"
+        onSubmit={(event) => {
+          event.preventDefault();
+          runSubmitOnce(() => handleCreate(draftFromCreateDom()));
+        }}
+      >
         <div className="section-heading">
-          <h2>New Prompt Container</h2>
-          <p>Add one prompt or an ordered group for the quick picker.</p>
+          <h2>{messages.manager.newContainerTitle}</h2>
+          <p>{messages.manager.newContainerDescription}</p>
         </div>
-        <div className="segmented-control" aria-label="Prompt container type">
+        <div className="segmented-control" aria-label={messages.manager.promptContainerType}>
           <button
             className={draft.type === "single" ? "is-selected" : ""}
             type="button"
             onClick={() => setDraft({ ...draft, type: "single" })}
           >
-            Single
+            {messages.manager.single}
           </button>
           <button
             className={draft.type === "group" ? "is-selected" : ""}
             type="button"
             onClick={() => setDraft({ ...draft, type: "group" })}
           >
-            Group
+            {messages.manager.group}
           </button>
         </div>
         <input
+          ref={titleInputRef}
           className="field"
           type="text"
-          placeholder="Title"
+          placeholder={messages.manager.titlePlaceholder}
           value={draft.title}
           onChange={(e) => setDraft({ ...draft, title: e.target.value })}
         />
         {draft.type === "single" ? (
           <textarea
+            ref={bodyTextareaRef}
             className="field prompt-body-field"
-            placeholder="Prompt body..."
+            placeholder={messages.manager.bodyPlaceholder}
             value={draft.body}
             onChange={(e) => setDraft({ ...draft, body: e.target.value })}
           />
@@ -221,6 +286,8 @@ export function PromptManager({
           <GroupFields
             prompts={draft.prompts}
             intervalMs={draft.intervalMs}
+            messages={messages}
+            promptRef={(index, node) => { groupPromptRefs.current[index] = node; }}
             onIntervalChange={(intervalMs) => setDraft({ ...draft, intervalMs })}
             onPromptChange={setDraftPrompt}
             onInsertPrompt={(index) => {
@@ -237,43 +304,55 @@ export function PromptManager({
             }}
           />
         )}
-        <button className="button button-primary editor-submit" onClick={handleCreate}>
-          Add {draft.type === "group" ? "Group" : "Prompt"}
+        <button
+          className="button button-primary editor-submit"
+          type="submit"
+          onPointerDown={(event) => event.preventDefault()}
+          onPointerUp={() => runSubmitOnce(() => handleCreate(draftFromCreateDom()))}
+        >
+          {draft.type === "group" ? messages.manager.addGroup : messages.manager.addPrompt}
         </button>
-      </section>
+      </form>
 
       <section className="list-panel">
         <div className="section-heading">
-          <h2>Prompt List</h2>
-          <p>Choose the order used by the floating picker.</p>
+          <h2>{messages.manager.promptListTitle}</h2>
+          <p>{messages.manager.promptListDescription}</p>
         </div>
         <div className="prompt-list">
           {prompts.length === 0 ? (
-            <div className="empty-state-block">No prompts yet</div>
+            <div className="empty-state-block">{messages.manager.noPrompts}</div>
           ) : prompts.map((prompt, index) => (
             <div
               key={prompt.id}
               className={`prompt-item ${prompt.type === "group" ? "prompt-item-group" : ""}`}
             >
               {editingId === prompt.id ? (
-                <div className="edit-form edit-form-stacked">
-                  <div className="segmented-control" aria-label="Edit prompt container type">
+                <form
+                  className="edit-form edit-form-stacked"
+                  onSubmit={(event) => {
+                    event.preventDefault();
+                    runSubmitOnce(() => handleSaveEdit(prompt.id, draftFromEditDom()));
+                  }}
+                >
+                  <div className="segmented-control" aria-label={messages.manager.editPromptContainerType}>
                     <button
                       className={editDraft.type === "single" ? "is-selected" : ""}
                       type="button"
                       onClick={() => setEditDraft({ ...editDraft, type: "single" })}
                     >
-                      Single
+                      {messages.manager.single}
                     </button>
                     <button
                       className={editDraft.type === "group" ? "is-selected" : ""}
                       type="button"
                       onClick={() => setEditDraft({ ...editDraft, type: "group" })}
                     >
-                      Group
+                      {messages.manager.group}
                     </button>
                   </div>
                   <input
+                    ref={editTitleInputRef}
                     className="field"
                     type="text"
                     value={editDraft.title}
@@ -281,6 +360,7 @@ export function PromptManager({
                   />
                   {editDraft.type === "single" ? (
                     <textarea
+                      ref={editBodyTextareaRef}
                       className="field prompt-body-field"
                       value={editDraft.body}
                       onChange={(e) => setEditDraft({ ...editDraft, body: e.target.value })}
@@ -289,6 +369,10 @@ export function PromptManager({
                     <GroupFields
                       prompts={editDraft.prompts}
                       intervalMs={editDraft.intervalMs}
+                      messages={messages}
+                      promptRef={(entryIndex, node) => {
+                        editGroupPromptRefs.current[entryIndex] = node;
+                      }}
                       onIntervalChange={(intervalMs) => setEditDraft({ ...editDraft, intervalMs })}
                       onPromptChange={setEditPrompt}
                       onInsertPrompt={(entryIndex) => {
@@ -311,33 +395,38 @@ export function PromptManager({
                   <div className="edit-actions">
                     <button
                       className="button button-primary"
-                      onClick={() => handleSaveEdit(prompt.id)}
+                      type="submit"
+                      onPointerDown={(event) => event.preventDefault()}
+                      onPointerUp={() => runSubmitOnce(() =>
+                        handleSaveEdit(prompt.id, draftFromEditDom())
+                      )}
                     >
-                      Save
+                      {messages.manager.save}
                     </button>
                     <button
                       className="button button-secondary"
+                      type="button"
                       onClick={() => setEditingId(null)}
                     >
-                      Cancel
+                      {messages.manager.cancel}
                     </button>
                   </div>
-                </div>
+                </form>
               ) : deleteConfirmId === prompt.id ? (
                 <div className="delete-confirm">
-                  <span>Delete this prompt?</span>
+                  <span>{messages.manager.deleteConfirm}</span>
                   <div className="confirm-actions">
                     <button
                       className="button button-danger"
                       onClick={() => { onDelete(prompt.id); setDeleteConfirmId(null); }}
                     >
-                      Confirm
+                      {messages.manager.confirm}
                     </button>
                     <button
                       className="button button-secondary"
                       onClick={() => setDeleteConfirmId(null)}
                     >
-                      Cancel
+                      {messages.manager.cancel}
                     </button>
                   </div>
                 </div>
@@ -346,7 +435,7 @@ export function PromptManager({
                   <div className="prompt-info">
                     <div className="prompt-title-row">
                       <strong>{prompt.title}</strong>
-                      <PromptKindBadge prompt={prompt} />
+                      <PromptKindBadge prompt={prompt} messages={messages} />
                     </div>
                     <span className="prompt-preview-lines">
                       {getPromptContainerPreviewLines(prompt).map((line) => (
@@ -378,13 +467,13 @@ export function PromptManager({
                         setEditDraft(draftFromPrompt(prompt));
                       }}
                     >
-                      Edit
+                      {messages.manager.edit}
                     </button>
                     <button
                       className="button button-ghost-danger"
                       onClick={() => setDeleteConfirmId(prompt.id)}
                     >
-                      Delete
+                      {messages.manager.delete}
                     </button>
                   </div>
                 </div>
@@ -400,6 +489,8 @@ export function PromptManager({
 interface GroupFieldsProps {
   prompts: string[];
   intervalMs: number;
+  messages: Messages;
+  promptRef?: (index: number, node: HTMLTextAreaElement | null) => void;
   onIntervalChange: (intervalMs: number) => void;
   onPromptChange: (index: number, value: string) => void;
   onInsertPrompt: (index: number) => void;
@@ -410,6 +501,8 @@ interface GroupFieldsProps {
 function GroupFields({
   prompts,
   intervalMs,
+  messages,
+  promptRef,
   onIntervalChange,
   onPromptChange,
   onInsertPrompt,
@@ -435,7 +528,7 @@ function GroupFields({
   return (
     <div className="group-editor">
       <label className="interval-field">
-        <span>Delay between prompts</span>
+        <span>{messages.manager.delayBetweenPrompts}</span>
         <input
           className="field"
           type="number"
@@ -456,7 +549,7 @@ function GroupFields({
             onDrop={(event) => handleDrop(event, index)}
           >
             <button
-              aria-label={`Drag Prompt ${index + 1}`}
+              aria-label={messages.manager.dragPrompt(index + 1)}
               className="group-prompt-handle"
               draggable
               type="button"
@@ -464,17 +557,18 @@ function GroupFields({
               onDragEnd={() => setDraggingIndex(null)}
             >
               <span aria-hidden="true">⋮⋮</span>
-              Prompt {index + 1}
+              {messages.manager.promptLabel(index + 1)}
             </button>
             <textarea
-              aria-label={`Prompt ${index + 1} body`}
+              ref={(node) => promptRef?.(index, node)}
+              aria-label={messages.manager.promptBody(index + 1)}
               className="field prompt-body-field"
               value={body}
               onChange={(e) => onPromptChange(index, e.target.value)}
             />
             <div className="group-prompt-actions">
               <button
-                aria-label={`Insert prompt after Prompt ${index + 1}`}
+                aria-label={messages.manager.insertPromptAfter(index + 1)}
                 className="button icon-button group-icon-button"
                 type="button"
                 onClick={() => onInsertPrompt(index)}
@@ -482,7 +576,7 @@ function GroupFields({
                 +
               </button>
               <button
-                aria-label={`Remove Prompt ${index + 1}`}
+                aria-label={messages.manager.removePrompt(index + 1)}
                 className="button icon-button group-icon-button"
                 type="button"
                 disabled={prompts.length === 1}
@@ -491,7 +585,7 @@ function GroupFields({
                 -
               </button>
               <button
-                aria-label={`Move Prompt ${index + 1} up`}
+                aria-label={messages.manager.movePromptUp(index + 1)}
                 className="button icon-button group-icon-button"
                 type="button"
                 disabled={index === 0}
@@ -500,7 +594,7 @@ function GroupFields({
                 ↑
               </button>
               <button
-                aria-label={`Move Prompt ${index + 1} down`}
+                aria-label={messages.manager.movePromptDown(index + 1)}
                 className="button icon-button group-icon-button"
                 type="button"
                 disabled={index === prompts.length - 1}

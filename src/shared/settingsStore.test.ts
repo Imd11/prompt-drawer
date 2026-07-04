@@ -15,6 +15,7 @@ describe("settings store", () => {
     const settings = await store.get();
     expect(settings.blacklistedApps).toEqual([]);
     expect(settings.promptInsertion.mode).toBe("paste_and_submit");
+    expect(settings.language).toBe("zh-CN");
   });
 
   it("add bundle id to blacklist", async () => {
@@ -111,5 +112,29 @@ describe("settings store", () => {
     );
     const settings = await store.get();
     expect(settings.promptInsertion.mode).toBe("paste_and_submit");
+  });
+
+  it("saves language", async () => {
+    const store = createTestSettingsStore();
+    await store.setLanguage("en-US");
+    expect((await store.get()).language).toBe("en-US");
+    await store.setLanguage("zh-CN");
+    expect((await store.get()).language).toBe("zh-CN");
+  });
+
+  it("normalizes old settings without language", async () => {
+    const store = createTestSettingsStore(
+      '{"version":1,"blacklistedApps":[],"overlayPlacement":{"buttonOffset":null},"floatingButton":{"visible":true},"promptInsertion":{"mode":"paste_only"}}'
+    );
+    const settings = await store.get();
+    expect(settings.language).toBe("zh-CN");
+  });
+
+  it("normalizes invalid language to Chinese", async () => {
+    const store = createTestSettingsStore(
+      '{"version":1,"language":"fr-FR","blacklistedApps":[],"overlayPlacement":{"buttonOffset":null},"floatingButton":{"visible":true},"promptInsertion":{"mode":"paste_only"}}'
+    );
+    const settings = await store.get();
+    expect(settings.language).toBe("zh-CN");
   });
 });

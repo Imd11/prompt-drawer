@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { render, screen, fireEvent } from "@testing-library/react";
 import { PromptManager } from "./PromptManager";
+import { getMessages } from "../shared/i18n";
 import type { PromptContainer } from "../shared/promptTypes";
 
 describe("prompt manager", () => {
@@ -40,6 +41,8 @@ describe("prompt manager", () => {
       onReorder: () => {},
       onImport: () => {},
       onExport: () => {},
+      messages: getMessages("zh-CN"),
+      onOpenSettings: () => {},
       ...overrides,
     };
     render(<PromptManager {...props} />);
@@ -52,22 +55,59 @@ describe("prompt manager", () => {
     expect(screen.getByText("Code Review")).toBeTruthy();
     expect(screen.getByText("Repair Group")).toBeTruthy();
     expect(screen.queryByText("Single · 1 prompt")).toBeNull();
-    expect(screen.getByText("Group · 2 prompts · 700ms")).toBeTruthy();
+    expect(screen.getByText("群组 · 2 条 · 700ms")).toBeTruthy();
   });
 
   it("creates a single prompt container", () => {
     let created: { title: string; body: string } | null = null;
     renderManager({ onCreate: (input) => { created = input; } });
 
-    fireEvent.change(screen.getByPlaceholderText("Title"), {
+    fireEvent.change(screen.getByPlaceholderText("标题"), {
       target: { value: "New Single" },
     });
-    fireEvent.change(screen.getByPlaceholderText("Prompt body..."), {
+    fireEvent.change(screen.getByPlaceholderText("提示词内容..."), {
       target: { value: "Single body" },
     });
-    fireEvent.click(screen.getByRole("button", { name: "Add Prompt" }));
+    fireEvent.click(screen.getByRole("button", { name: "添加提示词" }));
 
     expect(created).toEqual({ title: "New Single", body: "Single body" });
+  });
+
+  it("creates a single prompt on the first click while the body field is focused", () => {
+    let created: { title: string; body: string } | null = null;
+    renderManager({ onCreate: (input) => { created = input; } });
+
+    fireEvent.change(screen.getByPlaceholderText("标题"), {
+      target: { value: "审阅修复计划" },
+    });
+    const bodyField = screen.getByPlaceholderText("提示词内容...");
+    fireEvent.change(bodyField, {
+      target: { value: "你深入分析一下..." },
+    });
+    bodyField.focus();
+    fireEvent.pointerDown(screen.getByRole("button", { name: "添加提示词" }));
+    fireEvent.pointerUp(screen.getByRole("button", { name: "添加提示词" }));
+    fireEvent.click(screen.getByRole("button", { name: "添加提示词" }));
+
+    expect(created).toEqual({ title: "审阅修复计划", body: "你深入分析一下..." });
+  });
+
+  it("does not create duplicate prompts from pointer and click events in the same gesture", () => {
+    let createCount = 0;
+    renderManager({ onCreate: () => { createCount += 1; } });
+
+    fireEvent.change(screen.getByPlaceholderText("标题"), {
+      target: { value: "No duplicate" },
+    });
+    fireEvent.change(screen.getByPlaceholderText("提示词内容..."), {
+      target: { value: "Only once" },
+    });
+    const addButton = screen.getByRole("button", { name: "添加提示词" });
+    fireEvent.pointerDown(addButton);
+    fireEvent.pointerUp(addButton);
+    fireEvent.click(addButton);
+
+    expect(createCount).toBe(1);
   });
 
   it("creates a group with numbered prompts", () => {
@@ -78,19 +118,19 @@ describe("prompt manager", () => {
     } | null = null;
     renderManager({ onCreateGroup: (input) => { createdGroup = input; } });
 
-    fireEvent.click(screen.getByRole("button", { name: "Group" }));
-    fireEvent.change(screen.getByPlaceholderText("Title"), {
+    fireEvent.click(screen.getByRole("button", { name: "群组" }));
+    fireEvent.change(screen.getByPlaceholderText("标题"), {
       target: { value: "Codex Flow" },
     });
     const promptFields = screen.getAllByRole("textbox").filter((field) => {
-      return field.getAttribute("placeholder") !== "Title";
+      return field.getAttribute("placeholder") !== "标题";
     });
     fireEvent.change(promptFields[0], { target: { value: "First grouped prompt" } });
     fireEvent.change(promptFields[1], { target: { value: "Second grouped prompt" } });
 
-    expect(screen.getByText("Prompt 1")).toBeTruthy();
+    expect(screen.getByText("提示词 1")).toBeTruthy();
     expect(screen.queryByText(/Step/i)).toBeNull();
-    fireEvent.click(screen.getByRole("button", { name: "Add Group" }));
+    fireEvent.click(screen.getByRole("button", { name: "添加群组" }));
 
     expect(createdGroup).toEqual({
       title: "Codex Flow",
@@ -105,27 +145,27 @@ describe("prompt manager", () => {
   it("inserts and removes group prompts from row controls", () => {
     renderManager();
 
-    fireEvent.click(screen.getByRole("button", { name: "Group" }));
-    expect(screen.getAllByLabelText(/Prompt \d+ body/i)).toHaveLength(2);
+    fireEvent.click(screen.getByRole("button", { name: "群组" }));
+    expect(screen.getAllByLabelText(/提示词 \d+ 内容/i)).toHaveLength(2);
 
-    fireEvent.click(screen.getByRole("button", { name: "Insert prompt after Prompt 1" }));
-    expect(screen.getAllByLabelText(/Prompt \d+ body/i)).toHaveLength(3);
+    fireEvent.click(screen.getByRole("button", { name: "在提示词 1 后插入" }));
+    expect(screen.getAllByLabelText(/提示词 \d+ 内容/i)).toHaveLength(3);
 
-    fireEvent.click(screen.getByRole("button", { name: "Remove Prompt 2" }));
-    expect(screen.getAllByLabelText(/Prompt \d+ body/i)).toHaveLength(2);
+    fireEvent.click(screen.getByRole("button", { name: "移除提示词 2" }));
+    expect(screen.getAllByLabelText(/提示词 \d+ 内容/i)).toHaveLength(2);
   });
 
   it("reorders group prompts from row controls", () => {
     renderManager();
 
-    fireEvent.click(screen.getByRole("button", { name: "Group" }));
-    const promptFields = screen.getAllByLabelText(/Prompt \d+ body/i);
+    fireEvent.click(screen.getByRole("button", { name: "群组" }));
+    const promptFields = screen.getAllByLabelText(/提示词 \d+ 内容/i);
     fireEvent.change(promptFields[0], { target: { value: "First grouped prompt" } });
     fireEvent.change(promptFields[1], { target: { value: "Second grouped prompt" } });
 
-    fireEvent.click(screen.getByRole("button", { name: "Move Prompt 2 up" }));
+    fireEvent.click(screen.getByRole("button", { name: "上移提示词 2" }));
 
-    const reorderedFields = screen.getAllByLabelText(/Prompt \d+ body/i);
+    const reorderedFields = screen.getAllByLabelText(/提示词 \d+ 内容/i);
     expect((reorderedFields[0] as HTMLTextAreaElement).value).toBe("Second grouped prompt");
     expect((reorderedFields[1] as HTMLTextAreaElement).value).toBe("First grouped prompt");
   });
@@ -133,19 +173,19 @@ describe("prompt manager", () => {
   it("does not remove the last group prompt row", () => {
     renderManager();
 
-    fireEvent.click(screen.getByRole("button", { name: "Group" }));
-    fireEvent.click(screen.getByRole("button", { name: "Remove Prompt 2" }));
+    fireEvent.click(screen.getByRole("button", { name: "群组" }));
+    fireEvent.click(screen.getByRole("button", { name: "移除提示词 2" }));
 
-    expect((screen.getByRole("button", { name: "Remove Prompt 1" }) as HTMLButtonElement).disabled)
+    expect((screen.getByRole("button", { name: "移除提示词 1" }) as HTMLButtonElement).disabled)
       .toBe(true);
-    expect(screen.getAllByLabelText(/Prompt \d+ body/i)).toHaveLength(1);
+    expect(screen.getAllByLabelText(/提示词 \d+ 内容/i)).toHaveLength(1);
   });
 
   it("reorders group prompts by dragging the row handle", () => {
     renderManager();
 
-    fireEvent.click(screen.getByRole("button", { name: "Group" }));
-    const promptFields = screen.getAllByLabelText(/Prompt \d+ body/i);
+    fireEvent.click(screen.getByRole("button", { name: "群组" }));
+    const promptFields = screen.getAllByLabelText(/提示词 \d+ 内容/i);
     fireEvent.change(promptFields[0], { target: { value: "First grouped prompt" } });
     fireEvent.change(promptFields[1], { target: { value: "Second grouped prompt" } });
 
@@ -156,13 +196,13 @@ describe("prompt manager", () => {
       getData: () => "",
     };
 
-    fireEvent.dragStart(screen.getByRole("button", { name: "Drag Prompt 1" }), {
+    fireEvent.dragStart(screen.getByRole("button", { name: "拖拽提示词 1" }), {
       dataTransfer,
     });
-    fireEvent.dragOver(screen.getByLabelText("Prompt 2 body"), { dataTransfer });
-    fireEvent.drop(screen.getByLabelText("Prompt 2 body"), { dataTransfer });
+    fireEvent.dragOver(screen.getByLabelText("提示词 2 内容"), { dataTransfer });
+    fireEvent.drop(screen.getByLabelText("提示词 2 内容"), { dataTransfer });
 
-    const reorderedFields = screen.getAllByLabelText(/Prompt \d+ body/i);
+    const reorderedFields = screen.getAllByLabelText(/提示词 \d+ 内容/i);
     expect((reorderedFields[0] as HTMLTextAreaElement).value).toBe("Second grouped prompt");
     expect((reorderedFields[1] as HTMLTextAreaElement).value).toBe("First grouped prompt");
   });
@@ -170,18 +210,18 @@ describe("prompt manager", () => {
   it("asks for confirmation before delete", () => {
     renderManager();
 
-    const deleteBtn = screen.getAllByText("Delete")[0];
+    const deleteBtn = screen.getAllByText("删除")[0];
     fireEvent.click(deleteBtn);
 
-    expect(screen.getByText("Delete this prompt?")).toBeTruthy();
+    expect(screen.getByText("删除这个提示词？")).toBeTruthy();
   });
 
   it("deletes after confirmation", () => {
     let deleteId: string | null = null;
     renderManager({ onDelete: (id: string) => { deleteId = id; } });
 
-    fireEvent.click(screen.getAllByText("Delete")[0]);
-    fireEvent.click(screen.getByText("Confirm"));
+    fireEvent.click(screen.getAllByText("删除")[0]);
+    fireEvent.click(screen.getByText("确认"));
 
     expect(deleteId).toBe("1");
   });
@@ -199,7 +239,17 @@ describe("prompt manager", () => {
   it("exposes import and export actions", () => {
     renderManager();
 
-    expect(screen.getByText("Import")).toBeTruthy();
-    expect(screen.getByText("Export")).toBeTruthy();
+    expect(screen.getByText("设置")).toBeTruthy();
+    expect(screen.getByText("导入")).toBeTruthy();
+    expect(screen.getByText("导出")).toBeTruthy();
+  });
+
+  it("opens settings from the manager header", () => {
+    let opened = false;
+    renderManager({ onOpenSettings: () => { opened = true; } });
+
+    fireEvent.click(screen.getByRole("button", { name: "设置" }));
+
+    expect(opened).toBe(true);
   });
 });

@@ -1,4 +1,5 @@
 import { invoke } from "@tauri-apps/api/core";
+import type { AppLanguage } from "../shared/settingsStore";
 
 export interface FrontmostApp {
   name: string;
@@ -111,6 +112,10 @@ export async function pastePromptToApp(body: string, bundle_id: string): Promise
 }
 export async function openMainWindow(): Promise<void> {
   return invoke("open_main_window");
+}
+
+export async function setMenuLanguage(language: AppLanguage): Promise<void> {
+  return invoke("set_menu_language", { language });
 }
 
 export async function quitPromptPicker(): Promise<void> {

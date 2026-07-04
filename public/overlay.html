@@ -49,19 +49,6 @@ body {
   transition: transform 140ms ease;
 }
 
-.calico-projectile {
-  position: absolute;
-  left: 0;
-  top: 0;
-  width: 30px;
-  height: 24px;
-  opacity: 0;
-  pointer-events: none;
-  transform: translate(88px, 50px) rotate(-22deg) scale(0.76);
-  transform-origin: 50% 50%;
-  filter: drop-shadow(0 4px 8px rgba(15, 23, 42, 0.16));
-}
-
 .calico-entry:hover .calico-sprite {
   transform: translateY(-2px) scale(1.03);
 }
@@ -79,78 +66,9 @@ body {
   animation: calico-idle-breath 1800ms ease-in-out infinite alternate;
 }
 
-.calico-entry[data-motion-state="ready"] .calico-sprite {
-  animation: calico-ready-windup 820ms ease-in-out infinite alternate;
-}
-
-.calico-entry[data-motion-state="ready"] .calico-projectile {
-  opacity: 1;
-  animation: calico-ready-projectile 820ms ease-in-out infinite alternate;
-}
-
-.calico-entry[data-motion-state="throwing"] .calico-sprite {
-  animation: calico-throw-snap 620ms cubic-bezier(0.2, 0.85, 0.22, 1) both;
-}
-
-.calico-entry[data-motion-state="throwing"] .calico-projectile {
-  animation: calico-throw-projectile-release 620ms cubic-bezier(0.16, 0.9, 0.22, 1) both;
-}
-
-.calico-entry[data-motion-state="recovering"] .calico-sprite {
-  animation: calico-recover 260ms cubic-bezier(0.2, 0.9, 0.25, 1) both;
-}
-
 @keyframes calico-idle-breath {
   from { transform: translateY(0) scale(1); }
   to { transform: translateY(-1px) scale(1.01); }
-}
-
-@keyframes calico-ready-windup {
-  0% { transform: translate(-8px, 8px) rotate(-13deg) scale(1.02); }
-  100% { transform: translate(-12px, 10px) rotate(-18deg) scale(1.045); }
-}
-
-@keyframes calico-ready-projectile {
-  0% {
-    opacity: 1;
-    transform: translate(84px, 42px) rotate(-31deg) scale(0.82);
-  }
-  100% {
-    opacity: 1;
-    transform: translate(89px, 37px) rotate(-22deg) scale(0.88);
-  }
-}
-
-@keyframes calico-throw-snap {
-  0% { transform: translate(-12px, 10px) rotate(-18deg) scale(1.045); }
-  28% { transform: translate(-15px, 12px) rotate(-24deg) scale(1.05); }
-  48% { transform: translate(11px, -7px) rotate(17deg) scale(1.06); }
-  100% { transform: translate(0, 0) rotate(0deg) scale(1); }
-}
-
-@keyframes calico-throw-projectile-release {
-  0% {
-    opacity: 1;
-    transform: translate(89px, 37px) rotate(-22deg) scale(0.88);
-  }
-  32% {
-    opacity: 1;
-    transform: translate(96px, 33px) rotate(-34deg) scale(0.9);
-  }
-  44% {
-    opacity: 0;
-    transform: translate(102px, 45px) rotate(-18deg) scale(0.78);
-  }
-  100% {
-    opacity: 0;
-    transform: translate(102px, 45px) rotate(-18deg) scale(0.78);
-  }
-}
-
-@keyframes calico-recover {
-  0% { transform: translate(3px, -1px) rotate(4deg) scale(1.01); }
-  65% { transform: translate(-1px, 1px) rotate(-2deg) scale(0.995); }
-  100% { transform: translate(0, 0) rotate(0deg) scale(1); }
 }
 
 .calico-status-bubble {
@@ -209,22 +127,16 @@ body {
   data-motion-state="idle"
 >
   <img id="calicoSprite" class="calico-sprite" src="/calico/calico-idle.apng" alt="" draggable="false" />
-  <img id="promptProjectile" class="calico-projectile" src="/calico/paper-plane.svg" alt="" draggable="false" />
 </button>
 <script type="module">
 const btn = document.getElementById('btn');
 const sprite = document.getElementById('calicoSprite');
 const statusBubble = document.getElementById('statusBubble');
 const tauri = window.__TAURI__;
-const THROW_RELEASE_MS = 170;
-const THROW_RECOVER_MS = 760;
-const READY_TIMEOUT_MS = 30000;
 const DRAG_START_DISTANCE_PX = 10;
 const sprites = {
   idle: '/calico/calico-idle.apng',
-  ready: '/calico/calico-react-drag.apng',
-  drag: '/calico/calico-react-drag.apng',
-  throw: '/calico/calico-react-drag.apng'
+  drag: '/calico/calico-react-drag.apng'
 };
 let start = null;
 let dragging = false;
@@ -235,8 +147,6 @@ let pointerSequence = 0;
 let promptPickSessionId = 0;
 let dragStartedEmitted = false;
 let motionResetTimer = 0;
-let throwReleaseTimer = 0;
-let throwRecoverTimer = 0;
 let statusTimer = 0;
 
 function setSpriteSource(source) {
@@ -248,8 +158,6 @@ function setSpriteSource(source) {
 
 function clearMotionTimers() {
   window.clearTimeout(motionResetTimer);
-  window.clearTimeout(throwReleaseTimer);
-  window.clearTimeout(throwRecoverTimer);
 }
 
 function setMotionState(state, resetMs = 0) {
@@ -257,10 +165,6 @@ function setMotionState(state, resetMs = 0) {
   btn.dataset.motionState = state;
   if (state === 'dragging') {
     setSpriteSource(sprites.drag);
-  } else if (state === 'ready') {
-    setSpriteSource(sprites.ready);
-  } else if (state === 'throwing') {
-    setSpriteSource(sprites.throw);
   } else {
     setSpriteSource(sprites.idle);
   }
@@ -442,11 +346,14 @@ btn.addEventListener('pointerup', async (event) => {
       await emit('prompt-button-drag-ended', position);
     }
   } else {
-    setMotionState('ready', READY_TIMEOUT_MS);
     const sessionId = ++promptPickSessionId;
-    const sessionPromise = invoke('begin_prompt_pick_session', { sessionId });
-    await invoke('show_prompt_popover_from_button', { sessionId });
-    void sessionPromise.catch(() => null);
+    const toggleResult = await invoke('toggle_prompt_popover_from_button', { sessionId });
+    if (toggleResult?.opened) {
+      const sessionPromise = invoke('begin_prompt_pick_session', { sessionId });
+      void sessionPromise.catch(() => null);
+    } else {
+      resetCalicoMotion();
+    }
   }
   start = null;
   dragging = false;
@@ -464,28 +371,6 @@ btn.addEventListener('contextmenu', async (event) => {
 
 listenForAutosendStatus();
 listenForPromptPopoverDismissed();
-
-function playCalicoThrow() {
-  clearMotionTimers();
-  setMotionState('throwing');
-  throwReleaseTimer = window.setTimeout(() => {
-    invoke('show_paper_plane_flight_from_button').catch(() => {});
-  }, THROW_RELEASE_MS);
-  throwRecoverTimer = window.setTimeout(() => {
-    setMotionState('recovering', 280);
-  }, THROW_RECOVER_MS);
-}
-
-function listenForCalicoThrow() {
-  if (!tauri?.event?.listen) return;
-  tauri.event.listen('prompt-throw-send', () => {
-    playCalicoThrow();
-  }).catch((error) => {
-    console.error('Tauri event listen failed: prompt-throw-send', error);
-  });
-}
-
-listenForCalicoThrow();
 
 statusBubble?.addEventListener('click', async () => {
   if (statusBubble.dataset.action === 'request_accessibility_permission') {

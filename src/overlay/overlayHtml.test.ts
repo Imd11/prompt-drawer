@@ -15,7 +15,7 @@ describe("overlay button html", () => {
     expect(html).toContain("contextmenu");
     expect(html).toContain("Tauri invoke API is unavailable");
     expect(html).toContain("Tauri command failed");
-    expect(html).toContain("show_prompt_popover_from_button");
+    expect(html).toContain("toggle_prompt_popover_from_button");
     expect(html).toContain("show_prompt_button_controls_from_button");
     expect(html).toContain("prompt-button-drag-started");
     expect(html).toContain("prompt-button-drag-ended");
@@ -33,8 +33,9 @@ describe("overlay button html", () => {
     expect(html).toContain("calico-sprite");
     expect(html).toContain("calico-idle.apng");
     expect(html).toContain("calico-react-drag.apng");
-    expect(html).toContain("calico-projectile");
     expect(html).toContain('data-motion-state="idle"');
+    expect(html).not.toContain("calico-projectile");
+    expect(html).not.toContain("promptProjectile");
     expect(html).toContain('aria-label="Open Prompt Picker"');
     expect(html).not.toContain("calico-rig");
     expect(html).not.toContain("calico-body");
@@ -48,7 +49,7 @@ describe("overlay button html", () => {
 
     expect(html).toContain("prompt_button_position_cmd");
     expect(html).toContain("move_prompt_button_to");
-    expect(html).toContain("show_prompt_popover_from_button");
+    expect(html).toContain("toggle_prompt_popover_from_button");
     expect(html).toContain("prompt-button-drag-started");
     expect(html).toContain("prompt-button-drag-ended");
     expect(html).toContain("setPointerCapture");
@@ -60,11 +61,16 @@ describe("overlay button html", () => {
 
     expect(html).toContain("let promptPickSessionId = 0;");
     expect(html).toContain("const sessionId = ++promptPickSessionId;");
+    expect(html).toContain("const toggleResult = await invoke('toggle_prompt_popover_from_button', { sessionId });");
+    expect(html).toContain("if (toggleResult?.opened)");
     expect(html).toContain("const sessionPromise = invoke('begin_prompt_pick_session', { sessionId });");
-    expect(html).toContain("await invoke('show_prompt_popover_from_button', { sessionId });");
     expect(html).toContain("void sessionPromise.catch(() => null);");
+    expect(html).toContain("resetCalicoMotion();");
     expect(html).not.toContain("await invoke('begin_prompt_pick_session')");
     expect(html).not.toContain("await sessionPromise.catch");
+    expect(html.indexOf("toggle_prompt_popover_from_button")).toBeLessThan(
+      html.indexOf("begin_prompt_pick_session")
+    );
   });
 
   it("requires deliberate pointer movement before treating a click as drag", () => {
@@ -103,35 +109,31 @@ describe("overlay button html", () => {
     expect(html).not.toContain("payload.kind || 'copied'");
   });
 
-  it("switches Calico into a real throw-ready character pose before opening prompts", () => {
+  it("opens prompts without switching Calico into a throw-ready pose", () => {
     const html = readFileSync("public/overlay.html", "utf8");
 
-    expect(html).toContain("setMotionState('ready'");
-    expect(html).toContain('[data-motion-state="ready"]');
-    expect(html).toContain("ready: '/calico/calico-react-drag.apng'");
-    expect(html).toContain("setSpriteSource(sprites.ready)");
-    expect(html).toContain("calico-ready-windup");
-    expect(html).toContain("calico-ready-projectile");
-    expect(html).not.toContain("throwReady: '/calico/calico-idle.apng'");
-    expect(html.indexOf("setMotionState('ready'")).toBeLessThan(
-      html.indexOf("begin_prompt_pick_session")
-    );
+    expect(html).toContain("toggle_prompt_popover_from_button");
+    expect(html).not.toContain("setMotionState('ready'");
+    expect(html).not.toContain('[data-motion-state="ready"]');
+    expect(html).not.toContain("setSpriteSource(sprites.ready)");
+    expect(html).not.toContain("calico-ready-windup");
+    expect(html).not.toContain("calico-ready-projectile");
   });
 
-  it("listens for paper-plane throw events and starts the flight animation", () => {
+  it("does not listen for paper-plane throw events", () => {
     const html = readFileSync("public/overlay.html", "utf8");
 
-    expect(html).toContain("prompt-throw-send");
-    expect(html).toContain("playCalicoThrow");
-    expect(html).toContain("show_paper_plane_flight_from_button");
-    expect(html).toContain("setMotionState('throwing'");
-    expect(html).toContain("setMotionState('recovering'");
-    expect(html).toContain("calico-throw-snap");
-    expect(html).toContain("calico-throw-projectile-release");
-    expect(html).toContain("THROW_RELEASE_MS");
+    expect(html).not.toContain("prompt-throw-send");
+    expect(html).not.toContain("playCalicoThrow");
+    expect(html).not.toContain("show_paper_plane_flight_from_button");
+    expect(html).not.toContain("setMotionState('throwing'");
+    expect(html).not.toContain("setMotionState('recovering'");
+    expect(html).not.toContain("calico-throw-snap");
+    expect(html).not.toContain("calico-throw-projectile-release");
+    expect(html).not.toContain("THROW_RELEASE_MS");
   });
 
-  it("resets Calico from ready when the popover is dismissed without sending", () => {
+  it("resets Calico when the popover is dismissed without sending", () => {
     const html = readFileSync("public/overlay.html", "utf8");
 
     expect(html).toContain("prompt-popover-dismissed");

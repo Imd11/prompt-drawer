@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { render, screen, fireEvent } from "@testing-library/react";
 import { SettingsPanel } from "./SettingsPanel";
-import type { PromptInsertionMode, Settings } from "../shared/settingsStore";
+import type { AppLanguage, PromptInsertionMode, Settings } from "../shared/settingsStore";
 
 describe("settings panel", () => {
   const mockSettings: Settings = {
@@ -12,16 +12,19 @@ describe("settings panel", () => {
     overlayPlacement: { buttonOffset: null, buttonPosition: null },
     floatingButton: { visible: true },
     promptInsertion: { mode: "paste_and_submit" },
+    language: "zh-CN",
   };
 
   function renderPanel(
     settings: Settings = mockSettings,
-    onPromptInsertionModeChange: (mode: PromptInsertionMode) => void = () => {}
+    onPromptInsertionModeChange: (mode: PromptInsertionMode) => void = () => {},
+    onLanguageChange: (language: AppLanguage) => void = () => {}
   ) {
     render(
       <SettingsPanel
         settings={settings}
         onRemove={() => {}}
+        onLanguageChange={onLanguageChange}
         onPromptInsertionModeChange={onPromptInsertionModeChange}
       />
     );
@@ -38,11 +41,12 @@ describe("settings panel", () => {
       <SettingsPanel
         settings={mockSettings}
         onRemove={(id) => { removedBundleId = id; }}
+        onLanguageChange={() => {}}
         onPromptInsertionModeChange={() => {}}
       />
     );
 
-    const removeBtn = screen.getByRole("button", { name: "Remove" });
+    const removeBtn = screen.getByRole("button", { name: "移除" });
     removeBtn.click();
     expect(removedBundleId).toBe("com.example.app");
   });
@@ -54,15 +58,16 @@ describe("settings panel", () => {
       overlayPlacement: { buttonOffset: null, buttonPosition: null },
       floatingButton: { visible: true },
       promptInsertion: { mode: "paste_and_submit" },
+      language: "zh-CN",
     });
-    expect(screen.getByText("No blacklisted apps")).toBeTruthy();
+    expect(screen.getByText("暂无隐藏应用")).toBeTruthy();
   });
 
   it("renders prompt insertion behavior controls", () => {
     renderPanel();
 
-    expect(screen.getByRole("button", { name: "Paste only" })).toBeTruthy();
-    expect(screen.getByRole("button", { name: "Paste + Return" }).getAttribute(
+    expect(screen.getByRole("button", { name: "只填入输入框" })).toBeTruthy();
+    expect(screen.getByRole("button", { name: "填入并发送" }).getAttribute(
       "aria-pressed"
     )).toBe("true");
   });
@@ -71,8 +76,35 @@ describe("settings panel", () => {
     let selectedMode: PromptInsertionMode | null = null;
     renderPanel(mockSettings, (mode) => { selectedMode = mode; });
 
-    fireEvent.click(screen.getByRole("button", { name: "Paste only" }));
+    fireEvent.click(screen.getByRole("button", { name: "只填入输入框" }));
 
     expect(selectedMode).toBe("paste_only");
+  });
+
+  it("renders language selection", () => {
+    renderPanel();
+
+    expect(screen.getByRole("heading", { name: "语言" })).toBeTruthy();
+    expect(screen.getByLabelText("界面语言")).toBeTruthy();
+  });
+
+  it("changes language", () => {
+    let selectedLanguage: AppLanguage | null = null;
+    renderPanel(mockSettings, () => {}, (language) => { selectedLanguage = language; });
+
+    fireEvent.change(screen.getByLabelText("界面语言"), {
+      target: { value: "en-US" },
+    });
+
+    expect(selectedLanguage).toBe("en-US");
+  });
+
+  it("renders English labels when English is selected", () => {
+    renderPanel({ ...mockSettings, language: "en-US" });
+
+    expect(screen.getByRole("heading", { name: "Settings" })).toBeTruthy();
+    expect(screen.getByRole("button", { name: "Insert + Send" }).getAttribute(
+      "aria-pressed"
+    )).toBe("true");
   });
 });

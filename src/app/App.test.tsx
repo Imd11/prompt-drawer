@@ -207,10 +207,10 @@ describe("app", () => {
       expect(screen.getByText("Test Prompt")).toBeTruthy();
     });
 
-    expect(screen.queryByText("Manage Prompts")).toBeNull();
-    expect(screen.queryByText("Settings")).toBeNull();
-    expect(screen.queryByText("Import")).toBeNull();
-    expect(screen.queryByText("Export")).toBeNull();
+    expect(screen.queryByText("管理提示词")).toBeNull();
+    expect(screen.queryByText("设置")).toBeNull();
+    expect(screen.queryByText("导入")).toBeNull();
+    expect(screen.queryByText("导出")).toBeNull();
   });
 
   it("does not start input target polling in prompt popover windows", async () => {
@@ -254,7 +254,7 @@ describe("app", () => {
       render(<App />);
     });
 
-    await screen.findByRole("button", { name: "Hide Calico" });
+    await screen.findByRole("button", { name: "隐藏 Calico" });
     expect(inputTargetPollingMock).not.toHaveBeenCalled();
   });
 
@@ -269,7 +269,7 @@ describe("app", () => {
       render(<App />);
     });
 
-    await screen.findByRole("heading", { name: "Manage Prompts" });
+    await screen.findByRole("heading", { name: "管理提示词" });
     expect(inputTargetPollingMock).toHaveBeenCalled();
   });
 
@@ -290,14 +290,14 @@ describe("app", () => {
       render(<App />);
     });
 
-    await screen.findByRole("heading", { name: "Manage Prompts" });
+    await screen.findByRole("heading", { name: "管理提示词" });
     await act(async () => {
       eventHandlers.get("open-settings-window")?.({ payload: null });
     });
 
-    expect(screen.getByRole("heading", { name: "Settings" })).toBeTruthy();
-    expect(screen.getByRole("button", { name: "Paste + Return" })).toBeTruthy();
-    expect(screen.queryByRole("button", { name: "Back" })).toBeNull();
+    expect(screen.getByRole("heading", { name: "设置" })).toBeTruthy();
+    expect(screen.getByRole("button", { name: "填入并发送" })).toBeTruthy();
+    expect(screen.queryByRole("button", { name: "返回" })).toBeNull();
   });
 
   it("autosends selected prompt into the backend last input target", async () => {
@@ -366,11 +366,11 @@ describe("app", () => {
     );
     expect(emitMock).toHaveBeenCalledWith("prompt-autosend-status", {
       kind: "sent",
-      message: "已粘贴",
+      message: "已填入输入框",
     });
   });
 
-  it("hides the prompt list before emitting a paper-plane throw event for a selected single prompt", async () => {
+  it("hides the prompt list before autosending a selected single prompt without throw animation", async () => {
     const { invoke } = await import("@tauri-apps/api/core");
     const callOrder: string[] = [];
     vi.mocked(invoke).mockClear();
@@ -401,14 +401,12 @@ describe("app", () => {
         { body: "Test body" }
       );
     });
-    expect(emitMock).toHaveBeenCalledWith("prompt-throw-send", {
-      kind: "single",
-    });
     expect(callOrder.indexOf("invoke:hide_prompt_popover")).toBeLessThan(
-      callOrder.indexOf("emit:prompt-throw-send")
-    );
-    expect(callOrder.indexOf("emit:prompt-throw-send")).toBeLessThan(
       callOrder.indexOf("invoke:paste_prompt_and_submit_to_last_target")
+    );
+    expect(emitMock).not.toHaveBeenCalledWith(
+      "prompt-throw-send",
+      expect.anything()
     );
   });
 
@@ -471,7 +469,7 @@ describe("app", () => {
     );
   });
 
-  it("emits one paper-plane throw event for a grouped prompt selection", async () => {
+  it("autosends grouped prompts without emitting a paper-plane throw event", async () => {
     const { invoke } = await import("@tauri-apps/api/core");
     vi.mocked(invoke).mockClear();
     vi.mocked(invoke).mockImplementation(async (command: string) => {
@@ -516,12 +514,18 @@ describe("app", () => {
     fireEvent.click(await screen.findByText("Repair Group"));
 
     await waitFor(() => {
-      expect(emitMock).toHaveBeenCalledWith("prompt-throw-send", {
-        kind: "group",
-      });
+      expect(vi.mocked(invoke)).toHaveBeenCalledWith(
+        "paste_prompt_sequence_and_submit_to_last_target",
+        {
+          bodies: ["First prompt", "Second prompt"],
+          interval_ms: 700,
+        }
+      );
     });
-    const throwCalls = emitMock.mock.calls.filter(([event]) => event === "prompt-throw-send");
-    expect(throwCalls).toHaveLength(1);
+    expect(emitMock).not.toHaveBeenCalledWith(
+      "prompt-throw-send",
+      expect.anything()
+    );
   });
 
   it("emits a sent status when autosend reports keyboard success", async () => {
@@ -546,12 +550,13 @@ describe("app", () => {
     await waitFor(() => {
       expect(emitMock).toHaveBeenCalledWith("prompt-autosend-status", {
         kind: "sent",
-        message: "已粘贴并回车",
+        message: "已发送",
       });
     });
-    expect(emitMock).toHaveBeenCalledWith("prompt-throw-send", {
-      kind: "single",
-    });
+    expect(emitMock).not.toHaveBeenCalledWith(
+      "prompt-throw-send",
+      expect.anything()
+    );
   });
 
   it("emits an actionable permission status when autosend lacks accessibility permission", async () => {
@@ -585,9 +590,10 @@ describe("app", () => {
         action: "request_accessibility_permission",
       });
     });
-    expect(emitMock).toHaveBeenCalledWith("prompt-throw-send", {
-      kind: "single",
-    });
+    expect(emitMock).not.toHaveBeenCalledWith(
+      "prompt-throw-send",
+      expect.anything()
+    );
     expect(emitMock).not.toHaveBeenCalledWith(
       "prompt-autosend-status",
       expect.objectContaining({ message: "已复制，可手动 Cmd+V" })
@@ -621,7 +627,7 @@ describe("app", () => {
     await waitFor(() => {
       expect(emitMock).toHaveBeenCalledWith("prompt-autosend-status", {
         kind: "failed",
-        message: "已粘贴，未发送",
+        message: "已填入输入框，未发送",
       });
     });
   });
@@ -876,14 +882,14 @@ describe("app", () => {
 
     await waitFor(() => {
       expect(
-        screen.getByRole("heading", { name: "Manage Prompts" })
+        screen.getByRole("heading", { name: "管理提示词" })
       ).toBeTruthy();
     });
 
     expect(screen.queryByText("Floating Button")).toBeNull();
     expect(screen.queryByText("Hide Floating Button")).toBeNull();
-    expect(screen.queryByRole("heading", { name: "Settings" })).toBeNull();
-    expect(screen.getByPlaceholderText("Title")).toBeTruthy();
+    expect(screen.queryByRole("heading", { name: "设置" })).toBeNull();
+    expect(screen.getByPlaceholderText("标题")).toBeTruthy();
   });
 
   it("shows a newly saved prompt in the main window prompt list", async () => {
@@ -909,15 +915,14 @@ describe("app", () => {
       render(<App />);
     });
 
-    fireEvent.click(screen.getByRole("button", { name: "Add Prompt" }));
     // Editor is always visible; fill title and body
-    fireEvent.change(screen.getByPlaceholderText("Title"), {
+    fireEvent.change(screen.getByPlaceholderText("标题"), {
       target: { value: "My Prompt" },
     });
-    fireEvent.change(screen.getByPlaceholderText("Prompt body..."), {
+    fireEvent.change(screen.getByPlaceholderText("提示词内容..."), {
       target: { value: "My saved prompt body" },
     });
-    fireEvent.click(screen.getByRole("button", { name: "Add Prompt" }));
+    fireEvent.click(screen.getByRole("button", { name: "添加提示词" }));
 
     await waitFor(() => {
       expect(screen.getByText("My Prompt")).toBeTruthy();
@@ -935,7 +940,7 @@ describe("app", () => {
       render(<App />);
     });
 
-    expect(await screen.findByRole("heading", { name: "Manage Prompts" })).toBeTruthy();
+    expect(await screen.findByRole("heading", { name: "管理提示词" })).toBeTruthy();
     expect(screen.queryByText("Status: Visible")).toBeNull();
     expect(screen.queryByText("Autosend: Ready")).toBeNull();
     expect(screen.queryByRole("button", { name: "Hide Floating Button" })).toBeNull();
@@ -965,19 +970,19 @@ describe("app", () => {
     });
 
     expect(
-      await screen.findByRole("button", { name: "Hide Calico" })
+      await screen.findByRole("button", { name: "隐藏 Calico" })
     ).toBeTruthy();
     expect(
-      screen.getByRole("button", { name: "Manage Prompts..." })
+      screen.getByRole("button", { name: "管理提示词..." })
     ).toBeTruthy();
     expect(
-      screen.getByRole("button", { name: "Open Accessibility Settings" })
+      screen.getByRole("button", { name: "打开辅助功能设置" })
     ).toBeTruthy();
     expect(
-      screen.getByRole("button", { name: "Quit Prompt Picker" })
+      screen.getByRole("button", { name: "退出 Prompt Picker" })
     ).toBeTruthy();
-    expect(screen.queryByText("Import")).toBeNull();
-    expect(screen.queryByText("Export")).toBeNull();
+    expect(screen.queryByText("导入")).toBeNull();
+    expect(screen.queryByText("导出")).toBeNull();
   });
 
   it("button controls hide persists state and hides the floating button", async () => {
@@ -1000,8 +1005,8 @@ describe("app", () => {
       render(<App />);
     });
 
-    await screen.findByRole("button", { name: "Hide Calico" });
-    fireEvent.click(screen.getByRole("button", { name: "Hide Calico" }));
+    await screen.findByRole("button", { name: "隐藏 Calico" });
+    fireEvent.click(screen.getByRole("button", { name: "隐藏 Calico" }));
 
     await waitFor(() => {
       expect(vi.mocked(invoke)).toHaveBeenCalledWith("hide_prompt_button");
@@ -1034,7 +1039,7 @@ describe("app", () => {
       render(<App />);
     });
 
-    fireEvent.click(await screen.findByRole("button", { name: "Hide Calico" }));
+    fireEvent.click(await screen.findByRole("button", { name: "隐藏 Calico" }));
 
     await waitFor(() => {
       expect(emitMock).toHaveBeenCalledWith("prompt-popover-dismissed");
@@ -1056,8 +1061,8 @@ describe("app", () => {
 
     await act(async () => { render(<App />); });
 
-    await screen.findByRole("button", { name: "Manage Prompts..." });
-    fireEvent.click(screen.getByRole("button", { name: "Manage Prompts..." }));
+    await screen.findByRole("button", { name: "管理提示词..." });
+    fireEvent.click(screen.getByRole("button", { name: "管理提示词..." }));
 
     await waitFor(() => {
       expect(vi.mocked(invoke)).toHaveBeenCalledWith("open_main_window");
@@ -1085,7 +1090,7 @@ describe("app", () => {
       render(<App />);
     });
 
-    fireEvent.click(await screen.findByRole("button", { name: "Manage Prompts..." }));
+    fireEvent.click(await screen.findByRole("button", { name: "管理提示词..." }));
 
     await waitFor(() => {
       expect(emitMock).toHaveBeenCalledWith("prompt-popover-dismissed");
@@ -1106,8 +1111,8 @@ describe("app", () => {
 
     await act(async () => { render(<App />); });
 
-    await screen.findByRole("button", { name: "Open Accessibility Settings" });
-    fireEvent.click(screen.getByRole("button", { name: "Open Accessibility Settings" }));
+    await screen.findByRole("button", { name: "打开辅助功能设置" });
+    fireEvent.click(screen.getByRole("button", { name: "打开辅助功能设置" }));
 
     await waitFor(() => {
       expect(vi.mocked(invoke)).toHaveBeenCalledWith("open_accessibility_settings");
@@ -1129,8 +1134,8 @@ describe("app", () => {
 
     await act(async () => { render(<App />); });
 
-    await screen.findByRole("button", { name: "Quit Prompt Picker" });
-    fireEvent.click(screen.getByRole("button", { name: "Quit Prompt Picker" }));
+    await screen.findByRole("button", { name: "退出 Prompt Picker" });
+    fireEvent.click(screen.getByRole("button", { name: "退出 Prompt Picker" }));
 
     await waitFor(() => {
       expect(vi.mocked(invoke)).toHaveBeenCalledWith("quit_prompt_picker");
@@ -1149,10 +1154,10 @@ describe("app", () => {
 
     await act(async () => { render(<App />); });
 
-    expect(screen.queryByRole("button", { name: "Hide Calico" })).not.toBeNull();
-    expect(screen.queryByRole("button", { name: "Manage Prompts..." })).not.toBeNull();
-    expect(screen.queryByRole("button", { name: "Open Accessibility Settings" })).not.toBeNull();
-    expect(screen.queryByRole("button", { name: "Quit Prompt Picker" })).not.toBeNull();
-    expect(screen.queryByText("Settings")).toBeNull();
+    expect(screen.queryByRole("button", { name: "隐藏 Calico" })).not.toBeNull();
+    expect(screen.queryByRole("button", { name: "管理提示词..." })).not.toBeNull();
+    expect(screen.queryByRole("button", { name: "打开辅助功能设置" })).not.toBeNull();
+    expect(screen.queryByRole("button", { name: "退出 Prompt Picker" })).not.toBeNull();
+    expect(screen.queryByText("设置")).toBeNull();
   });
 });
