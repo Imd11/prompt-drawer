@@ -295,7 +295,6 @@ export function App({
 
     listen<string>("prompt-popover-opened", async (event) => {
       if (!active || event.payload !== "popover") return;
-      emitCalicoMotion("thinking", "popover-open", 1200);
       resetPromptHoverPreview();
       promptListRefreshingRef.current = true;
       try {

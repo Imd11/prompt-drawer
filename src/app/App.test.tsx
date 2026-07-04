@@ -264,16 +264,21 @@ describe("app", () => {
     expect(screen.queryByRole("tooltip")).toBeNull();
   });
 
-  it("emits thinking motion when a reused prompt popover opens", async () => {
+  it("does not emit Calico motion when a reused prompt popover opens", async () => {
     currentWindowLabel = "prompt-popover";
     window.history.pushState({}, "", "/?mode=popover");
     await renderPromptPopover();
+    emitMock.mockClear();
 
     await act(async () => {
       await eventHandlers.get("prompt-popover-opened")?.({ payload: "popover" });
     });
 
-    expectCalicoMotion("thinking");
+    expect(emitMock).not.toHaveBeenCalledWith(
+      "calico-motion",
+      expect.objectContaining({ state: "thinking" })
+    );
+    expect(calicoMotionStates()).toEqual([]);
   });
 
   it("clears visible prompt hover preview when the popover is dismissed", async () => {
