@@ -55,7 +55,8 @@ describe("prompt manager", () => {
     expect(screen.getByText("Code Review")).toBeTruthy();
     expect(screen.getByText("Repair Group")).toBeTruthy();
     expect(screen.queryByText("Single · 1 prompt")).toBeNull();
-    expect(screen.getByText("群组 · 2 条 · 700ms")).toBeTruthy();
+    expect(screen.getByText("群组 · 2 条")).toBeTruthy();
+    expect(screen.queryByText(/700ms/)).toBeNull();
   });
 
   it("does not render instructional manager section descriptions", () => {
@@ -73,6 +74,22 @@ describe("prompt manager", () => {
 
     expect(header).toBeTruthy();
     expect(header?.textContent).toContain("新建提示词容器");
+  });
+
+  it("marks prompt container type segments with pressed state", () => {
+    renderManager();
+
+    expect(screen.getByRole("button", { name: "单个" }).getAttribute("aria-pressed"))
+      .toBe("true");
+    expect(screen.getByRole("button", { name: "群组" }).getAttribute("aria-pressed"))
+      .toBe("false");
+
+    fireEvent.click(screen.getByRole("button", { name: "群组" }));
+
+    expect(screen.getByRole("button", { name: "单个" }).getAttribute("aria-pressed"))
+      .toBe("false");
+    expect(screen.getByRole("button", { name: "群组" }).getAttribute("aria-pressed"))
+      .toBe("true");
   });
 
   it("renders prompt list as a unified row list", () => {

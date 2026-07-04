@@ -98,7 +98,8 @@ describe("PromptQuickList", () => {
     renderQuickList();
 
     expect(screen.getByText("修复流程")).toBeTruthy();
-    expect(screen.getByText("群组 · 3 条 · 700ms")).toBeTruthy();
+    expect(screen.getByText("群组 · 3 条")).toBeTruthy();
+    expect(screen.queryByText(/700ms/)).toBeNull();
     const groupOption = screen.getByRole("option", { name: /修复流程/i });
     expect(groupOption.textContent).toContain("1. 分析根本原因。");
     expect(groupOption.textContent).toContain("2. 执行修复。");
@@ -294,7 +295,7 @@ describe("PromptQuickList", () => {
     expect(tooltip.textContent).toContain("2. 执行修复。");
     expect(tooltip.textContent).toContain("3. 完成验证。");
     expect(tooltip.textContent).not.toContain("修复流程");
-    expect(tooltip.textContent).not.toContain("群组 · 3 条 · 700ms");
+    expect(tooltip.textContent).not.toContain("群组 · 3 条");
 
     fireEvent.mouseLeave(option);
 

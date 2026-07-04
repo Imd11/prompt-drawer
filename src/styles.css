@@ -308,27 +308,47 @@ button {
 }
 
 .segmented-control {
-  display: inline-flex;
+  display: inline-grid;
+  grid-auto-flow: column;
+  align-items: center;
   width: fit-content;
+  gap: 2px;
+  padding: 2px;
   overflow: hidden;
-  border: 1px solid #cfd7e3;
-  border-radius: 8px;
-  background: #ffffff;
+  background: #eef3f6;
+  border: 1px solid var(--pp-border-strong);
+  border-radius: var(--pp-radius-md);
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.72);
 }
 
 .segmented-control button {
   min-width: 82px;
-  padding: 8px 12px;
+  min-height: 30px;
+  padding: 0 12px;
   color: #4b5563;
   background: transparent;
+  border-radius: 6px;
+  box-shadow: none;
   cursor: pointer;
   font-size: 13px;
-  font-weight: 800;
+  font-weight: 650;
+  transition:
+    background 120ms ease,
+    box-shadow 120ms ease,
+    color 120ms ease,
+    transform 120ms ease;
 }
 
 .segmented-control button.is-selected {
   color: #ffffff;
-  background: #2563eb;
+  background: var(--pp-text);
+  box-shadow:
+    0 1px 2px rgba(15, 23, 42, 0.18),
+    inset 0 1px 0 rgba(255, 255, 255, 0.12);
+}
+
+.segmented-control button:active {
+  transform: translateY(1px);
 }
 
 .field {
@@ -408,17 +428,19 @@ button {
   gap: 8px;
 }
 
-.prompt-kind-badge {
+.prompt-kind-badge,
+.prompt-quick-meta {
   display: inline-flex;
   align-items: center;
-  min-height: 22px;
-  padding: 3px 8px;
-  color: #1d4ed8;
-  background: #eff6ff;
-  border: 1px solid #bfdbfe;
-  border-radius: 999px;
-  font-size: 12px;
-  font-weight: 800;
+  min-height: 21px;
+  padding: 2px 7px;
+  color: #475467;
+  background: #f2f5f7;
+  border: 1px solid var(--pp-border);
+  border-radius: 6px;
+  font-size: 11px;
+  font-weight: 620;
+  line-height: 1.25;
 }
 
 .prompt-preview {
@@ -596,14 +618,7 @@ button {
 
 .settings-segmented-control button {
   min-width: 78px;
-  padding: 0 11px;
   color: #475467;
-  font-weight: 650;
-}
-
-.settings-segmented-control button.is-selected {
-  color: #ffffff;
-  background: var(--pp-text);
 }
 
 .popover-root {
@@ -695,18 +710,6 @@ button {
   font-size: 13px;
   font-weight: 700;
   line-height: 1.25;
-}
-
-.prompt-quick-meta {
-  display: inline-flex;
-  padding: 2px 7px;
-  color: #2455c3;
-  background: var(--pp-accent-soft);
-  border: 1px solid #d5e3ff;
-  border-radius: 999px;
-  font-size: 10px;
-  font-weight: 700;
-  line-height: 1.3;
 }
 
 .prompt-quick-preview-lines {
@@ -960,15 +963,7 @@ button {
 
 .prompt-manager .segmented-control button {
   min-width: 78px;
-  padding: 7px 12px;
   color: #475467;
-  font-weight: 650;
-}
-
-.prompt-manager .segmented-control button.is-selected {
-  color: var(--pp-text);
-  background: var(--pp-surface);
-  box-shadow: inset 0 0 0 1px var(--pp-border-strong);
 }
 
 .prompt-manager .prompt-list {
@@ -1005,13 +1000,7 @@ button {
 }
 
 .prompt-manager .prompt-kind-badge {
-  min-height: 20px;
-  padding: 2px 7px;
-  color: #2455c3;
-  background: var(--pp-accent-soft);
-  border-color: #d5e3ff;
   font-size: 10px;
-  font-weight: 700;
 }
 
 .prompt-preview-lines {

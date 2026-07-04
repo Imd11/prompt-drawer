@@ -92,7 +92,7 @@ function PromptKindBadge({ prompt, messages }: { prompt: PromptContainer; messag
   const count = getPromptContainerBodies(prompt).length;
   return (
     <span className="prompt-kind-badge">
-      {messages.manager.groupMeta(count, prompt.intervalMs)}
+      {messages.manager.groupMeta(count)}
     </span>
   );
 }
@@ -274,6 +274,7 @@ export function PromptManager({
             <button
               className={draft.type === "single" ? "is-selected" : ""}
               type="button"
+              aria-pressed={draft.type === "single"}
               onClick={() => setDraft({ ...draft, type: "single" })}
             >
               {messages.manager.single}
@@ -281,6 +282,7 @@ export function PromptManager({
             <button
               className={draft.type === "group" ? "is-selected" : ""}
               type="button"
+              aria-pressed={draft.type === "group"}
               onClick={() => setDraft({ ...draft, type: "group" })}
             >
               {messages.manager.group}
@@ -367,6 +369,7 @@ export function PromptManager({
                     <button
                       className={editDraft.type === "single" ? "is-selected" : ""}
                       type="button"
+                      aria-pressed={editDraft.type === "single"}
                       onClick={() => setEditDraft({ ...editDraft, type: "single" })}
                     >
                       {messages.manager.single}
@@ -374,6 +377,7 @@ export function PromptManager({
                     <button
                       className={editDraft.type === "group" ? "is-selected" : ""}
                       type="button"
+                      aria-pressed={editDraft.type === "group"}
                       onClick={() => setEditDraft({ ...editDraft, type: "group" })}
                     >
                       {messages.manager.group}

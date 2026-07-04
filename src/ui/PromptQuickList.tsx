@@ -200,7 +200,7 @@ export function PromptQuickList({
                 <span className="prompt-quick-title">{prompt.title}</span>
                 {prompt.type === "group" ? (
                   <span className="prompt-quick-meta">
-                    {groupMeta(getPromptContainerBodies(prompt).length, prompt.intervalMs)}
+                    {groupMeta(getPromptContainerBodies(prompt).length)}
                   </span>
                 ) : null}
               </span>

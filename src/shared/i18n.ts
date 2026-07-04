@@ -78,7 +78,7 @@ export const messages = {
       movePromptUp: (index: number) => `上移提示词 ${index}`,
       movePromptDown: (index: number) => `下移提示词 ${index}`,
       promptLabel: (index: number) => `提示词 ${index}`,
-      groupMeta: (count: number, intervalMs: number) => `群组 · ${count} 条 · ${intervalMs}ms`,
+      groupMeta: (count: number) => `群组 · ${count} 条`,
     },
     quickList: {
       ariaLabel: "提示词",
@@ -162,8 +162,7 @@ export const messages = {
       movePromptUp: (index: number) => `Move Prompt ${index} up`,
       movePromptDown: (index: number) => `Move Prompt ${index} down`,
       promptLabel: (index: number) => `Prompt ${index}`,
-      groupMeta: (count: number, intervalMs: number) =>
-        `Group · ${count} prompts · ${intervalMs}ms`,
+      groupMeta: (count: number) => `Group · ${count} prompts`,
     },
     quickList: {
       ariaLabel: "Prompts",
