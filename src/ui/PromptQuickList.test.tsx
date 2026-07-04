@@ -60,7 +60,7 @@ function makeRect(
 function revealHoverPreview(
   option: HTMLElement
 ) {
-  fireEvent.mouseEnter(option);
+  fireEvent.mouseMove(option);
   act(() => {
     vi.advanceTimersByTime(1500);
   });
@@ -136,7 +136,6 @@ describe("PromptQuickList", () => {
       makeRect(40, 180, 300, 90)
     );
 
-    fireEvent.mouseEnter(option, { clientX: 310, clientY: 250 });
     fireEvent.mouseMove(option, { clientX: 90, clientY: 330 });
     act(() => {
       vi.advanceTimersByTime(1500);
@@ -153,7 +152,7 @@ describe("PromptQuickList", () => {
     vi.useFakeTimers();
     renderQuickList();
 
-    fireEvent.mouseEnter(screen.getByRole("option", { name: /讨论方案/i }));
+    fireEvent.mouseMove(screen.getByRole("option", { name: /讨论方案/i }));
 
     act(() => {
       vi.advanceTimersByTime(1499);
@@ -163,6 +162,27 @@ describe("PromptQuickList", () => {
     act(() => {
       vi.advanceTimersByTime(1);
     });
+    expect(screen.getByRole("tooltip")).toBeTruthy();
+  });
+
+  it("does not start hover preview from mouse enter alone", () => {
+    vi.useFakeTimers();
+    renderQuickList();
+
+    const option = screen.getByRole("option", { name: /讨论方案/i });
+    fireEvent.mouseEnter(option);
+
+    act(() => {
+      vi.advanceTimersByTime(2000);
+    });
+
+    expect(screen.queryByRole("tooltip")).toBeNull();
+
+    fireEvent.mouseMove(option);
+    act(() => {
+      vi.advanceTimersByTime(1500);
+    });
+
     expect(screen.getByRole("tooltip")).toBeTruthy();
   });
 
@@ -191,7 +211,7 @@ describe("PromptQuickList", () => {
     vi.useFakeTimers();
     const { rerender } = renderQuickList({ hoverResetKey: 0 });
 
-    fireEvent.mouseEnter(screen.getByRole("option", { name: /修复流程/i }));
+    fireEvent.mouseMove(screen.getByRole("option", { name: /修复流程/i }));
 
     const zh = getMessages("zh-CN");
     rerender(

@@ -121,6 +121,15 @@ export function PromptQuickList({
     prompt: PromptContainer,
     target: HTMLElement
   ) {
+    const currentAnchor = hoverPreviewAnchorRef.current;
+    if (
+      currentAnchor?.prompt.id === prompt.id &&
+      currentAnchor.target === target &&
+      (hoverPreviewTimerRef.current !== null || hoverPreview?.promptId === prompt.id)
+    ) {
+      return;
+    }
+
     clearHoverPreviewTimer();
     hoverPreviewAnchorRef.current = {
       prompt,
@@ -172,7 +181,7 @@ export function PromptQuickList({
               role="option"
               aria-selected="false"
               disabled={submittingPromptId === prompt.id}
-              onMouseEnter={(event) => scheduleHoverPreview(prompt, event.currentTarget)}
+              onMouseMove={(event) => scheduleHoverPreview(prompt, event.currentTarget)}
               onMouseLeave={hideHoverPreview}
               onBlur={hideHoverPreview}
               onClick={() => selectPrompt(prompt)}
