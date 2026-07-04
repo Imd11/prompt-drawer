@@ -414,8 +414,12 @@ pub fn show_prompt_popover(x: f64, y: f64, app: tauri::AppHandle) -> Result<(), 
 #[tauri::command]
 pub fn hide_prompt_popover(app: tauri::AppHandle) -> Result<(), String> {
     if let Some(window) = app.get_webview_window(POPOVER_WINDOW_LABEL) {
+        let was_visible = window.is_visible().unwrap_or(false);
         window.hide().map_err(|e| e.to_string())?;
         set_outside_click_monitor_active(false);
+        if was_visible {
+            emit_popover_dismissed(&app);
+        }
     }
     Ok(())
 }
@@ -812,6 +816,30 @@ mod tests {
         assert!(command_source.contains("emit_popover_dismissed(&app)"));
         assert!(command_source.contains("PromptPopoverToggleOutcome { opened: false }"));
         assert!(command_source.contains("PromptPopoverToggleOutcome { opened: true }"));
+    }
+
+    #[test]
+    fn hide_prompt_popover_emits_dismissal_after_hiding_visible_window() {
+        let source = include_str!("windows.rs");
+        let start = source
+            .find("pub fn hide_prompt_popover")
+            .expect("hide_prompt_popover command should exist");
+        let end = source[start..]
+            .find("#[tauri::command]\npub fn show_prompt_popover_from_button")
+            .expect("show_prompt_popover_from_button should follow hide_prompt_popover");
+        let command_source = &source[start..start + end];
+
+        assert!(command_source.contains("let was_visible = window.is_visible().unwrap_or(false);"));
+        assert!(command_source.contains("if was_visible {"));
+        assert!(command_source.contains("emit_popover_dismissed(&app);"));
+        assert!(
+            command_source
+                .find("window.hide().map_err")
+                .expect("hide should happen")
+                < command_source
+                    .find("emit_popover_dismissed(&app);")
+                    .expect("dismissal should be emitted")
+        );
     }
 
     #[test]

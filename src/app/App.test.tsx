@@ -1373,7 +1373,8 @@ describe("app", () => {
     expect(allCalls).not.toContain("open_main_window");
   });
 
-  it("emits prompt-popover-dismissed when hiding Calico from button controls", async () => {
+  it("does not manually emit prompt-popover-dismissed when hiding Calico from button controls", async () => {
+    const { invoke } = await import("@tauri-apps/api/core");
     currentWindowLabel = "prompt-popover";
     window.history.pushState({}, "", "/?mode=button-controls");
     const { readTextFile } = await import("@tauri-apps/plugin-fs");
@@ -1397,8 +1398,9 @@ describe("app", () => {
     fireEvent.click(await screen.findByRole("button", { name: "隐藏 Calico" }));
 
     await waitFor(() => {
-      expect(emitMock).toHaveBeenCalledWith("prompt-popover-dismissed");
+      expect(vi.mocked(invoke)).toHaveBeenCalledWith("hide_prompt_popover");
     });
+    expect(emitMock).not.toHaveBeenCalledWith("prompt-popover-dismissed");
   });
 
   it("manage prompts from button controls calls open_main_window", async () => {
@@ -1424,7 +1426,8 @@ describe("app", () => {
     });
   });
 
-  it("emits prompt-popover-dismissed when button controls open the manager without sending", async () => {
+  it("does not manually emit prompt-popover-dismissed when button controls open the manager without sending", async () => {
+    const { invoke } = await import("@tauri-apps/api/core");
     currentWindowLabel = "prompt-popover";
     window.history.pushState({}, "", "/?mode=button-controls");
     const { readTextFile } = await import("@tauri-apps/plugin-fs");
@@ -1448,8 +1451,9 @@ describe("app", () => {
     fireEvent.click(await screen.findByRole("button", { name: "管理提示词..." }));
 
     await waitFor(() => {
-      expect(emitMock).toHaveBeenCalledWith("prompt-popover-dismissed");
+      expect(vi.mocked(invoke)).toHaveBeenCalledWith("hide_prompt_popover");
     });
+    expect(emitMock).not.toHaveBeenCalledWith("prompt-popover-dismissed");
   });
 
   it("button controls can open Accessibility settings", async () => {
@@ -1472,7 +1476,8 @@ describe("app", () => {
     await waitFor(() => {
       expect(vi.mocked(invoke)).toHaveBeenCalledWith("open_accessibility_settings");
     });
-    expect(emitMock).toHaveBeenCalledWith("prompt-popover-dismissed");
+    expect(vi.mocked(invoke)).toHaveBeenCalledWith("hide_prompt_popover");
+    expect(emitMock).not.toHaveBeenCalledWith("prompt-popover-dismissed");
   });
 
   it("button controls can quit Prompt Picker", async () => {

@@ -559,7 +559,6 @@ export function App({
             onClick={async () => {
               await openMainWindow();
               await hidePromptPopover();
-              await emitPromptPopoverDismissed();
             }}
           >
               {t.buttonControls.managePrompts}
@@ -571,7 +570,6 @@ export function App({
               setActiveSettings(await settingsStoreRef.current.get());
               await hidePromptButton();
               await hidePromptPopover();
-              await emitPromptPopoverDismissed();
             }}
           >
             {t.buttonControls.hideCalico}
@@ -581,7 +579,6 @@ export function App({
             onClick={async () => {
               await openAccessibilitySettings();
               await hidePromptPopover();
-              await emitPromptPopoverDismissed();
             }}
           >
             {t.buttonControls.openAccessibilitySettings}
