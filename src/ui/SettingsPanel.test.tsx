@@ -76,6 +76,16 @@ describe("settings panel", () => {
     expect(screen.queryByRole("combobox")).toBeNull();
   });
 
+  it("allows the language dropdown to escape the settings card clipping boundary", () => {
+    renderPanel();
+
+    const trigger = screen.getByRole("button", { name: /界面语言.*中文/ });
+    const card = trigger.closest(".settings-card");
+
+    expect(card).toBeTruthy();
+    expect(card?.classList.contains("settings-card--floating-control")).toBe(true);
+  });
+
   it("does not render instructional settings descriptions", () => {
     renderPanel();
 
