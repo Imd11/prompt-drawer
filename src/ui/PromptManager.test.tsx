@@ -211,8 +211,8 @@ describe("prompt manager", () => {
   });
 
   it("converts group interval seconds to milliseconds when creating a group", () => {
-    let createdGroup: { intervalMs: number } | null = null;
-    renderManager({ onCreateGroup: (input) => { createdGroup = input; } });
+    let createdIntervalMs: number | null = null;
+    renderManager({ onCreateGroup: (input) => { createdIntervalMs = input.intervalMs; } });
 
     fireEvent.click(screen.getByRole("button", { name: "群组" }));
     fireEvent.change(screen.getByPlaceholderText("标题"), {
@@ -226,7 +226,7 @@ describe("prompt manager", () => {
     });
     fireEvent.click(screen.getByRole("button", { name: "添加群组" }));
 
-    expect(createdGroup?.intervalMs).toBe(1500);
+    expect(createdIntervalMs).toBe(1500);
   });
 
   it("shows existing group interval in seconds while editing", () => {
