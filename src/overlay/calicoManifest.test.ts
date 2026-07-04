@@ -58,6 +58,10 @@ const reservedStates = [
   "mini-sleep",
 ];
 
+const calicoNativeWindowSize = 288;
+const calicoHitAreaSize = 132;
+const calicoSpriteSize = 126;
+
 function readManifest(): CalicoManifest {
   return JSON.parse(readFileSync("public/calico/manifest.json", "utf8"));
 }
@@ -117,5 +121,25 @@ describe("Calico manifest", () => {
     expect(manifest.states["mini-happy"]).toBeDefined();
     expect(existsSync(`public${manifest.states.waking.file}`)).toBe(true);
     expect(existsSync(`public${manifest.states["mini-happy"].file}`)).toBe(true);
+  });
+
+  it("keeps every rendered Calico motion inside the native transparent window", () => {
+    const manifest = readManifest();
+    const center = calicoNativeWindowSize / 2;
+
+    for (const [stateName, state] of Object.entries(manifest.states)) {
+      const renderedSize = calicoSpriteSize * state.scale;
+      const left = center - renderedSize / 2 + state.offsetX;
+      const top = center - renderedSize / 2 + state.offsetY;
+      const right = left + renderedSize;
+      const bottom = top + renderedSize;
+
+      expect(left, `${stateName} left edge`).toBeGreaterThanOrEqual(0);
+      expect(top, `${stateName} top edge`).toBeGreaterThanOrEqual(0);
+      expect(right, `${stateName} right edge`).toBeLessThanOrEqual(calicoNativeWindowSize);
+      expect(bottom, `${stateName} bottom edge`).toBeLessThanOrEqual(calicoNativeWindowSize);
+    }
+
+    expect(calicoHitAreaSize).toBe(132);
   });
 });

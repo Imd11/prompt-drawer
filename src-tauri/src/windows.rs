@@ -15,8 +15,8 @@ pub const POPOVER_WINDOW_LABEL: &str = "prompt-popover";
 
 pub const BUTTON_VISUAL_WIDTH: f64 = 132.0;
 pub const BUTTON_VISUAL_HEIGHT: f64 = 132.0;
-pub const BUTTON_WINDOW_WIDTH: f64 = 208.0;
-pub const BUTTON_WINDOW_HEIGHT: f64 = 208.0;
+pub const BUTTON_WINDOW_WIDTH: f64 = 288.0;
+pub const BUTTON_WINDOW_HEIGHT: f64 = 288.0;
 pub const BUTTON_WINDOW_PADDING_X: f64 = (BUTTON_WINDOW_WIDTH - BUTTON_VISUAL_WIDTH) / 2.0;
 pub const BUTTON_WINDOW_PADDING_Y: f64 = (BUTTON_WINDOW_HEIGHT - BUTTON_VISUAL_HEIGHT) / 2.0;
 pub const BUTTON_WINDOW_TRANSPARENT: bool = true;
@@ -790,10 +790,10 @@ mod tests {
     fn calico_button_window_has_animation_padding() {
         assert_eq!(BUTTON_VISUAL_WIDTH, 132.0);
         assert_eq!(BUTTON_VISUAL_HEIGHT, 132.0);
-        assert_eq!(BUTTON_WINDOW_WIDTH, 208.0);
-        assert_eq!(BUTTON_WINDOW_HEIGHT, 208.0);
-        assert_eq!(BUTTON_WINDOW_PADDING_X, 38.0);
-        assert_eq!(BUTTON_WINDOW_PADDING_Y, 38.0);
+        assert_eq!(BUTTON_WINDOW_WIDTH, 288.0);
+        assert_eq!(BUTTON_WINDOW_HEIGHT, 288.0);
+        assert_eq!(BUTTON_WINDOW_PADDING_X, 78.0);
+        assert_eq!(BUTTON_WINDOW_PADDING_Y, 78.0);
     }
 
     #[test]
@@ -826,7 +826,7 @@ mod tests {
         let visual = (320.0, 240.0);
         let window = prompt_button_visual_to_window_position(visual.0, visual.1);
 
-        assert_eq!(window, (282.0, 202.0));
+        assert_eq!(window, (242.0, 162.0));
         assert_eq!(
             prompt_button_window_to_visual_position(window.0, window.1),
             visual
@@ -840,8 +840,8 @@ mod tests {
 
         match button_position {
             tauri::Position::Logical(logical) => {
-                assert_eq!(logical.x, 282.0);
-                assert_eq!(logical.y, 202.0);
+                assert_eq!(logical.x, 242.0);
+                assert_eq!(logical.y, 162.0);
             }
             _ => panic!("prompt button position must use logical coordinates"),
         }
@@ -858,8 +858,8 @@ mod tests {
     #[test]
     fn outside_click_uses_visual_button_rect_not_transparent_window_padding() {
         let native_button = WindowRect {
-            x: 282.0,
-            y: 202.0,
+            x: 242.0,
+            y: 162.0,
             width: BUTTON_WINDOW_WIDTH,
             height: BUTTON_WINDOW_HEIGHT,
         };
