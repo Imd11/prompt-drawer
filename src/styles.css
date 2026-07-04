@@ -553,6 +553,10 @@ button {
   box-shadow: var(--pp-shadow-soft);
 }
 
+.settings-card--floating-control {
+  overflow: visible;
+}
+
 .settings-card-heading {
   display: flex;
   min-height: 38px;
@@ -560,6 +564,7 @@ button {
   padding: 0 14px;
   background: var(--pp-surface-subtle);
   border-bottom: 1px solid var(--pp-border);
+  border-radius: calc(var(--pp-radius-sm) - 1px) calc(var(--pp-radius-sm) - 1px) 0 0;
 }
 
 .settings-card-heading h2 {

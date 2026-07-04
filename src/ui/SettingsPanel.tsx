@@ -35,7 +35,7 @@ export function SettingsPanel({
         </div>
       </header>
 
-      <section className="settings-card">
+      <section className="settings-card settings-card--floating-control">
         <div className="settings-card-heading">
           <h2>{t.settings.languageTitle}</h2>
         </div>
