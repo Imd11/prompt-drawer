@@ -91,12 +91,13 @@ describe("overlay button html", () => {
   it("opens the prompt list without changing Calico motion state on click", () => {
     const html = readOverlayHtml();
     const clickBlock = html.slice(
-      html.indexOf("const sessionId = ++promptPickSessionId;"),
-      html.indexOf("start = null;", html.indexOf("const sessionId = ++promptPickSessionId;"))
+      html.indexOf("const permission = await invoke('prompt_interaction_permission_status');"),
+      html.indexOf("start = null;", html.indexOf("const permission = await invoke('prompt_interaction_permission_status');"))
     );
 
+    expect(clickBlock).toContain("prompt_interaction_permission_status");
+    expect(clickBlock).toContain("handleMissingPromptInteractionPermission(permission)");
     expect(clickBlock).toContain("toggle_prompt_popover_from_button");
-    expect(clickBlock).toContain("pauseIdleForPointerInteraction(6_000);");
     expect(clickBlock).not.toContain("applyCalicoMotion");
   });
 
@@ -146,8 +147,8 @@ describe("overlay button html", () => {
   it("keeps click-to-open neutral and separate from hover attention", () => {
     const html = readFileSync("public/overlay.html", "utf8");
     const clickBlock = html.slice(
-      html.indexOf("const sessionId = ++promptPickSessionId;"),
-      html.indexOf("start = null;", html.indexOf("const sessionId = ++promptPickSessionId;"))
+      html.indexOf("const permission = await invoke('prompt_interaction_permission_status');"),
+      html.indexOf("start = null;", html.indexOf("const permission = await invoke('prompt_interaction_permission_status');"))
     );
 
     expect(clickBlock).not.toContain("handleAttention");
@@ -170,6 +171,9 @@ describe("overlay button html", () => {
 
     expect(html).toContain("let promptPickSessionId = 0;");
     expect(html).toContain("const sessionId = ++promptPickSessionId;");
+    expect(html).toContain("const permission = await invoke('prompt_interaction_permission_status');");
+    expect(html).toContain("if (permission?.required && !permission.trusted)");
+    expect(html).toContain("await handleMissingPromptInteractionPermission(permission);");
     expect(html).toContain("const toggleResult = await invoke('toggle_prompt_popover_from_button', { sessionId });");
     expect(html).toContain("if (toggleResult?.opened)");
     expect(html).toContain("const sessionPromise = invoke('begin_prompt_pick_session', { sessionId });");
@@ -177,6 +181,9 @@ describe("overlay button html", () => {
     expect(html).toContain("resetCalicoMotion();");
     expect(html).not.toContain("await invoke('begin_prompt_pick_session')");
     expect(html).not.toContain("await sessionPromise.catch");
+    expect(html.indexOf("prompt_interaction_permission_status")).toBeLessThan(
+      html.indexOf("toggle_prompt_popover_from_button")
+    );
     expect(html.indexOf("toggle_prompt_popover_from_button")).toBeLessThan(
       html.indexOf("begin_prompt_pick_session")
     );
@@ -207,15 +214,20 @@ describe("overlay button html", () => {
     expect(html).not.toContain("可手动 Cmd+V");
   });
 
-  it("requests Accessibility permission from actionable autosend status bubbles", () => {
+  it("checks Accessibility permission from the Calico click before opening prompts", () => {
     const html = readOverlayHtml();
 
-    expect(html).toContain("request_accessibility_permission");
-    expect(html).toContain("request_accessibility_permission_cmd");
+    expect(html).toContain("prompt_interaction_permission_status");
+    expect(html).toContain("request_prompt_interaction_permission");
     expect(html).toContain("open_accessibility_settings");
-    expect(html).toContain("statusBubble.dataset.action");
-    expect(html).toContain("is-action");
-    expect(html).toContain("Open Accessibility Permission Help");
+    expect(html).toContain("permissionMessages");
+    expect(html).toContain("nativePromptFallback");
+    expect(html).toContain("lastAccessibilitySettingsOpenAt");
+    expect(html).toContain("invokeOrThrow('open_accessibility_settings')");
+    expect(html).not.toContain("request_accessibility_permission_cmd");
+    expect(html).not.toContain("statusBubble.dataset.action");
+    expect(html).not.toContain("is-action");
+    expect(html).not.toContain("Open Accessibility Permission Help");
     expect(html).not.toContain("payload.kind || 'copied'");
   });
 

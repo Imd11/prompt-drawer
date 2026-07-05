@@ -22,9 +22,9 @@ pub const BUTTON_WINDOW_PADDING_Y: f64 = (BUTTON_WINDOW_HEIGHT - BUTTON_VISUAL_H
 pub const BUTTON_WINDOW_TRANSPARENT: bool = true;
 pub const POPOVER_WIDTH: f64 = 280.0;
 pub const POPOVER_HEIGHT: f64 = 432.0;
-pub const POPOVER_WINDOW_PADDING: f64 = 16.0;
-pub const POPOVER_WINDOW_WIDTH: f64 = POPOVER_WIDTH + (POPOVER_WINDOW_PADDING * 2.0);
-pub const POPOVER_WINDOW_HEIGHT: f64 = POPOVER_HEIGHT + (POPOVER_WINDOW_PADDING * 2.0);
+pub const POPOVER_WINDOW_PADDING: f64 = 0.0;
+pub const POPOVER_WINDOW_WIDTH: f64 = POPOVER_WIDTH;
+pub const POPOVER_WINDOW_HEIGHT: f64 = POPOVER_HEIGHT;
 pub const BUTTON_CONTROLS_WIDTH: f64 = 156.0;
 pub const BUTTON_CONTROLS_HEIGHT: f64 = 72.0;
 pub const POPOVER_GAP: f64 = 4.0;
@@ -743,23 +743,33 @@ mod tests {
     }
 
     #[test]
-    fn prompt_popover_native_window_has_transparent_shadow_padding() {
+    fn prompt_popover_native_window_matches_rounded_panel_size() {
         let visual_size = popover_size_for_mode("popover");
         let window_size = popover_window_size_for_mode("popover");
 
-        assert_eq!(POPOVER_WINDOW_PADDING, 16.0);
+        assert_eq!(POPOVER_WINDOW_PADDING, 0.0);
         assert_eq!(visual_size.width, POPOVER_WIDTH);
         assert_eq!(visual_size.height, POPOVER_HEIGHT);
         assert_eq!(window_size.width, POPOVER_WINDOW_WIDTH);
         assert_eq!(window_size.height, POPOVER_WINDOW_HEIGHT);
-        assert_eq!(
-            window_size.width,
-            POPOVER_WIDTH + (POPOVER_WINDOW_PADDING * 2.0)
-        );
-        assert_eq!(
-            window_size.height,
-            POPOVER_HEIGHT + (POPOVER_WINDOW_PADDING * 2.0)
-        );
+        assert_eq!(window_size.width, POPOVER_WIDTH);
+        assert_eq!(window_size.height, POPOVER_HEIGHT);
+    }
+
+    #[test]
+    fn prompt_popover_visual_rect_matches_native_window_rect() {
+        let rect = WindowRect {
+            x: 120.0,
+            y: 240.0,
+            width: POPOVER_WINDOW_WIDTH,
+            height: POPOVER_WINDOW_HEIGHT,
+        };
+        let visual = visual_popover_rect_from_window_rect(rect, "popover");
+
+        assert_eq!(visual.x, rect.x);
+        assert_eq!(visual.y, rect.y);
+        assert_eq!(visual.width, rect.width);
+        assert_eq!(visual.height, rect.height);
     }
 
     #[test]
@@ -842,11 +852,8 @@ mod tests {
             Some(bounds),
         );
 
-        assert_eq!(left.0, 8.0 + POPOVER_WINDOW_PADDING);
-        assert_eq!(
-            right.0,
-            1440.0 - POPOVER_WIDTH - 8.0 - POPOVER_WINDOW_PADDING
-        );
+        assert_eq!(left.0, 8.0);
+        assert_eq!(right.0, 1440.0 - POPOVER_WIDTH - 8.0);
     }
 
     #[test]
@@ -984,19 +991,19 @@ mod tests {
     }
 
     #[test]
-    fn outside_click_uses_visual_popover_rect_not_transparent_shadow_padding() {
+    fn outside_click_uses_popover_panel_rect_without_shadow_padding() {
         let native_popover = WindowRect {
-            x: 784.0,
-            y: 4.0,
+            x: 800.0,
+            y: 20.0,
             width: POPOVER_WINDOW_WIDTH,
             height: POPOVER_WINDOW_HEIGHT,
         };
         let visual_popover = visual_popover_rect_from_window_rect(native_popover, "popover");
 
-        assert_eq!(visual_popover.x, 800.0);
-        assert_eq!(visual_popover.y, 20.0);
-        assert_eq!(visual_popover.width, POPOVER_WIDTH);
-        assert_eq!(visual_popover.height, POPOVER_HEIGHT);
+        assert_eq!(visual_popover.x, native_popover.x);
+        assert_eq!(visual_popover.y, native_popover.y);
+        assert_eq!(visual_popover.width, native_popover.width);
+        assert_eq!(visual_popover.height, native_popover.height);
         assert!(should_dismiss_popover_for_click(
             (790.0, 12.0),
             None,

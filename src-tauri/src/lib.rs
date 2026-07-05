@@ -32,6 +32,47 @@ fn request_accessibility_permission_cmd() -> AccessibilityStatus {
     request_accessibility_permission()
 }
 
+#[derive(Clone, Debug, serde::Serialize)]
+struct PromptInteractionPermissionStatus {
+    required: bool,
+    trusted: bool,
+    native_prompt_requested: bool,
+    language: String,
+}
+
+fn prompt_interaction_permission_status_from_parts(
+    required: bool,
+    trusted: bool,
+    native_prompt_requested: bool,
+    language: String,
+) -> PromptInteractionPermissionStatus {
+    PromptInteractionPermissionStatus {
+        required,
+        trusted: if required { trusted } else { true },
+        native_prompt_requested,
+        language,
+    }
+}
+
+#[tauri::command]
+fn prompt_interaction_permission_status(
+    app: tauri::AppHandle,
+) -> PromptInteractionPermissionStatus {
+    let settings = read_settings_value(&app);
+    prompt_interaction_permission_status_from_parts(
+        cfg!(target_os = "macos"),
+        accessibility_status().trusted,
+        accessibility_prompt_requested(&settings),
+        settings_language(&settings).to_string(),
+    )
+}
+
+#[tauri::command]
+fn request_prompt_interaction_permission(app: tauri::AppHandle) -> AccessibilityStatus {
+    let _ = set_accessibility_prompt_requested(&app, true);
+    request_accessibility_permission()
+}
+
 #[tauri::command]
 fn open_accessibility_settings() -> Result<(), String> {
     platform::macos::open_accessibility_settings()
@@ -796,6 +837,9 @@ fn default_settings_value() -> serde_json::Value {
         "promptInsertion": {
             "mode": "paste_and_submit"
         },
+        "permissions": {
+            "accessibilityPromptRequested": false
+        },
         "language": "zh-CN"
     })
 }
@@ -824,6 +868,13 @@ fn settings_language(settings: &serde_json::Value) -> &str {
     }
 }
 
+fn accessibility_prompt_requested(settings: &serde_json::Value) -> bool {
+    settings
+        .pointer("/permissions/accessibilityPromptRequested")
+        .and_then(serde_json::Value::as_bool)
+        .unwrap_or(false)
+}
+
 fn write_settings_value(
     app: &tauri::AppHandle,
     settings: &serde_json::Value,
@@ -847,6 +898,21 @@ fn set_saved_floating_button_visible(app: &tauri::AppHandle, visible: bool) -> R
         settings["floatingButton"] = serde_json::json!({});
     }
     settings["floatingButton"]["visible"] = serde_json::Value::Bool(visible);
+    write_settings_value(app, &settings)
+}
+
+fn set_accessibility_prompt_requested(
+    app: &tauri::AppHandle,
+    requested: bool,
+) -> Result<(), String> {
+    let mut settings = read_settings_value(app);
+    if !settings.is_object() {
+        settings = default_settings_value();
+    }
+    if settings.get("permissions").is_none() || !settings["permissions"].is_object() {
+        settings["permissions"] = serde_json::json!({});
+    }
+    settings["permissions"]["accessibilityPromptRequested"] = serde_json::Value::Bool(requested);
     write_settings_value(app, &settings)
 }
 
@@ -981,6 +1047,8 @@ pub fn run() {
         .invoke_handler(tauri::generate_handler![
             accessibility_status_cmd,
             request_accessibility_permission_cmd,
+            prompt_interaction_permission_status,
+            request_prompt_interaction_permission,
             open_accessibility_settings,
             frontmost_app_cmd,
             current_input_target,
@@ -1916,8 +1984,56 @@ mod menu_bar_app_tests {
             icon.rgba().len(),
             (MENUBAR_TEMPLATE_ICON_SIZE * MENUBAR_TEMPLATE_ICON_SIZE * 4) as usize
         );
-        assert!(icon.rgba().chunks_exact(4).any(|pixel| pixel[3] == 0));
-        assert!(icon.rgba().chunks_exact(4).any(|pixel| pixel[3] > 0));
+        let alpha_values: std::collections::BTreeSet<u8> =
+            icon.rgba().chunks_exact(4).map(|pixel| pixel[3]).collect();
+        let opaque_pixels = icon
+            .rgba()
+            .chunks_exact(4)
+            .filter(|pixel| pixel[3] == 255)
+            .count();
+
+        assert!(alpha_values.contains(&0));
+        assert!(alpha_values.contains(&255));
+        assert!(alpha_values
+            .iter()
+            .all(|alpha| *alpha == 0 || *alpha == 255));
+        assert!((60..=220).contains(&opaque_pixels));
+    }
+
+    #[test]
+    fn default_settings_tracks_accessibility_prompt_history() {
+        let settings = default_settings_value();
+
+        assert_eq!(
+            settings.pointer("/permissions/accessibilityPromptRequested"),
+            Some(&serde_json::Value::Bool(false))
+        );
+    }
+
+    #[test]
+    fn permission_status_does_not_require_accessibility_on_non_macos() {
+        let status = prompt_interaction_permission_status_from_parts(
+            false,
+            false,
+            false,
+            "zh-CN".to_string(),
+        );
+
+        assert!(!status.required);
+        assert!(status.trusted);
+        assert!(!status.native_prompt_requested);
+        assert_eq!(status.language, "zh-CN");
+    }
+
+    #[test]
+    fn permission_status_reports_untrusted_macos_prompt_state() {
+        let status =
+            prompt_interaction_permission_status_from_parts(true, false, true, "en-US".to_string());
+
+        assert!(status.required);
+        assert!(!status.trusted);
+        assert!(status.native_prompt_requested);
+        assert_eq!(status.language, "en-US");
     }
 
     #[test]

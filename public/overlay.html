@@ -147,10 +147,6 @@ body {
   border-color: rgba(253, 186, 116, 0.9);
 }
 
-.calico-status-bubble.is-action {
-  cursor: pointer;
-  pointer-events: auto;
-}
 </style></head>
 <body>
 <div id="statusBubble" class="calico-status-bubble" aria-live="polite"></div>
@@ -187,8 +183,23 @@ let dragStartedEmitted = false;
 let dragPopoverHidden = false;
 let motionResetTimer = 0;
 let statusTimer = 0;
+let lastAccessibilitySettingsOpenAt = 0;
 let calicoMotion = null;
 let calicoIdleDirector = null;
+const permissionMessages = {
+  'zh-CN': {
+    nativePrompt: '请在系统弹窗中授权',
+    nativePromptFallback: '未看到弹窗？再点小猫',
+    settingsOpened: '请启用 Prompt Picker',
+    settingsOpenFailed: '请手动打开系统设置中的辅助功能权限'
+  },
+  'en-US': {
+    nativePrompt: 'Use the system prompt',
+    nativePromptFallback: 'No prompt? Click Calico again',
+    settingsOpened: 'Enable Prompt Picker in Accessibility',
+    settingsOpenFailed: 'Open Accessibility manually in System Settings'
+  }
+};
 
 function clearMotionTimers() {
   window.clearTimeout(motionResetTimer);
@@ -263,6 +274,13 @@ async function invoke(command, args) {
   }
 }
 
+async function invokeOrThrow(command, args) {
+  if (!tauri?.core?.invoke) {
+    throw new Error("Tauri invoke API is unavailable in overlay.html");
+  }
+  return tauri.core.invoke(command, args);
+}
+
 async function emit(event, payload) {
   if (!tauri?.event?.emit) return;
   try {
@@ -287,13 +305,47 @@ function showStatusBubble(payload) {
   if (!statusBubble || !payload) return;
   const kind = payload.kind || 'failed';
   const message = payload.message || '未能自动发送';
-  const action = payload.action || '';
   window.clearTimeout(statusTimer);
   statusBubble.textContent = message;
-  statusBubble.dataset.action = action;
-  statusBubble.title = action ? 'Open Accessibility Permission Help' : '';
-  statusBubble.className = `calico-status-bubble is-visible is-${kind}${action ? ' is-action' : ''}`;
-  statusTimer = window.setTimeout(hideStatusBubble, action ? 3200 : 1800);
+  statusBubble.title = '';
+  statusBubble.className = `calico-status-bubble is-visible is-${kind}`;
+  statusTimer = window.setTimeout(hideStatusBubble, 1800);
+}
+
+function permissionText(permission, key) {
+  const language = permission?.language === 'en-US' ? 'en-US' : 'zh-CN';
+  return permissionMessages[language][key];
+}
+
+async function handleMissingPromptInteractionPermission(permission) {
+  if (!permission.native_prompt_requested) {
+    showStatusBubble({ kind: 'failed', message: permissionText(permission, 'nativePrompt') });
+    const status = await invoke('request_prompt_interaction_permission');
+    if (status?.trusted) {
+      hideStatusBubble();
+      return;
+    }
+    window.clearTimeout(statusTimer);
+    statusTimer = window.setTimeout(() => {
+      showStatusBubble({ kind: 'failed', message: permissionText(permission, 'nativePromptFallback') });
+    }, 1900);
+    return;
+  }
+
+  const now = Date.now();
+  if (now - lastAccessibilitySettingsOpenAt < 4_000) {
+    showStatusBubble({ kind: 'failed', message: permissionText(permission, 'settingsOpened') });
+    return;
+  }
+  lastAccessibilitySettingsOpenAt = now;
+
+  try {
+    await invokeOrThrow('open_accessibility_settings');
+    showStatusBubble({ kind: 'failed', message: permissionText(permission, 'settingsOpened') });
+  } catch (error) {
+    console.error('Failed to open Accessibility settings', error);
+    showStatusBubble({ kind: 'failed', message: permissionText(permission, 'settingsOpenFailed') });
+  }
 }
 
 function listenForAutosendStatus() {
@@ -444,14 +496,20 @@ btn.addEventListener('pointerup', async (event) => {
       await emit('prompt-button-drag-ended', position);
     }
   } else {
-    const sessionId = ++promptPickSessionId;
     pauseIdleForPointerInteraction(6_000);
-    const toggleResult = await invoke('toggle_prompt_popover_from_button', { sessionId });
-    if (toggleResult?.opened) {
-      const sessionPromise = invoke('begin_prompt_pick_session', { sessionId });
-      void sessionPromise.catch(() => null);
-    } else {
+    const permission = await invoke('prompt_interaction_permission_status');
+    if (permission?.required && !permission.trusted) {
+      await handleMissingPromptInteractionPermission(permission);
       resetCalicoMotion();
+    } else {
+      const sessionId = ++promptPickSessionId;
+      const toggleResult = await invoke('toggle_prompt_popover_from_button', { sessionId });
+      if (toggleResult?.opened) {
+        const sessionPromise = invoke('begin_prompt_pick_session', { sessionId });
+        void sessionPromise.catch(() => null);
+      } else {
+        resetCalicoMotion();
+      }
     }
   }
   start = null;
@@ -479,17 +537,6 @@ initializeCalicoMotion();
 listenForAutosendStatus();
 listenForCalicoMotion();
 listenForPromptPopoverDismissed();
-
-statusBubble?.addEventListener('click', async () => {
-  if (statusBubble.dataset.action === 'request_accessibility_permission') {
-    const status = await invoke('request_accessibility_permission_cmd');
-    if (!status?.trusted) {
-      await invoke('open_accessibility_settings');
-    }
-  } else if (statusBubble.dataset.action === 'open_accessibility_settings') {
-    await invoke('open_accessibility_settings');
-  }
-});
 </script>
 </body>
 </html>

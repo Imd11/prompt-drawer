@@ -137,4 +137,35 @@ describe("settings store", () => {
     const settings = await store.get();
     expect(settings.language).toBe("zh-CN");
   });
+
+  it("defaults permission prompt history to not requested", async () => {
+    const store = createTestSettingsStore();
+    const settings = await store.get();
+    expect(settings.permissions).toEqual({ accessibilityPromptRequested: false });
+  });
+
+  it("normalizes old settings without permissions", async () => {
+    const store = createTestSettingsStore(
+      JSON.stringify({
+        version: 1,
+        language: "zh-CN",
+        blacklistedApps: [],
+        overlayPlacement: { buttonOffset: null, buttonPosition: null },
+        floatingButton: { visible: true },
+        promptInsertion: { mode: "paste_and_submit" }
+      })
+    );
+
+    const settings = await store.get();
+    expect(settings.permissions).toEqual({ accessibilityPromptRequested: false });
+  });
+
+  it("saves accessibility prompt requested state", async () => {
+    const store = createTestSettingsStore();
+
+    await store.setAccessibilityPromptRequested(true);
+
+    const settings = await store.get();
+    expect(settings.permissions).toEqual({ accessibilityPromptRequested: true });
+  });
 });

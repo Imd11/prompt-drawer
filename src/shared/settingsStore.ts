@@ -25,6 +25,9 @@ export type Settings = {
   promptInsertion: {
     mode: PromptInsertionMode;
   };
+  permissions: {
+    accessibilityPromptRequested: boolean;
+  };
 };
 
 interface SettingsAdapter {
@@ -40,7 +43,8 @@ export function createSettingsStore(adapter: SettingsAdapter) {
       blacklistedApps: [],
       overlayPlacement: { buttonOffset: null, buttonPosition: null },
       floatingButton: { visible: true },
-      promptInsertion: { mode: "paste_and_submit" }
+      promptInsertion: { mode: "paste_and_submit" },
+      permissions: { accessibilityPromptRequested: false }
     };
   }
 
@@ -56,6 +60,7 @@ export function createSettingsStore(adapter: SettingsAdapter) {
     if (!value || typeof value !== "object") return defaultSettings();
     const candidate = value as Partial<Settings> & {
       overlayPlacement?: { buttonOffset?: unknown; buttonPosition?: unknown };
+      permissions?: { accessibilityPromptRequested?: unknown };
     };
     if (candidate.version !== 1 || !Array.isArray(candidate.blacklistedApps)) {
       return defaultSettings();
@@ -77,6 +82,9 @@ export function createSettingsStore(adapter: SettingsAdapter) {
         mode: candidate.promptInsertion?.mode === "paste_only"
           ? "paste_only"
           : "paste_and_submit"
+      },
+      permissions: {
+        accessibilityPromptRequested: candidate.permissions?.accessibilityPromptRequested === true
       }
     };
   }
@@ -148,6 +156,12 @@ export function createSettingsStore(adapter: SettingsAdapter) {
     async setLanguage(language: AppLanguage): Promise<void> {
       const settings = await load();
       settings.language = language;
+      await save(settings);
+    },
+
+    async setAccessibilityPromptRequested(requested: boolean): Promise<void> {
+      const settings = await load();
+      settings.permissions.accessibilityPromptRequested = requested;
       await save(settings);
     }
   };

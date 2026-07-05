@@ -12,6 +12,7 @@ describe("settings panel", () => {
     overlayPlacement: { buttonOffset: null, buttonPosition: null },
     floatingButton: { visible: true },
     promptInsertion: { mode: "paste_and_submit" },
+    permissions: { accessibilityPromptRequested: false },
     language: "zh-CN",
   };
 

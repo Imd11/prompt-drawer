@@ -37,22 +37,20 @@ const DEFAULT_SETTINGS: Settings = {
   overlayPlacement: { buttonOffset: null, buttonPosition: null },
   floatingButton: { visible: true },
   promptInsertion: { mode: "paste_and_submit" },
+  permissions: { accessibilityPromptRequested: false },
   language: "zh-CN",
 };
 
 const waitForWindowHide = () => new Promise((resolve) => window.setTimeout(resolve, 260));
 
 type AutosendStatusKind = "sent" | "failed";
-type AutosendStatusAction = "open_accessibility_settings" | "request_accessibility_permission";
 
 async function emitAutosendStatus(
   kind: AutosendStatusKind,
-  message: string,
-  action?: AutosendStatusAction
+  message: string
 ) {
   try {
-    const payload = action ? { kind, message, action } : { kind, message };
-    await emit("prompt-autosend-status", payload);
+    await emit("prompt-autosend-status", { kind, message });
   } catch (error) {
     console.warn("Failed to emit autosend status:", error);
   }
@@ -94,7 +92,7 @@ function pasteOnlyBody(prompt: PromptContainer, bodies: string[]): string {
 function statusForAutosendOutcome(outcome: AutosendOutcome, t: Messages): {
   kind: AutosendStatusKind;
   message: string;
-  action?: AutosendStatusAction;
+  requiresAttention?: boolean;
 } {
   if (outcome.sent) {
     return { kind: "sent", message: t.autosend.sent };
@@ -104,8 +102,8 @@ function statusForAutosendOutcome(outcome: AutosendOutcome, t: Messages): {
     case "missing_accessibility_permission":
       return {
         kind: "failed",
-        message: t.autosend.clickToAuthorize,
-        action: "request_accessibility_permission",
+        message: t.autosend.enableAccessibility,
+        requiresAttention: true,
       };
     case "no_safe_target":
       return { kind: "failed", message: t.autosend.copiedNotSent };
@@ -128,7 +126,7 @@ function statusForAutosendOutcome(outcome: AutosendOutcome, t: Messages): {
 function statusForAutosendSequenceOutcome(outcome: AutosendSequenceOutcome, t: Messages): {
   kind: AutosendStatusKind;
   message: string;
-  action?: AutosendStatusAction;
+  requiresAttention?: boolean;
 } {
   if (outcome.sent) {
     return { kind: "sent", message: t.autosend.sent };
@@ -136,14 +134,23 @@ function statusForAutosendSequenceOutcome(outcome: AutosendSequenceOutcome, t: M
   if (outcome.reason === "missing_accessibility_permission") {
     return {
       kind: "failed",
-      message: t.autosend.clickToAuthorize,
-      action: "request_accessibility_permission",
+      message: t.autosend.enableAccessibility,
+      requiresAttention: true,
     };
   }
   return {
     kind: "failed",
     message: t.autosend.sequenceFailed(outcome.failed_index ?? 1),
   };
+}
+
+function isAccessibilityPermissionError(error: unknown): boolean {
+  const message = error instanceof Error
+    ? error.message
+    : typeof error === "string"
+      ? error
+      : "";
+  return message.toLowerCase().includes("accessibility permission");
 }
 
 interface InputTargetPollingControllerProps {
@@ -402,16 +409,21 @@ export function App({
         emitCalicoMotion("happy", "autosend-success", 3000);
       } else {
         emitCalicoMotion(
-          status.action ? "notification" : "error",
-          status.action ? "autosend-action-required" : "autosend-failed",
-          status.action ? 5200 : 5000
+          status.requiresAttention ? "notification" : "error",
+          status.requiresAttention ? "autosend-action-required" : "autosend-failed",
+          status.requiresAttention ? 5200 : 5000
         );
       }
-      await emitAutosendStatus(status.kind, status.message, status.action);
+      await emitAutosendStatus(status.kind, status.message);
     } catch (e) {
       console.warn("Prompt autosend failed without blocking the picker:", e);
-      emitCalicoMotion("error", "autosend-exception", 5000);
-      await emitAutosendStatus("failed", t.autosend.genericFailed);
+      if (isAccessibilityPermissionError(e)) {
+        emitCalicoMotion("notification", "autosend-accessibility-required", 5200);
+        await emitAutosendStatus("failed", t.autosend.enableAccessibility);
+      } else {
+        emitCalicoMotion("error", "autosend-exception", 5000);
+        await emitAutosendStatus("failed", t.autosend.genericFailed);
+      }
     } finally {
       setSubmittingPromptId(null);
     }

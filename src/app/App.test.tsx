@@ -829,6 +829,41 @@ describe("app", () => {
     expectCalicoMotion("happy");
   });
 
+  it("emits a permission status when paste-only insertion lacks accessibility permission", async () => {
+    const { invoke } = await import("@tauri-apps/api/core");
+    vi.mocked(invoke).mockClear();
+    vi.mocked(invoke).mockImplementation(async (command: string) => {
+      if (command === "paste_prompt_to_last_target") {
+        throw new Error("Accessibility permission required for prompt insertion.");
+      }
+      return undefined;
+    });
+    const { readTextFile } = await import("@tauri-apps/plugin-fs");
+    (readTextFile as ReturnType<typeof vi.fn>)
+      .mockResolvedValueOnce(JSON.stringify({ version: 1, prompts: mockPrompts }))
+      .mockResolvedValueOnce(JSON.stringify({
+        version: 1,
+        blacklistedApps: [],
+        overlayPlacement: { buttonOffset: null, buttonPosition: null },
+        floatingButton: { visible: true },
+        promptInsertion: { mode: "paste_only" },
+      }));
+
+    await act(async () => {
+      render(<App />);
+    });
+
+    fireEvent.click(await screen.findByText("Test Prompt"));
+
+    await waitFor(() => {
+      expect(emitMock).toHaveBeenCalledWith("prompt-autosend-status", {
+        kind: "failed",
+        message: "请启用辅助功能权限",
+      });
+    });
+    expectCalicoMotion("notification");
+  });
+
   it("hides the prompt list before autosending a selected single prompt without throw animation", async () => {
     const { invoke } = await import("@tauri-apps/api/core");
     const callOrder: string[] = [];
@@ -1020,14 +1055,14 @@ describe("app", () => {
     );
   });
 
-  it("emits an actionable permission status when autosend lacks accessibility permission", async () => {
+  it("emits a permission status when autosend lacks accessibility permission", async () => {
     const { invoke } = await import("@tauri-apps/api/core");
     vi.mocked(invoke).mockImplementation(async (command: string) => {
       if (command === "paste_prompt_and_submit_to_last_target") {
         return {
-          copied: true,
+          copied: false,
           sent: false,
-          error: "Accessibility permission required for autosend.",
+          error: "Accessibility permission required for prompt insertion.",
           reason: "missing_accessibility_permission",
         };
       }
@@ -1047,8 +1082,7 @@ describe("app", () => {
     await waitFor(() => {
       expect(emitMock).toHaveBeenCalledWith("prompt-autosend-status", {
         kind: "failed",
-        message: "点击授权",
-        action: "request_accessibility_permission",
+        message: "请启用辅助功能权限",
       });
     });
     expectCalicoMotion("notification");
@@ -1207,7 +1241,7 @@ describe("app", () => {
       }
       if (command === "paste_prompt_and_submit_to_last_target") {
         calls.push("autosend");
-        throw new Error("Accessibility permission required for autosend.");
+        throw new Error("Unexpected autosend failure.");
       }
       return undefined;
     });

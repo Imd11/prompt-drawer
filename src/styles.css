@@ -16,7 +16,7 @@
   --pp-radius-sm: 8px;
   --pp-radius-md: 10px;
   --pp-radius-lg: 14px;
-  --pp-popover-window-padding: 16px;
+  --pp-popover-window-padding: 0px;
   --pp-shadow-soft: 0 1px 2px rgba(15, 23, 42, 0.04);
   --pp-shadow-popover: 0 18px 48px rgba(15, 23, 42, 0.16),
     0 2px 8px rgba(15, 23, 42, 0.08);
@@ -719,7 +719,7 @@ button {
   height: 100vh;
   min-height: 0;
   overflow: hidden;
-  padding: var(--pp-popover-window-padding);
+  padding: 0;
   background: transparent;
 }
 
@@ -735,7 +735,7 @@ button {
   background: var(--pp-surface-subtle);
   border: 1px solid rgba(148, 163, 184, 0.26);
   border-radius: var(--pp-radius-lg);
-  box-shadow: var(--pp-shadow-popover);
+  box-shadow: none;
 }
 
 .prompt-quick-shell {

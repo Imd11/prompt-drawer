@@ -20,14 +20,16 @@ describe("quick picker layout styles", () => {
     expect(css).toContain("overflow-y: auto");
   });
 
-  it("keeps the rounded popover panel inside a transparent shadow gutter", () => {
+  it("keeps the rounded popover panel flush with the native popover window", () => {
     const rootRule = rule(".popover-root");
     const windowRule = rule(".popover-window");
 
-    expect(css).toContain("--pp-popover-window-padding: 16px");
-    expect(rootRule).toContain("padding: var(--pp-popover-window-padding)");
+    expect(css).toContain("--pp-popover-window-padding: 0px");
+    expect(rootRule).toContain("padding: 0");
     expect(windowRule).toContain("width: 100%");
     expect(windowRule).toContain("height: 100%");
+    expect(windowRule).toContain("box-shadow: none");
+    expect(windowRule).not.toContain("box-shadow: var(--pp-shadow-popover)");
     expect(windowRule).not.toContain("width: 100vw");
     expect(windowRule).not.toContain("min-height: 100vh");
   });

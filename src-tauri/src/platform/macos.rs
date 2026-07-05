@@ -5,6 +5,9 @@ use std::ffi::c_void;
 use std::process::Command;
 use std::time::{Duration, Instant};
 
+const ACCESSIBILITY_PERMISSION_REQUIRED_ERROR: &str =
+    "Accessibility permission required for prompt insertion.";
+
 #[derive(Clone, Debug, Serialize)]
 pub struct FrontmostApp {
     pub name: String,
@@ -60,9 +63,9 @@ impl AutosendOutcome {
 
     pub fn missing_accessibility_permission() -> Self {
         Self {
-            copied: true,
+            copied: false,
             sent: false,
-            error: Some("Accessibility permission required for autosend.".to_string()),
+            error: Some(ACCESSIBILITY_PERMISSION_REQUIRED_ERROR.to_string()),
             reason: Some(AutosendFailureReason::MissingAccessibilityPermission),
         }
     }
@@ -188,6 +191,32 @@ fn is_accessibility_trusted() -> bool {
 
 fn is_accessibility_trusted_with_prompt() -> bool {
     unsafe { ax_is_process_trusted_with_prompt() }
+}
+
+fn accessibility_permission_required_error() -> String {
+    ACCESSIBILITY_PERMISSION_REQUIRED_ERROR.to_string()
+}
+
+fn ensure_accessibility_trusted_with<T>(is_trusted: T) -> Result<(), String>
+where
+    T: FnOnce() -> bool,
+{
+    if is_trusted() {
+        Ok(())
+    } else {
+        Err(accessibility_permission_required_error())
+    }
+}
+
+fn missing_accessibility_outcome_if_untrusted_with<T>(is_trusted: T) -> Option<AutosendOutcome>
+where
+    T: FnOnce() -> bool,
+{
+    if is_trusted() {
+        None
+    } else {
+        Some(AutosendOutcome::missing_accessibility_permission())
+    }
 }
 
 // ── Frontmost App ─────────────────────────────────────────────────────────────
@@ -425,6 +454,7 @@ pub fn paste_prompt_to_app_with_copier<C>(
 where
     C: FnOnce(&str) -> Result<(), String>,
 {
+    ensure_accessibility_trusted_with(is_accessibility_trusted)?;
     copy_sender(body)?;
     let script = paste_to_app_script(bundle_id);
     let output = Command::new("osascript")
@@ -450,6 +480,7 @@ pub fn paste_prompt_and_submit_to_app_with_copier<C>(
 where
     C: FnOnce(&str) -> Result<(), String>,
 {
+    ensure_accessibility_trusted_with(is_accessibility_trusted)?;
     copy_sender(body)?;
     let script = paste_and_submit_to_app_script(bundle_id);
     let output = Command::new("osascript")
@@ -475,11 +506,12 @@ pub fn paste_prompt_and_submit_to_app_clipboard_with_copier<C>(
 where
     C: FnOnce(&str) -> Result<(), String>,
 {
+    if let Some(outcome) = missing_accessibility_outcome_if_untrusted_with(is_accessibility_trusted)
+    {
+        return outcome;
+    }
     if let Err(error) = copy_sender(body) {
         return AutosendOutcome::copy_failed(error);
-    }
-    if !is_accessibility_trusted() {
-        return AutosendOutcome::missing_accessibility_permission();
     }
 
     if let Err(error) = activate_app_by_bundle_id(bundle_id) {
@@ -533,6 +565,7 @@ pub fn type_or_paste_prompt_and_submit_to_app_with_copier<C>(
 where
     C: FnOnce(&str) -> Result<(), String>,
 {
+    ensure_accessibility_trusted_with(is_accessibility_trusted)?;
     restore_focus_before_autosend(bundle_id);
 
     let mut direct_type_error = None;
@@ -571,11 +604,12 @@ pub fn paste_prompt_and_submit_to_foreground_with_copier<C>(
 where
     C: FnOnce(&str) -> Result<(), String>,
 {
+    if let Some(outcome) = missing_accessibility_outcome_if_untrusted_with(is_accessibility_trusted)
+    {
+        return Ok(outcome);
+    }
     if let Err(error) = copy_sender(body) {
         return Ok(AutosendOutcome::copy_failed(error));
-    }
-    if !is_accessibility_trusted() {
-        return Ok(AutosendOutcome::missing_accessibility_permission());
     }
     refocus_previous_app_if_prompt_picker_frontmost();
     std::thread::sleep(std::time::Duration::from_millis(280));
@@ -607,10 +641,11 @@ pub fn type_or_paste_prompt_and_submit_to_foreground_with_copier<C>(
 where
     C: FnOnce(&str) -> Result<(), String>,
 {
-    let copy_result = copy_sender(body);
-    if !is_accessibility_trusted() {
-        return AutosendOutcome::missing_accessibility_permission();
+    if let Some(outcome) = missing_accessibility_outcome_if_untrusted_with(is_accessibility_trusted)
+    {
+        return outcome;
     }
+    let copy_result = copy_sender(body);
 
     refocus_previous_app_if_prompt_picker_frontmost();
     std::thread::sleep(Duration::from_millis(320));
@@ -658,6 +693,7 @@ pub fn paste_prompt_and_submit_to_app_at_point_with_copier<C>(
 where
     C: FnOnce(&str) -> Result<(), String>,
 {
+    ensure_accessibility_trusted_with(is_accessibility_trusted)?;
     copy_sender(body)?;
     let script = paste_and_submit_to_app_at_point_script(bundle_id, x, y);
     let output = Command::new("osascript")
@@ -1087,7 +1123,38 @@ mod tests {
     fn autosend_outcome_reports_missing_accessibility_permission() {
         let outcome = AutosendOutcome::missing_accessibility_permission();
 
-        assert!(outcome.copied);
+        assert!(!outcome.copied);
+        assert!(!outcome.sent);
+        assert_eq!(
+            outcome.error.as_deref(),
+            Some(ACCESSIBILITY_PERMISSION_REQUIRED_ERROR)
+        );
+        assert_eq!(
+            outcome.reason,
+            Some(AutosendFailureReason::MissingAccessibilityPermission)
+        );
+    }
+
+    #[test]
+    fn accessibility_gate_returns_specific_error_when_untrusted() {
+        let result = ensure_accessibility_trusted_with(|| false);
+
+        assert_eq!(
+            result,
+            Err(ACCESSIBILITY_PERMISSION_REQUIRED_ERROR.to_string())
+        );
+    }
+
+    #[test]
+    fn accessibility_gate_allows_work_when_trusted() {
+        assert!(ensure_accessibility_trusted_with(|| true).is_ok());
+    }
+
+    #[test]
+    fn accessibility_outcome_reports_no_copy_before_permission() {
+        let outcome = missing_accessibility_outcome_if_untrusted_with(|| false).unwrap();
+
+        assert!(!outcome.copied);
         assert!(!outcome.sent);
         assert_eq!(
             outcome.reason,
