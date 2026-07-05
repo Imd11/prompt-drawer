@@ -2,8 +2,12 @@
 set -euo pipefail
 
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+APP_VERSION="$(
+  node -e "console.log(JSON.parse(require('fs').readFileSync(process.argv[1], 'utf8')).version)" \
+    "$ROOT_DIR/src-tauri/tauri.conf.json"
+)"
 APP_PATH="$ROOT_DIR/src-tauri/target/release/bundle/macos/Prompt Picker.app"
-DMG_PATH="$ROOT_DIR/src-tauri/target/release/bundle/dmg/Prompt Picker_1.0.0_aarch64.dmg"
+DMG_PATH="$ROOT_DIR/src-tauri/target/release/bundle/dmg/Prompt Picker_${APP_VERSION}_aarch64.dmg"
 BUNDLE_IDENTIFIER="local.promptpicker.dev"
 SIGNING_IDENTITY="${PROMPT_PICKER_CODESIGN_IDENTITY:-}"
 
