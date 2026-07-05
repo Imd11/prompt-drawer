@@ -1,0 +1,176 @@
+use serde::Serialize;
+
+#[derive(Clone, Debug, Serialize)]
+pub struct FrontmostApp {
+    pub name: String,
+    pub bundle_id: String,
+}
+
+#[derive(Debug, Serialize)]
+pub struct AccessibilityStatus {
+    pub trusted: bool,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "snake_case")]
+pub enum AutosendFailureReason {
+    CopyFailed,
+    MissingAccessibilityPermission,
+    NoSafeTarget,
+    PasteEventFailed,
+    ReturnEventFailed,
+    TargetFocusFailed,
+}
+
+#[derive(Clone, Debug, Serialize)]
+pub struct AutosendOutcome {
+    pub copied: bool,
+    pub sent: bool,
+    pub error: Option<String>,
+    pub reason: Option<AutosendFailureReason>,
+}
+
+impl AutosendOutcome {
+    pub fn sent() -> Self {
+        Self {
+            copied: true,
+            sent: true,
+            error: None,
+            reason: None,
+        }
+    }
+
+    pub fn copy_failed(error: String) -> Self {
+        Self {
+            copied: false,
+            sent: false,
+            error: Some(error),
+            reason: Some(AutosendFailureReason::CopyFailed),
+        }
+    }
+
+    pub fn keyboard_failed(error: String) -> Self {
+        Self::paste_event_failed(error)
+    }
+
+    pub fn missing_accessibility_permission() -> Self {
+        Self {
+            copied: true,
+            sent: false,
+            error: Some("Accessibility permission is only available on macOS.".to_string()),
+            reason: Some(AutosendFailureReason::MissingAccessibilityPermission),
+        }
+    }
+
+    pub fn copied_without_send(error: String) -> Self {
+        Self {
+            copied: true,
+            sent: false,
+            error: Some(error),
+            reason: Some(AutosendFailureReason::NoSafeTarget),
+        }
+    }
+
+    pub fn paste_event_failed(error: String) -> Self {
+        Self {
+            copied: true,
+            sent: false,
+            error: Some(error),
+            reason: Some(AutosendFailureReason::PasteEventFailed),
+        }
+    }
+
+    pub fn return_event_failed(error: String) -> Self {
+        Self {
+            copied: true,
+            sent: false,
+            error: Some(error),
+            reason: Some(AutosendFailureReason::ReturnEventFailed),
+        }
+    }
+
+    pub fn target_focus_failed(error: String) -> Self {
+        Self {
+            copied: true,
+            sent: false,
+            error: Some(error),
+            reason: Some(AutosendFailureReason::TargetFocusFailed),
+        }
+    }
+}
+
+#[derive(Clone, Debug, Serialize)]
+pub struct InputTarget {
+    pub frame: CandidateInput,
+    pub window_frame: CandidateInput,
+    pub button_position: (f64, f64),
+    pub click_point: (f64, f64),
+    pub app: Option<FrontmostApp>,
+}
+
+#[derive(Clone, Debug, Serialize)]
+pub struct CandidateInput {
+    pub x: f64,
+    pub y: f64,
+    pub width: f64,
+    pub height: f64,
+}
+
+pub fn accessibility_status() -> AccessibilityStatus {
+    AccessibilityStatus { trusted: false }
+}
+
+pub fn request_accessibility_permission() -> AccessibilityStatus {
+    AccessibilityStatus { trusted: false }
+}
+
+pub fn open_accessibility_settings() -> Result<(), String> {
+    Err("Accessibility settings are only available on macOS.".to_string())
+}
+
+pub fn frontmost_app() -> Option<FrontmostApp> {
+    None
+}
+
+pub fn visible_apps() -> Vec<FrontmostApp> {
+    Vec::new()
+}
+
+pub fn current_input_target() -> Option<InputTarget> {
+    None
+}
+
+pub fn paste_prompt_with_copier<C>(body: &str, copy_sender: C) -> Result<(), String>
+where
+    C: FnOnce(&str) -> Result<(), String>,
+{
+    copy_sender(body)
+}
+
+pub fn paste_prompt_to_app_with_copier<C>(
+    body: &str,
+    _bundle_id: &str,
+    copy_sender: C,
+) -> Result<(), String>
+where
+    C: FnOnce(&str) -> Result<(), String>,
+{
+    copy_sender(body)
+}
+
+pub fn paste_prompt_and_submit_to_app_clipboard_with_copier<C>(
+    body: &str,
+    _bundle_id: &str,
+    _click_point: Option<(f64, f64)>,
+    copy_sender: C,
+) -> AutosendOutcome
+where
+    C: FnOnce(&str) -> Result<(), String>,
+{
+    match copy_sender(body) {
+        Ok(()) => AutosendOutcome::copied_without_send(
+            "Autosend is only implemented for macOS targets.".to_string(),
+        ),
+        Err(error) => AutosendOutcome::copy_failed(error),
+    }
+}
