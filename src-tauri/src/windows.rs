@@ -22,6 +22,9 @@ pub const BUTTON_WINDOW_PADDING_Y: f64 = (BUTTON_WINDOW_HEIGHT - BUTTON_VISUAL_H
 pub const BUTTON_WINDOW_TRANSPARENT: bool = true;
 pub const POPOVER_WIDTH: f64 = 280.0;
 pub const POPOVER_HEIGHT: f64 = 432.0;
+pub const POPOVER_WINDOW_PADDING: f64 = 16.0;
+pub const POPOVER_WINDOW_WIDTH: f64 = POPOVER_WIDTH + (POPOVER_WINDOW_PADDING * 2.0);
+pub const POPOVER_WINDOW_HEIGHT: f64 = POPOVER_HEIGHT + (POPOVER_WINDOW_PADDING * 2.0);
 pub const BUTTON_CONTROLS_WIDTH: f64 = 156.0;
 pub const BUTTON_CONTROLS_HEIGHT: f64 = 72.0;
 pub const POPOVER_GAP: f64 = 4.0;
@@ -178,6 +181,40 @@ fn popover_size_for_mode(mode: &str) -> PopoverSize {
     }
 }
 
+fn popover_window_padding_for_mode(mode: &str) -> f64 {
+    if mode == "popover" {
+        POPOVER_WINDOW_PADDING
+    } else {
+        0.0
+    }
+}
+
+fn popover_window_size_for_mode(mode: &str) -> PopoverSize {
+    if mode == "popover" {
+        return PopoverSize {
+            width: POPOVER_WINDOW_WIDTH,
+            height: POPOVER_WINDOW_HEIGHT,
+        };
+    }
+
+    popover_size_for_mode(mode)
+}
+
+fn popover_window_position_from_visual_position(x: f64, y: f64, mode: &str) -> (f64, f64) {
+    let padding = popover_window_padding_for_mode(mode);
+    (x - padding, y - padding)
+}
+
+fn visual_popover_rect_from_window_rect(rect: WindowRect, mode: &str) -> WindowRect {
+    let padding = popover_window_padding_for_mode(mode);
+    WindowRect {
+        x: rect.x + padding,
+        y: rect.y + padding,
+        width: rect.width - (padding * 2.0),
+        height: rect.height - (padding * 2.0),
+    }
+}
+
 fn should_use_transparent_popover_window(mode: Option<&str>) -> bool {
     matches!(mode, Some("popover" | "button-controls"))
 }
@@ -237,7 +274,8 @@ fn handle_prompt_popover_outside_click(app: tauri::AppHandle) {
     if !OUTSIDE_CLICK_MONITOR_ACTIVE.load(Ordering::SeqCst) {
         return;
     }
-    if !should_use_transparent_popover_window(current_popover_mode().as_deref()) {
+    let current_mode = current_popover_mode();
+    if !should_use_transparent_popover_window(current_mode.as_deref()) {
         set_outside_click_monitor_active(false);
         return;
     }
@@ -255,7 +293,9 @@ fn handle_prompt_popover_outside_click(app: tauri::AppHandle) {
         return;
     };
     let button = window_rect(&app, BUTTON_WINDOW_LABEL).map(visual_button_rect_from_window_rect);
-    let popover = window_rect(&app, POPOVER_WINDOW_LABEL);
+    let popover = window_rect(&app, POPOVER_WINDOW_LABEL).map(|rect| {
+        visual_popover_rect_from_window_rect(rect, current_mode.as_deref().unwrap_or_default())
+    });
     if should_dismiss_popover_for_click(point, button, popover) {
         let _ = popover_window.hide();
         set_outside_click_monitor_active(false);
@@ -353,12 +393,13 @@ pub fn move_prompt_button_to(x: f64, y: f64, app: tauri::AppHandle) -> Result<()
 }
 
 fn show_popover_mode(x: f64, y: f64, mode: &str, app: &tauri::AppHandle) -> Result<(), String> {
-    let popover_size = popover_size_for_mode(mode);
+    let popover_size = popover_window_size_for_mode(mode);
+    let (window_x, window_y) = popover_window_position_from_visual_position(x, y, mode);
     if let Some(window) = app.get_webview_window(POPOVER_WINDOW_LABEL) {
         let existing_mode = current_popover_mode();
         if should_reuse_popover(existing_mode.as_deref(), mode) {
             window
-                .set_position(logical_position(x, y))
+                .set_position(logical_position(window_x, window_y))
                 .map_err(|e| e.to_string())?;
             window
                 .set_size(tauri::Size::Logical(tauri::LogicalSize {
@@ -390,7 +431,7 @@ fn show_popover_mode(x: f64, y: f64, mode: &str, app: &tauri::AppHandle) -> Resu
         .always_on_top(true)
         .accept_first_mouse(true)
         .skip_taskbar(true)
-        .position(x, y)
+        .position(window_x, window_y)
         .build()
         .map_err(|e| e.to_string())?;
     if should_use_transparent_popover_window(Some(mode)) {
@@ -504,7 +545,7 @@ pub fn show_prompt_popover_from_button(
         &app,
         BUTTON_VISUAL_WIDTH,
         BUTTON_VISUAL_HEIGHT,
-        popover_size_for_mode("popover"),
+        "popover",
     );
     show_popover_mode(position.0, position.1, "popover", &app)
 }
@@ -531,7 +572,7 @@ pub fn toggle_prompt_popover_from_button(
         &app,
         BUTTON_VISUAL_WIDTH,
         BUTTON_VISUAL_HEIGHT,
-        popover_size_for_mode("popover"),
+        "popover",
     );
     show_popover_mode(position.0, position.1, "popover", &app)?;
     Ok(PromptPopoverToggleOutcome { opened: true })
@@ -543,7 +584,7 @@ pub fn show_prompt_button_controls_from_button(app: tauri::AppHandle) -> Result<
         &app,
         BUTTON_VISUAL_WIDTH,
         BUTTON_VISUAL_HEIGHT,
-        popover_size_for_mode("button-controls"),
+        "button-controls",
     );
     show_popover_mode(position.0, position.1, "button-controls", &app)
 }
@@ -552,8 +593,10 @@ fn button_relative_popover_position(
     app: &tauri::AppHandle,
     button_width: f64,
     button_height: f64,
-    popover_size: PopoverSize,
+    mode: &str,
 ) -> (f64, f64) {
+    let popover_size = popover_size_for_mode(mode);
+    let window_padding = popover_window_padding_for_mode(mode);
     app.get_webview_window(BUTTON_WINDOW_LABEL)
         .and_then(|window| {
             let position = window.outer_position().ok()?;
@@ -568,6 +611,7 @@ fn button_relative_popover_position(
                 button_width,
                 button_height,
                 popover_size,
+                window_padding,
                 monitor.as_ref(),
             ))
         })
@@ -580,6 +624,7 @@ fn clamp_popover_position_for_size(
     button_width: f64,
     button_height: f64,
     popover_size: PopoverSize,
+    window_padding: f64,
     monitor: Option<&tauri::Monitor>,
 ) -> (f64, f64) {
     let Some(monitor) = monitor else {
@@ -589,6 +634,7 @@ fn clamp_popover_position_for_size(
             button_width,
             button_height,
             popover_size,
+            window_padding,
             None,
         );
     };
@@ -607,6 +653,7 @@ fn clamp_popover_position_for_size(
         button_width,
         button_height,
         popover_size,
+        window_padding,
         Some(bounds),
     )
 }
@@ -625,6 +672,7 @@ fn clamp_popover_position_in_bounds(
         button_width,
         button_height,
         popover_size_for_mode("popover"),
+        popover_window_padding_for_mode("popover"),
         bounds,
     )
 }
@@ -635,6 +683,7 @@ fn clamp_popover_position_in_bounds_for_size(
     button_width: f64,
     button_height: f64,
     popover_size: PopoverSize,
+    window_padding: f64,
     bounds: Option<MonitorBounds>,
 ) -> (f64, f64) {
     let centered_x = button_x + (button_width / 2.0) - (popover_size.width / 2.0);
@@ -648,10 +697,10 @@ fn clamp_popover_position_in_bounds_for_size(
     let margin = 8.0;
     let monitor_right = bounds.x + bounds.width;
     let monitor_bottom = bounds.y + bounds.height;
-    let min_x = bounds.x + margin;
-    let max_x = monitor_right - popover_size.width - margin;
-    let min_y = bounds.y + margin;
-    let max_y = monitor_bottom - popover_size.height - margin;
+    let min_x = bounds.x + margin + window_padding;
+    let max_x = monitor_right - popover_size.width - margin - window_padding;
+    let min_y = bounds.y + margin + window_padding;
+    let max_y = monitor_bottom - popover_size.height - margin - window_padding;
 
     let x = centered_x.clamp(min_x, max_x);
     let y = if above_y >= min_y {
@@ -694,11 +743,34 @@ mod tests {
     }
 
     #[test]
+    fn prompt_popover_native_window_has_transparent_shadow_padding() {
+        let visual_size = popover_size_for_mode("popover");
+        let window_size = popover_window_size_for_mode("popover");
+
+        assert_eq!(POPOVER_WINDOW_PADDING, 16.0);
+        assert_eq!(visual_size.width, POPOVER_WIDTH);
+        assert_eq!(visual_size.height, POPOVER_HEIGHT);
+        assert_eq!(window_size.width, POPOVER_WINDOW_WIDTH);
+        assert_eq!(window_size.height, POPOVER_WINDOW_HEIGHT);
+        assert_eq!(
+            window_size.width,
+            POPOVER_WIDTH + (POPOVER_WINDOW_PADDING * 2.0)
+        );
+        assert_eq!(
+            window_size.height,
+            POPOVER_HEIGHT + (POPOVER_WINDOW_PADDING * 2.0)
+        );
+    }
+
+    #[test]
     fn button_controls_uses_compact_popover_size() {
         let size = popover_size_for_mode("button-controls");
+        let window_size = popover_window_size_for_mode("button-controls");
 
         assert_eq!(size.width, BUTTON_CONTROLS_WIDTH);
         assert_eq!(size.height, BUTTON_CONTROLS_HEIGHT);
+        assert_eq!(window_size.width, BUTTON_CONTROLS_WIDTH);
+        assert_eq!(window_size.height, BUTTON_CONTROLS_HEIGHT);
         assert_eq!(BUTTON_CONTROLS_WIDTH, 156.0);
         assert_eq!(BUTTON_CONTROLS_HEIGHT, 72.0);
     }
@@ -770,8 +842,11 @@ mod tests {
             Some(bounds),
         );
 
-        assert_eq!(left.0, 8.0);
-        assert_eq!(right.0, 1440.0 - POPOVER_WIDTH - 8.0);
+        assert_eq!(left.0, 8.0 + POPOVER_WINDOW_PADDING);
+        assert_eq!(
+            right.0,
+            1440.0 - POPOVER_WIDTH - 8.0 - POPOVER_WINDOW_PADDING
+        );
     }
 
     #[test]
@@ -788,6 +863,7 @@ mod tests {
             BUTTON_VISUAL_WIDTH,
             BUTTON_VISUAL_HEIGHT,
             popover_size_for_mode("button-controls"),
+            popover_window_padding_for_mode("button-controls"),
             Some(bounds),
         );
 
@@ -904,6 +980,32 @@ mod tests {
             (340.0, 260.0),
             Some(visual_button),
             Some(popover)
+        ));
+    }
+
+    #[test]
+    fn outside_click_uses_visual_popover_rect_not_transparent_shadow_padding() {
+        let native_popover = WindowRect {
+            x: 784.0,
+            y: 4.0,
+            width: POPOVER_WINDOW_WIDTH,
+            height: POPOVER_WINDOW_HEIGHT,
+        };
+        let visual_popover = visual_popover_rect_from_window_rect(native_popover, "popover");
+
+        assert_eq!(visual_popover.x, 800.0);
+        assert_eq!(visual_popover.y, 20.0);
+        assert_eq!(visual_popover.width, POPOVER_WIDTH);
+        assert_eq!(visual_popover.height, POPOVER_HEIGHT);
+        assert!(should_dismiss_popover_for_click(
+            (790.0, 12.0),
+            None,
+            Some(visual_popover)
+        ));
+        assert!(!should_dismiss_popover_for_click(
+            (810.0, 30.0),
+            None,
+            Some(visual_popover)
         ));
     }
 
@@ -1097,7 +1199,7 @@ mod tests {
         let reuse_source = &source[start..start + end];
 
         assert!(reuse_source.contains("should_reuse_popover("));
-        assert!(reuse_source.contains("set_position(logical_position(x, y))"));
+        assert!(reuse_source.contains("set_position(logical_position(window_x, window_y))"));
         assert!(reuse_source.contains("window.show().map_err"));
         assert!(reuse_source.contains("emit_popover_opened(app, mode)"));
     }

@@ -1,4 +1,4 @@
-import { useState, useEffect, useRef, useCallback, useMemo } from "react";
+import { useState, useEffect, useLayoutEffect, useRef, useCallback, useMemo } from "react";
 import { emit, listen } from "@tauri-apps/api/event";
 import { getCurrentWindow } from "@tauri-apps/api/window";
 import { save, open } from "@tauri-apps/plugin-dialog";
@@ -244,7 +244,7 @@ export function App({
     return category.name;
   }, [t.manager.defaultCategoryName]);
 
-  useEffect(() => {
+  useLayoutEffect(() => {
     const className = "popover-transparent-page";
     const enabled = windowLabel === "prompt-popover"
       && (mode === "popover" || mode === "button-controls");

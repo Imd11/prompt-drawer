@@ -3,6 +3,10 @@ import { describe, expect, it } from "vitest";
 
 describe("quick picker layout styles", () => {
   const css = readFileSync("src/styles.css", "utf8");
+  const rule = (selector: string) => {
+    const match = css.match(new RegExp(`${selector.replace(".", "\\.")}\\s*{[^}]*}`));
+    return match?.[0] ?? "";
+  };
 
   it("does not render the old popover bottom triangle", () => {
     expect(css).not.toContain(".popover-window::after");
@@ -14,5 +18,17 @@ describe("quick picker layout styles", () => {
     expect(css).toContain(".prompt-category-tabs");
     expect(css).toContain(".prompt-quick-list");
     expect(css).toContain("overflow-y: auto");
+  });
+
+  it("keeps the rounded popover panel inside a transparent shadow gutter", () => {
+    const rootRule = rule(".popover-root");
+    const windowRule = rule(".popover-window");
+
+    expect(css).toContain("--pp-popover-window-padding: 16px");
+    expect(rootRule).toContain("padding: var(--pp-popover-window-padding)");
+    expect(windowRule).toContain("width: 100%");
+    expect(windowRule).toContain("height: 100%");
+    expect(windowRule).not.toContain("width: 100vw");
+    expect(windowRule).not.toContain("min-height: 100vh");
   });
 });
