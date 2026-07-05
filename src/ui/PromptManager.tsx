@@ -310,6 +310,8 @@ export function PromptManager({
             title: messages.manager.categoriesTitle,
             newCategory: messages.manager.newCategory,
             newCategoryName: messages.manager.newCategoryName,
+            newCategoryDefaultName: messages.manager.newCategoryDefaultName,
+            categoryActions: messages.manager.categoryActions,
             renameCategory: messages.manager.renameCategory,
             deleteCategory: messages.manager.deleteCategory,
             saveCategory: messages.manager.saveCategory,
