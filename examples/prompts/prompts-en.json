@@ -1,0 +1,312 @@
+{
+  "version": 3,
+  "categories": [
+    {
+      "id": "category-default",
+      "name": "Development Workflow",
+      "order": 0,
+      "createdAt": "2026-07-05T00:59:37.043Z",
+      "updatedAt": "2026-07-05T06:35:23.512Z"
+    },
+    {
+      "id": "category-1783233257563-8e6yioa",
+      "name": "Release & Packaging",
+      "order": 1,
+      "createdAt": "2026-07-05T06:34:17.563Z",
+      "updatedAt": "2026-07-05T06:34:17.563Z"
+    }
+  ],
+  "containers": [
+    {
+      "id": "prompt-1779776521979-3umga02",
+      "categoryId": "category-default",
+      "title": "Solution Discussion",
+      "type": "single",
+      "prompts": [
+        {
+          "id": "prompt-1779776521979-3umga02-entry",
+          "body": "Use the brainstorming skill to discuss the solution with me first. Do not modify code yet.",
+          "order": 0
+        }
+      ],
+      "intervalMs": 700,
+      "order": 0,
+      "createdAt": "2026-05-26T06:22:01.979Z",
+      "updatedAt": "2026-07-04T18:48:10.896Z"
+    },
+    {
+      "id": "container-1783233353983-pgq01m6",
+      "categoryId": "category-1783233257563-8e6yioa",
+      "title": "R2 Release Packaging",
+      "type": "single",
+      "prompts": [
+        {
+          "id": "entry-1783233353983-3bfn0yv",
+          "body": "1. Please republish the IMD Mac client: package it, sign it, notarize it, staple it, and upload the file to R2. Make sure Mac users who click the download link on the landing page receive the latest version.\n2. Repackage the Windows version and upload it to R2 as well. Make sure Windows users who click the download link on the landing page receive the latest version.",
+          "order": 0
+        }
+      ],
+      "intervalMs": 700,
+      "order": 0,
+      "createdAt": "2026-07-05T06:35:53.983Z",
+      "updatedAt": "2026-07-05T10:37:45.444Z"
+    },
+    {
+      "id": "container-1783066534923-njjnpyn",
+      "categoryId": "category-default",
+      "title": "Focused Solution Analysis",
+      "type": "single",
+      "prompts": [
+        {
+          "id": "entry-1783066534923-c1lkdc1",
+          "body": "Analyze this from the user's perspective: what would a reasonable interaction experience look like? Then assess whether you are confident you can fix the issue properly. Finally, provide your complete proposed solution in detail. Do not modify code yet. Use text wireframes if helpful.",
+          "order": 0
+        }
+      ],
+      "intervalMs": 700,
+      "order": 1,
+      "createdAt": "2026-07-03T08:15:34.923Z",
+      "updatedAt": "2026-07-04T18:48:10.896Z"
+    },
+    {
+      "id": "container-1783233377578-gmwt6dl",
+      "categoryId": "category-1783233257563-8e6yioa",
+      "title": "GitHub Release Publishing",
+      "type": "single",
+      "prompts": [
+        {
+          "id": "entry-1783233377577-q0vkl7r",
+          "body": "Repackage the app for both macOS and Windows. For the macOS version, make sure it is signed, notarized, and stapled. Upload the builds to the GitHub repository, create a tag, and make them available for users to download directly from GitHub. If the repository already has a Release, follow semantic versioning.",
+          "order": 0
+        }
+      ],
+      "intervalMs": 700,
+      "order": 1,
+      "createdAt": "2026-07-05T06:36:17.577Z",
+      "updatedAt": "2026-07-05T10:38:17.737Z"
+    },
+    {
+      "id": "container-1783146424566-6x3y6j3",
+      "categoryId": "category-default",
+      "title": "Work Checklist & Solution Summary",
+      "type": "single",
+      "prompts": [
+        {
+          "id": "entry-1783146424566-27rybtd",
+          "body": "Based on our recent discussion, summarize the work that needs to be done now. Provide a complete checklist. For each item, describe the reasonable interaction experience and your complete proposed solution. Use text wireframes if helpful.",
+          "order": 0
+        }
+      ],
+      "intervalMs": 700,
+      "order": 2,
+      "createdAt": "2026-07-04T06:27:04.566Z",
+      "updatedAt": "2026-07-04T18:48:10.896Z"
+    },
+    {
+      "id": "container-1783066600444-h5x8po7",
+      "categoryId": "category-default",
+      "title": "Write an Execution Plan",
+      "type": "single",
+      "prompts": [
+        {
+          "id": "entry-1783066600444-yh71d8o",
+          "body": "Use the writing-plans skill to organize all of the above solutions into an execution plan. Do not execute it yet.",
+          "order": 0
+        }
+      ],
+      "intervalMs": 700,
+      "order": 3,
+      "createdAt": "2026-07-03T08:16:40.444Z",
+      "updatedAt": "2026-07-04T18:48:10.896Z"
+    },
+    {
+      "id": "container-1783066631622-jad31ag",
+      "categoryId": "category-default",
+      "title": "User-Facing Outcome Review",
+      "type": "single",
+      "prompts": [
+        {
+          "id": "entry-1783066631622-mfrwb0g",
+          "body": "Study the code deeply, then describe in natural language what the final result would look like if this plan were executed. Does it match our previous discussion? Answer from the user's perspective. Use text wireframes if helpful.",
+          "order": 0
+        }
+      ],
+      "intervalMs": 700,
+      "order": 4,
+      "createdAt": "2026-07-03T08:17:11.622Z",
+      "updatedAt": "2026-07-04T18:48:10.896Z"
+    },
+    {
+      "id": "container-1783066643030-36i5hxl",
+      "categoryId": "category-default",
+      "title": "Pre-Execution Risk Review",
+      "type": "single",
+      "prompts": [
+        {
+          "id": "entry-1783066643030-n1dd81n",
+          "body": "Study the code deeply and systematically evaluate the plan. Are there hidden risks that people commonly miss? Could it break or affect other existing functionality? Is it a Pareto improvement? Based on this analysis, give a final conclusion on whether we can proceed directly to the next step and execute the plan.",
+          "order": 0
+        }
+      ],
+      "intervalMs": 700,
+      "order": 5,
+      "createdAt": "2026-07-03T08:17:23.030Z",
+      "updatedAt": "2026-07-04T18:48:10.896Z"
+    },
+    {
+      "id": "container-1783144723315-ttbrem8",
+      "categoryId": "category-default",
+      "title": "Execute the Plan in Batches",
+      "type": "single",
+      "prompts": [
+        {
+          "id": "entry-1783144723315-jupdr61",
+          "body": "Use the executing-plans skill to execute the plan in batches until every task in the plan is complete.\nRequirements:\n1. While implementing the plan in batches, strictly follow all coding standards and behavioral rules defined in the karpathy-guidelines skill.\n2. Before completion, use the verification-before-completion skill and perform verification.\n3. After all planned work is complete, push the changes to GitHub main.\n4. Finally, report from the user's perspective what the user should now see and experience.",
+          "order": 0
+        }
+      ],
+      "intervalMs": 700,
+      "order": 6,
+      "createdAt": "2026-07-04T05:58:43.315Z",
+      "updatedAt": "2026-07-04T18:48:10.896Z"
+    },
+    {
+      "id": "container-1783145584820-i7hmhod",
+      "categoryId": "category-default",
+      "title": "Execution Result Review",
+      "type": "single",
+      "prompts": [
+        {
+          "id": "entry-1783145584820-pdjbg0z",
+          "body": "Review the implementation based on the final plan and the current code state. Do not rewrite the plan and do not modify code. Focus on whether the plan was followed strictly, whether any plan-drifting changes were introduced, and whether there are hidden risks, missed steps, overengineering, or destructive changes. Give an initial acceptance conclusion: Pass / Needs Fixes / Fail, and list repair suggestions. I am running multiple tasks in parallel; only consider whether this specific task plan has been fully and correctly implemented.",
+          "order": 0
+        }
+      ],
+      "intervalMs": 700,
+      "order": 7,
+      "createdAt": "2026-07-04T06:13:04.820Z",
+      "updatedAt": "2026-07-04T18:48:10.896Z"
+    },
+    {
+      "id": "container-1783190876052-eoxiv2z",
+      "categoryId": "category-default",
+      "title": "Execution Result Review (Strict)",
+      "type": "single",
+      "prompts": [
+        {
+          "id": "entry-1783190876052-o7t3yqj",
+          "body": "1. Use the requesting-code-review skill to dispatch an independent subagent as a code reviewer. Based on the original execution plan for this task and the current code state, review and code-review the current implementation without modifying code. Review only the changes related to this task plan; do not perform a broad review of the entire project. Focus on whether the plan was followed strictly, whether any plan-drifting changes were introduced, and whether there are hidden risks, missed steps, overengineering, destructive changes, or insufficient verification. I am running multiple tasks in parallel; only consider whether this specific task plan has been fully and correctly implemented.\n\n2. Handle the review feedback:\nUse the receiving-code-review skill to process the feedback returned by the review and code review. Do not blindly accept every comment. Judge each item one by one: for valid issues, list them as items that need fixes and provide repair suggestions; for invalid issues, technically rebut them using code, tests, or runtime results. Do not modify code, do not rewrite the plan, do not expand the plan, and do not introduce out-of-scope features.\n\n3. Finally, combine the review result, the code review result, and your judgment on the review feedback, then give the final review-stage conclusion: Pass / Needs Fixes / Fail.",
+          "order": 0
+        }
+      ],
+      "intervalMs": 700,
+      "order": 8,
+      "createdAt": "2026-07-04T18:47:56.051Z",
+      "updatedAt": "2026-07-04T18:48:10.896Z"
+    },
+    {
+      "id": "container-1783145619724-ezduoeq",
+      "categoryId": "category-default",
+      "title": "Write a Fix Plan",
+      "type": "single",
+      "prompts": [
+        {
+          "id": "entry-1783145619724-gy1t9tk",
+          "body": "Use the writing-plans skill to provide a detailed fix plan. Do not execute it yet.",
+          "order": 0
+        }
+      ],
+      "intervalMs": 700,
+      "order": 9,
+      "createdAt": "2026-07-04T06:13:39.724Z",
+      "updatedAt": "2026-07-04T18:48:10.896Z"
+    },
+    {
+      "id": "container-1783145721758-20hb6qq",
+      "categoryId": "category-default",
+      "title": "Fix Plan Feasibility Review",
+      "type": "single",
+      "prompts": [
+        {
+          "id": "entry-1783145721758-jvq9tm9",
+          "body": "Analyze deeply whether this fix plan can actually resolve the issues identified during the previous review stage. Systematically evaluate whether the plan has hidden risks that people commonly miss, whether it could break or affect other existing functionality, and whether it is a Pareto improvement. Based on this analysis, give a final conclusion on whether we can proceed directly to the next step and execute the plan.",
+          "order": 0
+        }
+      ],
+      "intervalMs": 700,
+      "order": 10,
+      "createdAt": "2026-07-04T06:15:21.758Z",
+      "updatedAt": "2026-07-04T18:48:10.896Z"
+    },
+    {
+      "id": "container-1783169939796-3bde1hn",
+      "categoryId": "category-default",
+      "title": "Root Cause Analysis",
+      "type": "single",
+      "prompts": [
+        {
+          "id": "entry-1783169939796-dvcvik1",
+          "body": "Use the systematic-debugging skill to systematically investigate the root cause. Do not modify code yet.",
+          "order": 0
+        }
+      ],
+      "intervalMs": 700,
+      "order": 11,
+      "createdAt": "2026-07-04T12:58:59.796Z",
+      "updatedAt": "2026-07-04T18:48:10.896Z"
+    },
+    {
+      "id": "container-1783013204947-0ped4fd",
+      "categoryId": "category-default",
+      "title": "End-to-End Debugging & Fix Workflow",
+      "type": "group",
+      "prompts": [
+        {
+          "id": "entry-1783266618373-06zkygi",
+          "body": "Based on our recent discussion, summarize the work that needs to be done now. Provide a complete checklist. For each item, describe the reasonable interaction experience and your complete proposed solution. Use text wireframes if helpful.",
+          "order": 0
+        },
+        {
+          "id": "entry-1783266618373-a841xva",
+          "body": "Use the writing-plans skill to organize all of the above solutions into an execution plan. Do not execute it yet.",
+          "order": 1
+        },
+        {
+          "id": "entry-1783266618373-x2xtnk3",
+          "body": "Study the code deeply, then describe in natural language what the final result would look like if this plan were executed. Does it match our previous discussion? Answer from the user's perspective. Use text wireframes if helpful.",
+          "order": 2
+        },
+        {
+          "id": "entry-1783266618373-6g0ccvj",
+          "body": "Study the code deeply and systematically evaluate the plan. Are there hidden risks that people commonly miss? Could it break or affect other existing functionality? Is it a Pareto improvement? Based on this analysis, give a final conclusion on whether we can proceed directly to the next step and execute the plan.",
+          "order": 3
+        },
+        {
+          "id": "entry-1783266618373-mrpgc5u",
+          "body": "If there is a problem, fix it for me. If there is no problem, wait for my next instruction.",
+          "order": 4
+        },
+        {
+          "id": "entry-1783266618373-cek4c79",
+          "body": "Use the executing-plans skill to execute the plan in batches until every task in the plan is complete.\nRequirements:\n1. While implementing the plan in batches, strictly follow all coding standards and behavioral rules defined in the karpathy-guidelines skill.\n2. Before completion, use the verification-before-completion skill and perform verification.\n3. After all planned work is complete, push the changes to GitHub main.\n4. Finally, report from the user's perspective what the user should now see and experience.",
+          "order": 5
+        },
+        {
+          "id": "entry-1783266618373-ahk9ljn",
+          "body": "Use the requesting-code-review skill to dispatch an independent subagent as a code reviewer. Based on the original execution plan for this task and the current code state, review and code-review the current implementation without modifying code. Review only the changes related to this task plan; do not perform a broad review of the entire project. Focus on whether the plan was followed strictly, whether any plan-drifting changes were introduced, and whether there are hidden risks, missed steps, overengineering, destructive changes, or insufficient verification. I am running multiple tasks in parallel; only consider whether this specific task plan has been fully and correctly implemented.\n\n2. Handle the review feedback:\nUse the receiving-code-review skill to process the feedback returned by the review and code review. Do not blindly accept every comment. Judge each item one by one: for valid issues, list them as items that need fixes and provide repair suggestions; for invalid issues, technically rebut them using code, tests, or runtime results. Do not modify code, do not rewrite the plan, do not expand the plan, and do not introduce out-of-scope features.\n\n3. Finally, combine the review result, the code review result, and your judgment on the review feedback, then give the final review-stage conclusion: Pass / Needs Fixes / Fail.",
+          "order": 6
+        },
+        {
+          "id": "entry-1783266618373-wovxxap",
+          "body": "If there is a problem, use the writing-plans skill to provide a detailed fix plan, then execute it. If there is no problem, send me this message: \"Josh, please review.\"",
+          "order": 7
+        }
+      ],
+      "intervalMs": 700,
+      "order": 12,
+      "createdAt": "2026-07-02T17:26:44.946Z",
+      "updatedAt": "2026-07-05T15:50:18.373Z"
+    }
+  ],
+  "activeCategoryId": "category-default"
+}

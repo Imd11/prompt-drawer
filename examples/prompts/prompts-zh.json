@@ -1,0 +1,312 @@
+{
+  "version": 3,
+  "categories": [
+    {
+      "id": "category-default",
+      "name": "开发工作流",
+      "order": 0,
+      "createdAt": "2026-07-05T00:59:37.043Z",
+      "updatedAt": "2026-07-05T06:35:23.512Z"
+    },
+    {
+      "id": "category-1783233257563-8e6yioa",
+      "name": "发布与打包",
+      "order": 1,
+      "createdAt": "2026-07-05T06:34:17.563Z",
+      "updatedAt": "2026-07-05T06:34:17.563Z"
+    }
+  ],
+  "containers": [
+    {
+      "id": "prompt-1779776521979-3umga02",
+      "categoryId": "category-default",
+      "title": "方案讨论",
+      "type": "single",
+      "prompts": [
+        {
+          "id": "prompt-1779776521979-3umga02-entry",
+          "body": "使用 brainstorming skill，先和我讨论方案，不要修改代码。",
+          "order": 0
+        }
+      ],
+      "intervalMs": 700,
+      "order": 0,
+      "createdAt": "2026-05-26T06:22:01.979Z",
+      "updatedAt": "2026-07-04T18:48:10.896Z"
+    },
+    {
+      "id": "container-1783233353983-pgq01m6",
+      "categoryId": "category-1783233257563-8e6yioa",
+      "title": "R2 发布打包",
+      "type": "single",
+      "prompts": [
+        {
+          "id": "entry-1783233353983-3bfn0yv",
+          "body": "1、请帮我重新发布 IMD Mac 客户端：打包、签名、公证、staple，并上传 R2 文件，确保落地页下载链接的Mac用户能下载到最新版本。\n2、重新打包 Windows 版本的，也要上传到 R2。并上传 R2 文件，确保落地页下载链接的Windows用户能下载到最新版本",
+          "order": 0
+        }
+      ],
+      "intervalMs": 700,
+      "order": 0,
+      "createdAt": "2026-07-05T06:35:53.983Z",
+      "updatedAt": "2026-07-05T10:37:45.444Z"
+    },
+    {
+      "id": "container-1783066534923-njjnpyn",
+      "categoryId": "category-default",
+      "title": "单点方案分析",
+      "type": "single",
+      "prompts": [
+        {
+          "id": "entry-1783066534923-c1lkdc1",
+          "body": "请你站在用户的角度来分析，合理的交互体验是怎么样的？然后分析一下你有没有把握把这个问题修复好，最后再详细列示一下你的完整方案，先不要修改代码，必要时画文本线框图来解释。",
+          "order": 0
+        }
+      ],
+      "intervalMs": 700,
+      "order": 1,
+      "createdAt": "2026-07-03T08:15:34.923Z",
+      "updatedAt": "2026-07-04T18:48:10.896Z"
+    },
+    {
+      "id": "container-1783233377578-gmwt6dl",
+      "categoryId": "category-1783233257563-8e6yioa",
+      "title": "GitHub Release 发布",
+      "type": "single",
+      "prompts": [
+        {
+          "id": "entry-1783233377577-q0vkl7r",
+          "body": "帮我重新打包 APP，分别打包 Mac 版本（注意要签名、公证、staple）和 Windows 版本。然后上传到GitHub仓库里，注意要打一个标签。实现用户可以通过GitHub直接下载。如果现在GitHub仓库里已经有了Release，注意进行语义化版本控制。",
+          "order": 0
+        }
+      ],
+      "intervalMs": 700,
+      "order": 1,
+      "createdAt": "2026-07-05T06:36:17.577Z",
+      "updatedAt": "2026-07-05T10:38:17.737Z"
+    },
+    {
+      "id": "container-1783146424566-6x3y6j3",
+      "categoryId": "category-default",
+      "title": "工作清单与方案汇总",
+      "type": "single",
+      "prompts": [
+        {
+          "id": "entry-1783146424566-27rybtd",
+          "body": "根据我们刚刚过去的这些讨论，你总结一下现在我们有哪些工作需要做，你列一个完整的清单，然后每一项工作里面都要列出合理的交互体验是怎么样的、你的完整的方案，必要时画文本线框图来解释",
+          "order": 0
+        }
+      ],
+      "intervalMs": 700,
+      "order": 2,
+      "createdAt": "2026-07-04T06:27:04.566Z",
+      "updatedAt": "2026-07-04T18:48:10.896Z"
+    },
+    {
+      "id": "container-1783066600444-h5x8po7",
+      "categoryId": "category-default",
+      "title": "编写执行计划",
+      "type": "single",
+      "prompts": [
+        {
+          "id": "entry-1783066600444-yh71d8o",
+          "body": "使用 writing-plans skill，把上面所有方案整理成执行计划，先不要执行。",
+          "order": 0
+        }
+      ],
+      "intervalMs": 700,
+      "order": 3,
+      "createdAt": "2026-07-03T08:16:40.444Z",
+      "updatedAt": "2026-07-04T18:48:10.896Z"
+    },
+    {
+      "id": "container-1783066631622-jad31ag",
+      "categoryId": "category-default",
+      "title": "用户视角效果评估",
+      "type": "single",
+      "prompts": [
+        {
+          "id": "entry-1783066631622-mfrwb0g",
+          "body": "请你深入理解代码，然后用自然语言描述一下，如果按照这个计划执行，最终的效果是怎样的？是否符合我们之前的讨论？站在用户的视角来回答我的问题，必要时画文本线框图来解释。",
+          "order": 0
+        }
+      ],
+      "intervalMs": 700,
+      "order": 4,
+      "createdAt": "2026-07-03T08:17:11.622Z",
+      "updatedAt": "2026-07-04T18:48:10.896Z"
+    },
+    {
+      "id": "container-1783066643030-36i5hxl",
+      "categoryId": "category-default",
+      "title": "执行前风险评估",
+      "type": "single",
+      "prompts": [
+        {
+          "id": "entry-1783066643030-n1dd81n",
+          "body": "请你深入理解代码，系统评估分析这个方案计划是否有一般人注意不到的潜在风险？是否会破坏影响其他功能的正常运行？是否是一种帕累托改进？最后基于这些分析，给出最终结论，是否可以直接进入到下一步来执行这个计划？",
+          "order": 0
+        }
+      ],
+      "intervalMs": 700,
+      "order": 5,
+      "createdAt": "2026-07-03T08:17:23.030Z",
+      "updatedAt": "2026-07-04T18:48:10.896Z"
+    },
+    {
+      "id": "container-1783144723315-ttbrem8",
+      "categoryId": "category-default",
+      "title": "分批执行计划",
+      "type": "single",
+      "prompts": [
+        {
+          "id": "entry-1783144723315-jupdr61",
+          "body": "使用 executing-plans skill，按计划分批执行，一直到完成所有任务计划。\n注意：\n1、在分批执行进行编程的时候，严格遵循 karpathy-guidelines skill 中所定义的全部编码规范和行为准则。\n2、完成前使用 verification-before-completion skill，完成前做验证。\n3、执行完所有计划后，推送到GitHub的main\n4、最后站在用户的视角，你汇报一下现在用户看到的效果应该是怎么样的",
+          "order": 0
+        }
+      ],
+      "intervalMs": 700,
+      "order": 6,
+      "createdAt": "2026-07-04T05:58:43.315Z",
+      "updatedAt": "2026-07-04T18:48:10.896Z"
+    },
+    {
+      "id": "container-1783145584820-i7hmhod",
+      "categoryId": "category-default",
+      "title": "执行结果审阅",
+      "type": "single",
+      "prompts": [
+        {
+          "id": "entry-1783145584820-pdjbg0z",
+          "body": "请你基于最终计划和当前代码状态进行审阅，不要重写方案，不要修改代码，重点检查是否严格按计划完成、是否引入偏离计划的改动、是否存在隐藏风险、遗漏步骤、过度实现或破坏性修改，并给出是否可以验收的初步结论：通过 / 需修复 / 不通过，并列出修复建议。（我是多个任务同时进行的，你只需要考虑我们当前的这个任务计划有没有完整实施好就行了）",
+          "order": 0
+        }
+      ],
+      "intervalMs": 700,
+      "order": 7,
+      "createdAt": "2026-07-04T06:13:04.820Z",
+      "updatedAt": "2026-07-04T18:48:10.896Z"
+    },
+    {
+      "id": "container-1783190876052-eoxiv2z",
+      "categoryId": "category-default",
+      "title": "执行结果审阅（严格）",
+      "type": "single",
+      "prompts": [
+        {
+          "id": "entry-1783190876052-o7t3yqj",
+          "body": "1、请使用 requesting-code-review skill，派出一个独立 subagent 扮演代码审查员，基于这个任务最开始的执行计划和当前代码状态，对当前任务完成情况做审阅与代码审查，不修改代码。只审查当前任务计划对应的改动，不要泛泛审查整个项目；重点检查是否严格按计划完成、是否引入偏离计划的改动、是否存在隐藏风险、遗漏步骤、过度实现、破坏性修改或验证不足。（我是多个任务同时进行的，你只需要考虑我们当前这个任务计划有没有完整实施好。）\n\n2、处理审查意见：\n使用 receiving-code-review skill，处理审阅与代码审查返回的反馈。不要盲目接受所有意见，请逐条判断问题是否真实成立：成立的问题列为需修复项，并给出修复建议；不成立的问题要用代码、测试或运行结果进行技术性反驳。不要修改代码，不要重写方案，不要扩展计划，不要引入计划外功能。\n\n3、最后结合审阅结果、代码审查结果和对审查意见的判断，给出审阅阶段的最终结论：通过 / 需修复 / 不通过。",
+          "order": 0
+        }
+      ],
+      "intervalMs": 700,
+      "order": 8,
+      "createdAt": "2026-07-04T18:47:56.051Z",
+      "updatedAt": "2026-07-04T18:48:10.896Z"
+    },
+    {
+      "id": "container-1783145619724-ezduoeq",
+      "categoryId": "category-default",
+      "title": "编写修复计划",
+      "type": "single",
+      "prompts": [
+        {
+          "id": "entry-1783145619724-gy1t9tk",
+          "body": "使用 writing-plans skill，给出详细的修复计划，先不要执行。",
+          "order": 0
+        }
+      ],
+      "intervalMs": 700,
+      "order": 9,
+      "createdAt": "2026-07-04T06:13:39.724Z",
+      "updatedAt": "2026-07-04T18:48:10.896Z"
+    },
+    {
+      "id": "container-1783145721758-20hb6qq",
+      "categoryId": "category-default",
+      "title": "修复计划可行性评估",
+      "type": "single",
+      "prompts": [
+        {
+          "id": "entry-1783145721758-jvq9tm9",
+          "body": "你深入分析一下，这个修复计划能否修复好前面审阅阶段检查出的问题？系统评估分析这个方案计划是否有一般人注意不到的潜在风险？是否会破坏影响其他功能的正常运行？是否是一种帕累托改进？最后基于这些分析，给出最终结论，是否可以直接进入到下一步来执行这个计划？",
+          "order": 0
+        }
+      ],
+      "intervalMs": 700,
+      "order": 10,
+      "createdAt": "2026-07-04T06:15:21.758Z",
+      "updatedAt": "2026-07-04T18:48:10.896Z"
+    },
+    {
+      "id": "container-1783169939796-3bde1hn",
+      "categoryId": "category-default",
+      "title": "根因排查",
+      "type": "single",
+      "prompts": [
+        {
+          "id": "entry-1783169939796-dvcvik1",
+          "body": "使用 systematic-debugging skill，系统排查根本原因，先不要修改代码。",
+          "order": 0
+        }
+      ],
+      "intervalMs": 700,
+      "order": 11,
+      "createdAt": "2026-07-04T12:58:59.796Z",
+      "updatedAt": "2026-07-04T18:48:10.896Z"
+    },
+    {
+      "id": "container-1783013204947-0ped4fd",
+      "categoryId": "category-default",
+      "title": "端到端调试修复流程",
+      "type": "group",
+      "prompts": [
+        {
+          "id": "entry-1783266618373-06zkygi",
+          "body": "根据我们刚刚过去的这些讨论，你总结一下现在我们有哪些工作需要做，你列一个完整的清单，然后每一项工作里面都要列出合理的交互体验是怎么样的、你的完整的方案，必要时画文本线框图来解释",
+          "order": 0
+        },
+        {
+          "id": "entry-1783266618373-a841xva",
+          "body": "使用 writing-plans skill，把上面所有方案整理成执行计划，先不要执行。",
+          "order": 1
+        },
+        {
+          "id": "entry-1783266618373-x2xtnk3",
+          "body": "请你深入理解代码，然后用自然语言描述一下，如果按照这个计划执行，最终的效果是怎样的？是否符合我们之前的讨论？站在用户的视角来回答我的问题，必要时画文本线框图来解释。",
+          "order": 2
+        },
+        {
+          "id": "entry-1783266618373-6g0ccvj",
+          "body": "请你深入理解代码，系统评估分析这个方案计划是否有一般人注意不到的潜在风险？是否会破坏影响其他功能的正常运行？是否是一种帕累托改进？最后基于这些分析，给出最终结论，是否可以直接进入到下一步来执行这个计划？",
+          "order": 3
+        },
+        {
+          "id": "entry-1783266618373-mrpgc5u",
+          "body": "如果有问题的话，帮我修复。如果没有问题的话，等候我的下一条指令",
+          "order": 4
+        },
+        {
+          "id": "entry-1783266618373-cek4c79",
+          "body": "使用 executing-plans skill，按计划分批执行，一直到完成所有任务计划。\n注意：\n1、在分批执行进行编程的时候，严格遵循 karpathy-guidelines skill 中所定义的全部编码规范和行为准则。\n2、完成前使用 verification-before-completion skill，完成前做验证。\n3、执行完所有计划后，推送到GitHub的main\n4、最后站在用户的视角，你汇报一下现在用户看到的效果应该是怎么样的",
+          "order": 5
+        },
+        {
+          "id": "entry-1783266618373-ahk9ljn",
+          "body": "请使用 requesting-code-review skill，派出一个独立 subagent 扮演代码审查员，基于这个任务最开始的执行计划和当前代码状态，对当前任务完成情况做审阅与代码审查，不修改代码。只审查当前任务计划对应的改动，不要泛泛审查整个项目；重点检查是否严格按计划完成、是否引入偏离计划的改动、是否存在隐藏风险、遗漏步骤、过度实现、破坏性修改或验证不足。（我是多个任务同时进行的，你只需要考虑我们当前这个任务计划有没有完整实施好。）\n\n2、处理审查意见：\n使用 receiving-code-review skill，处理审阅与代码审查返回的反馈。不要盲目接受所有意见，请逐条判断问题是否真实成立：成立的问题列为需修复项，并给出修复建议；不成立的问题要用代码、测试或运行结果进行技术性反驳。不要修改代码，不要重写方案，不要扩展计划，不要引入计划外功能。\n\n3、最后结合审阅结果、代码审查结果和对审查意见的判断，给出审阅阶段的最终结论：通过 / 需修复 / 不通过。",
+          "order": 6
+        },
+        {
+          "id": "entry-1783266618373-wovxxap",
+          "body": "如果有问题，用使用 writing-plans skill，给出详细的修复计划，然后执行。如果没问题，你就给我发送一条“Josh，请验货”。",
+          "order": 7
+        }
+      ],
+      "intervalMs": 700,
+      "order": 12,
+      "createdAt": "2026-07-02T17:26:44.946Z",
+      "updatedAt": "2026-07-05T15:50:18.373Z"
+    }
+  ],
+  "activeCategoryId": "category-default"
+}

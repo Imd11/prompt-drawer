@@ -1,0 +1,142 @@
+# Prompt Picker
+
+Prompt Picker is a local desktop prompt launcher for people who repeatedly use structured prompts in coding agents and chat-based tools. It keeps a floating Calico button near your current input area, opens a compact prompt picker, and inserts the selected prompt into the target app.
+
+The app is built with Tauri, React, and Rust. Prompt data is stored locally on the user's machine.
+
+## Features
+
+- Floating prompt button with a compact prompt list.
+- Local prompt manager for single prompts and grouped prompt sequences.
+- Category support for organizing prompt collections.
+- Paste-only and paste-and-submit insertion modes.
+- Import and export prompt libraries as JSON.
+- Local-first storage; prompt data is not uploaded to a server.
+- macOS menu bar app packaging with Developer ID signing and notarization.
+- Windows installer build through GitHub Actions.
+
+## Download
+
+The latest release is available on GitHub:
+
+https://github.com/Imd11/prompt-picker/releases/latest
+
+Current packaged builds:
+
+- macOS Apple Silicon DMG
+- Windows x64 installer
+
+On macOS, Prompt Picker requires Accessibility permission to paste into and submit text in other apps.
+
+## Example Prompt Libraries
+
+This repository includes two example prompt libraries:
+
+- `examples/prompts/prompts-zh.json`
+- `examples/prompts/prompts-en.json`
+
+They contain a development workflow prompt set with planning, execution, review, debugging, and release prompts.
+
+To use one of them:
+
+1. Open Prompt Picker.
+2. Go to the prompt manager.
+3. Click Import.
+4. Select one of the JSON files from `examples/prompts/`.
+
+Importing a JSON file replaces the current prompt library, so export your current prompts first if you want a backup.
+
+## Local Data
+
+Prompt Picker stores user data locally.
+
+On macOS, prompts are stored at:
+
+```text
+~/Library/Application Support/local.promptpicker.dev/prompts.json
+```
+
+Settings are stored next to it:
+
+```text
+~/Library/Application Support/local.promptpicker.dev/settings.json
+```
+
+Exporting prompts creates a separate JSON backup. It does not change the app's default storage location.
+
+## Development
+
+Install dependencies:
+
+```bash
+npm install
+```
+
+Run the frontend development server:
+
+```bash
+npm run dev
+```
+
+Run tests:
+
+```bash
+npm test
+```
+
+Build the frontend:
+
+```bash
+npm run build
+```
+
+Build the Tauri app:
+
+```bash
+npm run tauri -- build
+```
+
+## macOS Release Build
+
+The Tauri config is set up for Developer ID signing. For a public macOS release, build, notarize, and staple the DMG:
+
+```bash
+npm run tauri -- build --bundles dmg
+xcrun notarytool submit "src-tauri/target/release/bundle/dmg/Prompt Picker_<version>_aarch64.dmg" \
+  --key /path/to/AuthKey_<KEY_ID>.p8 \
+  --key-id <KEY_ID> \
+  --issuer <ISSUER_ID> \
+  --wait
+xcrun stapler staple "src-tauri/target/release/bundle/dmg/Prompt Picker_<version>_aarch64.dmg"
+xcrun stapler validate "src-tauri/target/release/bundle/dmg/Prompt Picker_<version>_aarch64.dmg"
+```
+
+Verify Gatekeeper acceptance:
+
+```bash
+spctl --assess --type open --context context:primary-signature --verbose=4 \
+  "src-tauri/target/release/bundle/dmg/Prompt Picker_<version>_aarch64.dmg"
+```
+
+## Windows Release Build
+
+The repository includes a GitHub Actions workflow:
+
+```text
+.github/workflows/build-windows.yml
+```
+
+Run it from GitHub Actions to produce the Windows NSIS installer artifact.
+
+## Tech Stack
+
+- Tauri 2
+- Rust 2021
+- React 19
+- TypeScript
+- Vite
+- Vitest
+
+## License
+
+ISC
