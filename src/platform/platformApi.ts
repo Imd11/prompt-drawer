@@ -15,6 +15,15 @@ export interface PromptButtonPosition {
   y: number;
 }
 
+export interface PromptLibraryFile {
+  content: string;
+  signature: string;
+}
+
+export interface PromptLibraryFileMetadata {
+  signature: string;
+}
+
 export type AutosendFailureReason =
   | "copy_failed"
   | "missing_accessibility_permission"
@@ -120,4 +129,21 @@ export async function setMenuLanguage(language: AppLanguage): Promise<void> {
 
 export async function quitPromptPicker(): Promise<void> {
   return invoke("quit_prompt_picker");
+}
+
+export async function readPromptLibraryFile(path: string): Promise<PromptLibraryFile> {
+  return invoke<PromptLibraryFile>("read_prompt_library_file", { path });
+}
+
+export async function writePromptLibraryFile(
+  path: string,
+  content: string
+): Promise<PromptLibraryFileMetadata> {
+  return invoke<PromptLibraryFileMetadata>("write_prompt_library_file", { path, content });
+}
+
+export async function getPromptLibraryFileMetadata(
+  path: string
+): Promise<PromptLibraryFileMetadata> {
+  return invoke<PromptLibraryFileMetadata>("prompt_library_file_metadata", { path });
 }

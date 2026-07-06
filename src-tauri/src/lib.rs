@@ -21,6 +21,10 @@ pub use windows::{
 };
 mod macos_panels;
 pub use macos_panels::{activate_main_window, configure_non_activating_panel};
+mod prompt_files;
+pub use prompt_files::{
+    prompt_library_file_metadata, read_prompt_library_file, write_prompt_library_file,
+};
 
 #[tauri::command]
 fn accessibility_status_cmd() -> AccessibilityStatus {
@@ -1090,7 +1094,10 @@ pub fn run() {
             open_main_window,
             open_settings_window,
             set_menu_language,
-            quit_prompt_picker
+            quit_prompt_picker,
+            read_prompt_library_file,
+            write_prompt_library_file,
+            prompt_library_file_metadata
         ])
         .setup(|app| {
             #[cfg(target_os = "macos")]
