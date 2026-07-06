@@ -79,7 +79,11 @@ extern "C-unwind" fn never_key_window(_: &AnyObject, _: Sel) -> Bool {
 fn apply_never_key_panel_class(ns_window: &NSWindow) -> Result<(), String> {
     let object: &AnyObject = ns_window.as_ref();
     let current_class = object.class();
-    if current_class.name().to_string_lossy().contains("PromptPickerNeverKeyPanel") {
+    let current_class_name = current_class.name().to_string_lossy();
+    if current_class_name.contains("PromptPickerNeverKeyPanel") {
+        return Ok(());
+    }
+    if current_class_name.contains("Tao") || current_class_name.contains("Wry") {
         return Ok(());
     }
 
