@@ -1,5 +1,7 @@
 # Prompt Picker
 
+**Read this in:** **English** | [简体中文](README.zh-CN.md) | [हिन्दी](README.hi.md) | [Español](README.es.md) | [العربية](README.ar.md)
+
 Prompt Picker is a local desktop prompt launcher for people who repeatedly use structured prompts in coding agents and chat-based tools. It keeps a floating Calico button near your current input area, opens a compact prompt picker, and inserts the selected prompt into the target app.
 
 The app is built with Tauri, React, and Rust. Prompt data is stored locally on the user's machine.
@@ -139,4 +141,4 @@ Run it from GitHub Actions to produce the Windows NSIS installer artifact.
 
 ## License
 
-ISC
+MIT

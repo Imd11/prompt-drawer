@@ -1,0 +1,144 @@
+# Prompt Picker
+
+**阅读语言：** [English](README.md) | **简体中文** | [हिन्दी](README.hi.md) | [Español](README.es.md) | [العربية](README.ar.md)
+
+Prompt Picker 是一个本地桌面提示词启动器，适合经常在编程 Agent 和聊天工具中重复使用结构化提示词的人。它会在当前输入区域附近保留一个悬浮的 Calico 按钮，打开一个紧凑的提示词面板，并把选中的提示词插入目标应用。
+
+这个应用使用 Tauri、React 和 Rust 构建。提示词数据存储在用户自己的电脑本地。
+
+## 功能
+
+- 悬浮提示词按钮和紧凑提示词列表。
+- 本地提示词管理器，支持单条提示词和分组提示词序列。
+- 分类功能，用于整理不同提示词集合。
+- 支持“只粘贴”和“粘贴并发送”两种插入模式。
+- 支持用 JSON 导入和导出提示词库。
+- 本地优先存储；提示词数据不会上传到服务器。
+- macOS 菜单栏应用打包，支持 Developer ID 签名和公证。
+- 通过 GitHub Actions 构建 Windows 安装包。
+
+## 下载
+
+最新版本可以在 GitHub Release 下载：
+
+https://github.com/Imd11/prompt-picker/releases/latest
+
+当前提供的打包版本：
+
+- macOS Apple Silicon DMG
+- Windows x64 安装包
+
+在 macOS 上，Prompt Picker 需要辅助功能权限，才能向其他应用粘贴文本并执行发送操作。
+
+## 示例提示词库
+
+这个仓库包含两个示例提示词库：
+
+- `examples/prompts/prompts-zh.json`
+- `examples/prompts/prompts-en.json`
+
+它们包含一套开发工作流提示词，覆盖计划、执行、审查、调试和发布。
+
+使用方式：
+
+1. 打开 Prompt Picker。
+2. 进入提示词管理器。
+3. 点击 Import。
+4. 从 `examples/prompts/` 中选择一个 JSON 文件。
+
+导入 JSON 文件会替换当前提示词库。如果你想保留现有提示词，请先导出备份。
+
+## 本地数据
+
+Prompt Picker 会在本地存储用户数据。
+
+在 macOS 上，提示词存储在：
+
+```text
+~/Library/Application Support/local.promptpicker.dev/prompts.json
+```
+
+设置文件存储在同一目录：
+
+```text
+~/Library/Application Support/local.promptpicker.dev/settings.json
+```
+
+导出提示词会创建一个独立的 JSON 备份文件，不会改变应用默认的数据存储位置。
+
+## 开发
+
+安装依赖：
+
+```bash
+npm install
+```
+
+启动前端开发服务器：
+
+```bash
+npm run dev
+```
+
+运行测试：
+
+```bash
+npm test
+```
+
+构建前端：
+
+```bash
+npm run build
+```
+
+构建 Tauri 应用：
+
+```bash
+npm run tauri -- build
+```
+
+## macOS 发布构建
+
+Tauri 配置已经支持 Developer ID 签名。公开发布 macOS 版本时，需要构建、公证并 staple DMG：
+
+```bash
+npm run tauri -- build --bundles dmg
+xcrun notarytool submit "src-tauri/target/release/bundle/dmg/Prompt Picker_<version>_aarch64.dmg" \
+  --key /path/to/AuthKey_<KEY_ID>.p8 \
+  --key-id <KEY_ID> \
+  --issuer <ISSUER_ID> \
+  --wait
+xcrun stapler staple "src-tauri/target/release/bundle/dmg/Prompt Picker_<version>_aarch64.dmg"
+xcrun stapler validate "src-tauri/target/release/bundle/dmg/Prompt Picker_<version>_aarch64.dmg"
+```
+
+验证 Gatekeeper 是否接受：
+
+```bash
+spctl --assess --type open --context context:primary-signature --verbose=4 \
+  "src-tauri/target/release/bundle/dmg/Prompt Picker_<version>_aarch64.dmg"
+```
+
+## Windows 发布构建
+
+仓库包含一个 GitHub Actions 工作流：
+
+```text
+.github/workflows/build-windows.yml
+```
+
+在 GitHub Actions 中运行它，可以生成 Windows NSIS 安装包 artifact。
+
+## 技术栈
+
+- Tauri 2
+- Rust 2021
+- React 19
+- TypeScript
+- Vite
+- Vitest
+
+## 许可证
+
+MIT
