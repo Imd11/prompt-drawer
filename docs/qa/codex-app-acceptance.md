@@ -25,7 +25,12 @@
 - [ ] Edit existing prompt works
 - [ ] Delete requires confirmation before removing
 - [ ] Move Up/Move Down reorders prompts correctly
-- [ ] Import JSON replaces current prompt library
+- [ ] Import JSON defaults to replacing the internal prompt library copy
+- [ ] Import JSON can optionally link and sync the selected external file
+- [ ] Linked prompt library status shows the file name, Sync now, and Unlink actions
+- [ ] In-app edits write through to a linked JSON file
+- [ ] External file conflicts keep the active edit form open instead of discarding the draft
+- [ ] Unlink keeps the current internal prompt library and does not delete the external JSON file
 - [ ] Export JSON downloads prompt library file
 
 ## Blacklist Settings

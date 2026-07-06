@@ -53,20 +53,43 @@ describe("prompt library sync storage", () => {
 
   it("reads linked external file and refreshes AppData cache when link is valid", async () => {
     let link = linked();
+    const externalContent = JSON.stringify({ version: 2, containers: [] });
     const appDataStorage = memoryStorage("appdata");
     const storage = createPromptLibrarySyncStorage({
       appDataStorage,
       getLink: async () => link,
       setLink: async (next) => { link = next; },
-      readExternal: async () => ({ content: "external", signature: "20:2000" }),
+      readExternal: async () => ({ content: externalContent, signature: "20:2000" }),
       writeExternal: vi.fn(),
       getExternalMetadata: vi.fn(),
     });
 
-    await expect(storage.read()).resolves.toBe("external");
-    expect(appDataStorage.state()).toBe("external");
+    await expect(storage.read()).resolves.toBe(externalContent);
+    expect(appDataStorage.state()).toBe(externalContent);
     expect(link.lastKnownSignature).toBe("20:2000");
     expect(link.lastSyncedAt).toEqual(expect.any(String));
+  });
+
+  it("does not overwrite AppData when linked external file is invalid JSON", async () => {
+    const appDataStorage = memoryStorage(JSON.stringify({ version: 2, containers: [] }));
+    const onSyncError = vi.fn();
+    const storage = createPromptLibrarySyncStorage({
+      appDataStorage,
+      getLink: async () => linked(),
+      setLink: async () => {},
+      readExternal: async () => ({ content: "{", signature: "20:2000" }),
+      writeExternal: vi.fn(),
+      getExternalMetadata: vi.fn(),
+      onSyncError,
+    });
+
+    const fallback = appDataStorage.state();
+    await expect(storage.read()).resolves.toBe(fallback);
+    expect(appDataStorage.state()).toBe(fallback);
+    expect(onSyncError).toHaveBeenCalledWith(expect.objectContaining({
+      kind: "read_failed",
+      path: "/Users/example/Desktop/prompts.json",
+    }));
   });
 
   it("falls back to AppData when linked file is missing", async () => {

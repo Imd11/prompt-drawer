@@ -45,6 +45,10 @@ function syncedLink(
   };
 }
 
+function assertJsonContent(content: string): void {
+  JSON.parse(content);
+}
+
 export function createPromptLibrarySyncStorage({
   appDataStorage,
   getLink,
@@ -63,6 +67,7 @@ export function createPromptLibrarySyncStorage({
 
       try {
         const external = await readExternal(path);
+        assertJsonContent(external.content);
         await appDataStorage.write(external.content);
         await setLink(syncedLink(link, external.signature, now));
         return external.content;

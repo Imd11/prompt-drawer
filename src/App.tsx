@@ -9,15 +9,22 @@ import type { AppLanguage, PromptInsertionMode, Settings } from "./shared/settin
 import { createSettingsStore } from "./shared/settingsStore";
 import { getMessages, type Messages } from "./shared/i18n";
 import { DEFAULT_CATEGORY_ID, createPromptStore } from "./shared/promptStore";
+import {
+  createPromptLibrarySyncStorage,
+  type PromptLibrarySyncError,
+} from "./storage/promptLibrarySyncStorage";
 import { createTauriPromptStorage } from "./storage/tauriPromptStorage";
 import { createTauriSettingsStorage } from "./storage/tauriSettingsStorage";
 import {
+  getPromptLibraryFileMetadata,
   hidePromptButton,
   hidePromptPopover,
   pastePromptToLastTarget,
   pastePromptAndSubmitToLastTarget,
   pastePromptSequenceAndSubmitToLastTarget,
+  readPromptLibraryFile,
   setMenuLanguage,
+  writePromptLibraryFile,
 } from "./platform/platformApi";
 import type { AutosendOutcome, AutosendSequenceOutcome } from "./platform/platformApi";
 import { useInputTargetPolling } from "./overlay/useInputTargetPolling";
@@ -86,6 +93,12 @@ type CalicoMotionPayload = {
   state: CalicoMotionState;
   reason: string;
   durationMs?: number;
+};
+
+type PendingPromptImport = {
+  path: string;
+  content: string;
+  linkAndSync: boolean;
 };
 
 function emitCalicoMotion(state: CalicoMotionState, reason: string, durationMs?: number) {
@@ -223,8 +236,31 @@ export function App({
   const [settingsLoaded, setSettingsLoaded] = useState(false);
   const [hoverResetKey, setHoverResetKey] = useState(0);
   const [settingsReturnTarget, setSettingsReturnTarget] = useState<"manager" | null>(null);
-  const storeRef = useRef(createPromptStore(createTauriPromptStorage()));
+  const [promptLibrarySyncError, setPromptLibrarySyncError] =
+    useState<PromptLibrarySyncError | null>(null);
+  const [promptLibraryDraftActive, setPromptLibraryDraftActive] = useState(false);
+  const [pendingPromptImport, setPendingPromptImport] = useState<PendingPromptImport | null>(null);
+  const activeSettingsRef = useRef<Settings>(settings);
+  const appDataStorageRef = useRef(createTauriPromptStorage());
   const settingsStoreRef = useRef(createSettingsStore(createTauriSettingsStorage()));
+  const applyActiveSettings = useCallback((nextSettings: Settings) => {
+    activeSettingsRef.current = nextSettings;
+    setActiveSettings(nextSettings);
+  }, []);
+  const appDataPromptStoreRef = useRef(createPromptStore(appDataStorageRef.current));
+  const promptStorageRef = useRef(createPromptLibrarySyncStorage({
+    appDataStorage: appDataStorageRef.current,
+    getLink: async () => activeSettingsRef.current.promptLibraryLink,
+    setLink: async (promptLibraryLink) => {
+      await settingsStoreRef.current.setPromptLibraryLink(promptLibraryLink);
+      applyActiveSettings(await settingsStoreRef.current.get());
+    },
+    readExternal: readPromptLibraryFile,
+    writeExternal: writePromptLibraryFile,
+    getExternalMetadata: getPromptLibraryFileMetadata,
+    onSyncError: setPromptLibrarySyncError,
+  }));
+  const storeRef = useRef(createPromptStore(promptStorageRef.current));
   const promptListRefreshingRef = useRef(false);
   const autosendInFlightRef = useRef(false);
   const t = getMessages(activeSettings.language);
@@ -280,24 +316,37 @@ export function App({
 
   useEffect(() => {
     let active = true;
-    reloadPromptData().catch((error) => {
-      console.warn("Failed to load prompt data:", error);
-    });
-    settingsStoreRef.current.get().then((loadedSettings) => {
+    const label = currentWindowLabel();
+    setWindowLabel(label);
+    const loadInitialData = async () => {
+      try {
+        await reloadPromptData();
+      } catch (error) {
+        console.warn("Failed to load prompt data:", error);
+      }
+      const loadedSettings = await settingsStoreRef.current.get();
       if (!active) return;
-      setActiveSettings(loadedSettings);
+      applyActiveSettings(loadedSettings);
       setSettingsLoaded(true);
       setMenuLanguage(loadedSettings.language).catch((error) => {
         console.warn("Failed to update menu language:", error);
       });
+      if (loadedSettings.promptLibraryLink.mode === "linked") {
+        try {
+          await reloadPromptData();
+        } catch (error) {
+          console.warn("Failed to load linked prompt data:", error);
+        }
+      }
+    };
+    loadInitialData().catch((error) => {
+      console.warn("Failed to initialize app data:", error);
     });
-    const label = currentWindowLabel();
-    setWindowLabel(label);
 
     return () => {
       active = false;
     };
-  }, [reloadPromptData]);
+  }, [applyActiveSettings, reloadPromptData]);
 
   useEffect(() => {
     let active = true;
@@ -497,23 +546,90 @@ export function App({
       _basePosition: [number, number] | null
     ) => {
       await settingsStoreRef.current.setOverlayButtonPosition(position);
-      setActiveSettings(await settingsStoreRef.current.get());
+      applyActiveSettings(await settingsStoreRef.current.get());
     },
-    []
+    [applyActiveSettings]
   );
 
   const updatePromptInsertionMode = async (mode: PromptInsertionMode) => {
     await settingsStoreRef.current.setPromptInsertionMode(mode);
-    setActiveSettings(await settingsStoreRef.current.get());
+    applyActiveSettings(await settingsStoreRef.current.get());
   };
 
   const updateLanguage = async (language: AppLanguage) => {
     await settingsStoreRef.current.setLanguage(language);
     const nextSettings = await settingsStoreRef.current.get();
-    setActiveSettings(nextSettings);
+    applyActiveSettings(nextSettings);
     setMenuLanguage(language).catch((error) => {
       console.warn("Failed to update menu language:", error);
     });
+  };
+
+  const openPromptImportChoice = async () => {
+    try {
+      const file = await open({
+        filters: [{ name: "JSON", extensions: ["json"] }],
+        multiple: false,
+      });
+      if (!file || Array.isArray(file)) return;
+      const content = await readTextFile(file);
+      setPendingPromptImport({ path: file, content, linkAndSync: false });
+    } catch (e) {
+      console.error("Import failed:", e);
+      emitCalicoMotion("error", "import-prompts-failed", 5000);
+      alert(t.manager.importFailed);
+    }
+  };
+
+  const confirmPromptImport = async () => {
+    if (!pendingPromptImport) return;
+    try {
+      emitCalicoMotion("working-carrying", "import-prompts");
+      await settingsStoreRef.current.clearPromptLibraryLink();
+      applyActiveSettings(await settingsStoreRef.current.get());
+      await appDataPromptStoreRef.current.importJson(pendingPromptImport.content);
+      if (pendingPromptImport.linkAndSync) {
+        const normalizedContent = await appDataPromptStoreRef.current.exportJson();
+        const metadata = await writePromptLibraryFile(
+          pendingPromptImport.path,
+          normalizedContent
+        );
+        await settingsStoreRef.current.setPromptLibraryLink({
+          mode: "linked",
+          path: pendingPromptImport.path,
+          lastKnownSignature: metadata.signature,
+          lastSyncedAt: new Date().toISOString(),
+        });
+        applyActiveSettings(await settingsStoreRef.current.get());
+      }
+      setPendingPromptImport(null);
+      setPromptLibrarySyncError(null);
+      await reloadPromptData();
+      emitCalicoMotion("happy", "import-prompts-success", 3000);
+    } catch (e) {
+      console.error("Import failed:", e);
+      emitCalicoMotion("error", "import-prompts-failed", 5000);
+      alert(t.manager.importFailed);
+    }
+  };
+
+  const syncLinkedPromptLibraryNow = async () => {
+    if (promptLibraryDraftActive) return;
+    try {
+      setPromptLibrarySyncError(null);
+      await reloadPromptData();
+      emitCalicoMotion("happy", "sync-prompts-success", 2200);
+    } catch (e) {
+      console.warn("Prompt library sync failed:", e);
+      emitCalicoMotion("error", "sync-prompts-failed", 5000);
+      alert(t.manager.promptLibrarySyncFailed);
+    }
+  };
+
+  const unlinkPromptLibrary = async () => {
+    await settingsStoreRef.current.clearPromptLibraryLink();
+    applyActiveSettings(await settingsStoreRef.current.get());
+    setPromptLibrarySyncError(null);
   };
 
   const pollingController =
@@ -543,6 +659,12 @@ export function App({
             onDeleteCategory={handleDeleteCategory}
             getCategoryDisplayName={getCategoryDisplayName}
             categoryActionError={categoryActionError}
+            promptLibraryLink={activeSettings.promptLibraryLink}
+            promptLibrarySyncError={promptLibrarySyncError}
+            promptLibraryDraftActive={promptLibraryDraftActive}
+            onSyncPromptLibraryNow={syncLinkedPromptLibraryNow}
+            onUnlinkPromptLibrary={unlinkPromptLibrary}
+            onDraftActivityChange={setPromptLibraryDraftActive}
             onOpenSettings={() => {
               setSettingsReturnTarget("manager");
               setMode("settings");
@@ -579,25 +701,7 @@ export function App({
               await storeRef.current.reorder(ids, activeCategory?.id);
               await reloadPromptData();
             }}
-            onImport={async () => {
-              try {
-                const file = await open({
-                  filters: [{ name: "JSON", extensions: ["json"] }],
-                  multiple: false,
-                });
-                if (file) {
-                  emitCalicoMotion("working-carrying", "import-prompts");
-                  const content = await readTextFile(file as string);
-                  await storeRef.current.importJson(content);
-                  await reloadPromptData();
-                  emitCalicoMotion("happy", "import-prompts-success", 3000);
-                }
-              } catch (e) {
-                console.error("Import failed:", e);
-                emitCalicoMotion("error", "import-prompts-failed", 5000);
-                alert(t.manager.importFailed);
-              }
-            }}
+            onImport={openPromptImportChoice}
             onExport={async () => {
               try {
                 const path = await save({
@@ -617,6 +721,17 @@ export function App({
               }
             }}
           />
+          {pendingPromptImport ? (
+            <PromptImportChoiceDialog
+              pendingImport={pendingPromptImport}
+              messages={t}
+              onLinkAndSyncChange={(linkAndSync) => {
+                setPendingPromptImport({ ...pendingPromptImport, linkAndSync });
+              }}
+              onCancel={() => setPendingPromptImport(null)}
+              onConfirm={confirmPromptImport}
+            />
+          ) : null}
           {windowLabel !== "main" ? (
             <div className="page-footer">
               <button className="button button-secondary" onClick={handleBackToPopover}>
@@ -666,7 +781,7 @@ export function App({
             className="button-controls-close"
             onClick={async () => {
               await settingsStoreRef.current.setFloatingButtonVisible(false);
-              setActiveSettings(await settingsStoreRef.current.get());
+              applyActiveSettings(await settingsStoreRef.current.get());
               await hidePromptButton();
               await hidePromptPopover();
             }}
@@ -704,3 +819,55 @@ export function App({
 }
 
 // ── Sub-components ────────────────────────────────────────────────────
+
+interface PromptImportChoiceDialogProps {
+  pendingImport: PendingPromptImport;
+  messages: Messages;
+  onLinkAndSyncChange: (linkAndSync: boolean) => void;
+  onCancel: () => void;
+  onConfirm: () => void | Promise<void>;
+}
+
+function promptFileName(path: string): string {
+  const parts = path.split(/[\\/]/).filter(Boolean);
+  return parts[parts.length - 1] ?? path;
+}
+
+function PromptImportChoiceDialog({
+  pendingImport,
+  messages,
+  onLinkAndSyncChange,
+  onCancel,
+  onConfirm,
+}: PromptImportChoiceDialogProps) {
+  return (
+    <div className="import-choice-backdrop" role="presentation">
+      <section className="import-choice-dialog" role="dialog" aria-modal="true">
+        <div>
+          <h2>{messages.manager.importPromptLibraryTitle}</h2>
+          <p>{promptFileName(pendingImport.path)}</p>
+        </div>
+        <label className="import-choice-option">
+          <input
+            type="checkbox"
+            aria-label={messages.manager.linkAndSyncThisFile}
+            checked={pendingImport.linkAndSync}
+            onChange={(event) => onLinkAndSyncChange(event.target.checked)}
+          />
+          <span>
+            <strong>{messages.manager.linkAndSyncThisFile}</strong>
+            <small>{messages.manager.linkAndSyncDescription}</small>
+          </span>
+        </label>
+        <div className="import-choice-actions">
+          <button className="button button-secondary" type="button" onClick={onCancel}>
+            {messages.manager.cancel}
+          </button>
+          <button className="button button-primary" type="button" onClick={onConfirm}>
+            {messages.manager.importPromptLibrary}
+          </button>
+        </div>
+      </section>
+    </div>
+  );
+}

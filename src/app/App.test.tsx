@@ -1594,6 +1594,7 @@ describe("app", () => {
     });
 
     fireEvent.click(screen.getByRole("button", { name: "导入" }));
+    fireEvent.click(await screen.findByRole("button", { name: "导入提示词库" }));
     await waitFor(() => {
       expectCalicoMotion("happy");
     });
@@ -1605,6 +1606,238 @@ describe("app", () => {
 
     expect(calicoMotionStates().filter((state) => state === "working-carrying").length)
       .toBeGreaterThanOrEqual(3);
+  });
+
+  it("loads prompts from a linked prompt library file after settings load", async () => {
+    currentWindowLabel = "main";
+    const { invoke } = await import("@tauri-apps/api/core");
+    vi.mocked(invoke).mockImplementation(async (command: string) => {
+      if (command === "read_prompt_library_file") {
+        return {
+          content: JSON.stringify({
+            version: 2,
+            containers: [makeContainer({ id: "linked", title: "Linked Prompt" })],
+          }),
+          signature: "20:2000",
+        };
+      }
+      return undefined;
+    });
+    const { readTextFile } = await import("@tauri-apps/plugin-fs");
+    (readTextFile as ReturnType<typeof vi.fn>).mockImplementation(async (path: string) => {
+      if (path === "prompts.json") {
+        return JSON.stringify({
+          version: 2,
+          containers: [makeContainer({ id: "local", title: "Local Prompt" })],
+        });
+      }
+      if (path === "settings.json") {
+        return JSON.stringify({
+          version: 1,
+          language: "zh-CN",
+          blacklistedApps: [],
+          overlayPlacement: { buttonOffset: null, buttonPosition: null },
+          floatingButton: { visible: true },
+          promptInsertion: { mode: "paste_and_submit" },
+          permissions: { accessibilityPromptRequested: false },
+          promptLibraryLink: {
+            mode: "linked",
+            path: "/Users/example/Desktop/prompts.json",
+            lastKnownSignature: "10:1000",
+            lastSyncedAt: "2026-07-06T00:00:00.000Z",
+          },
+        });
+      }
+      throw new Error("missing file: " + path);
+    });
+
+    await act(async () => {
+      render(<App />);
+    });
+
+    expect(await screen.findByText("Linked Prompt")).toBeTruthy();
+  });
+
+  it("keeps import as copy by default and does not write the old linked file", async () => {
+    currentWindowLabel = "main";
+    const files = new Map<string, string>([
+      [
+        "prompts.json",
+        JSON.stringify({ version: 2, containers: [makeContainer({ title: "Old Local" })] }),
+      ],
+      [
+        "settings.json",
+        JSON.stringify({
+          version: 1,
+          language: "zh-CN",
+          blacklistedApps: [],
+          overlayPlacement: { buttonOffset: null, buttonPosition: null },
+          floatingButton: { visible: true },
+          promptInsertion: { mode: "paste_and_submit" },
+          permissions: { accessibilityPromptRequested: false },
+          promptLibraryLink: {
+            mode: "linked",
+            path: "/Users/example/Desktop/old.json",
+            lastKnownSignature: "10:1000",
+            lastSyncedAt: "2026-07-06T00:00:00.000Z",
+          },
+        }),
+      ],
+      [
+        "/Users/example/Desktop/new.json",
+        JSON.stringify({ version: 2, containers: [makeContainer({ title: "Imported Copy" })] }),
+      ],
+    ]);
+    const { readTextFile, writeTextFile } = await import("@tauri-apps/plugin-fs");
+    (readTextFile as ReturnType<typeof vi.fn>).mockImplementation(async (path: string) => {
+      const value = files.get(path);
+      if (!value) throw new Error("missing file: " + path);
+      return value;
+    });
+    (writeTextFile as ReturnType<typeof vi.fn>).mockImplementation(async (path: string, value: string) => {
+      files.set(path, value);
+    });
+    const { open } = await import("@tauri-apps/plugin-dialog");
+    (open as ReturnType<typeof vi.fn>).mockResolvedValue("/Users/example/Desktop/new.json");
+    const { invoke } = await import("@tauri-apps/api/core");
+    vi.mocked(invoke).mockImplementation(async (command: string) => {
+      if (command === "read_prompt_library_file") {
+        return {
+          content: files.get("prompts.json") ?? "",
+          signature: "10:1000",
+        };
+      }
+      return undefined;
+    });
+
+    await act(async () => {
+      render(<App />);
+    });
+    fireEvent.click(await screen.findByRole("button", { name: "导入" }));
+    fireEvent.click(await screen.findByRole("button", { name: "导入提示词库" }));
+
+    await waitFor(() => {
+      expect(screen.getByText("Imported Copy")).toBeTruthy();
+    });
+    expect(vi.mocked(invoke)).not.toHaveBeenCalledWith(
+      "write_prompt_library_file",
+      expect.objectContaining({ path: "/Users/example/Desktop/old.json" })
+    );
+  });
+
+  it("links and syncs an imported prompt library file when selected", async () => {
+    currentWindowLabel = "main";
+    const files = new Map<string, string>([
+      ["prompts.json", JSON.stringify({ version: 2, containers: [] })],
+      [
+        "settings.json",
+        JSON.stringify({
+          version: 1,
+          language: "zh-CN",
+          blacklistedApps: [],
+          overlayPlacement: { buttonOffset: null, buttonPosition: null },
+          floatingButton: { visible: true },
+          promptInsertion: { mode: "paste_and_submit" },
+          permissions: { accessibilityPromptRequested: false },
+        }),
+      ],
+      [
+        "/Users/example/Desktop/link.json",
+        JSON.stringify({ version: 2, containers: [makeContainer({ title: "Linked Import" })] }),
+      ],
+    ]);
+    const { readTextFile, writeTextFile } = await import("@tauri-apps/plugin-fs");
+    (readTextFile as ReturnType<typeof vi.fn>).mockImplementation(async (path: string) => {
+      const value = files.get(path);
+      if (!value) throw new Error("missing file: " + path);
+      return value;
+    });
+    (writeTextFile as ReturnType<typeof vi.fn>).mockImplementation(async (path: string, value: string) => {
+      files.set(path, value);
+    });
+    const { open } = await import("@tauri-apps/plugin-dialog");
+    (open as ReturnType<typeof vi.fn>).mockResolvedValue("/Users/example/Desktop/link.json");
+    const { invoke } = await import("@tauri-apps/api/core");
+    vi.mocked(invoke).mockImplementation(async (command: string) => {
+      if (command === "write_prompt_library_file") return { signature: "30:3000" };
+      return undefined;
+    });
+
+    await act(async () => {
+      render(<App />);
+    });
+    fireEvent.click(await screen.findByRole("button", { name: "导入" }));
+    fireEvent.click(await screen.findByLabelText("链接并同步这个文件"));
+    fireEvent.click(screen.getByRole("button", { name: "导入提示词库" }));
+
+    await waitFor(() => {
+      expect(screen.getByText("Linked Import")).toBeTruthy();
+    });
+    expect(vi.mocked(invoke)).toHaveBeenCalledWith(
+      "write_prompt_library_file",
+      expect.objectContaining({ path: "/Users/example/Desktop/link.json" })
+    );
+    expect(JSON.parse(files.get("settings.json") ?? "{}").promptLibraryLink).toMatchObject({
+      mode: "linked",
+      path: "/Users/example/Desktop/link.json",
+      lastKnownSignature: "30:3000",
+    });
+  });
+
+  it("keeps the edit form open when a linked-file conflict blocks update", async () => {
+    currentWindowLabel = "main";
+    const prompt = makeContainer({ id: "conflict", title: "Conflict Prompt" });
+    const files = new Map<string, string>([
+      ["prompts.json", JSON.stringify({ version: 2, containers: [prompt] })],
+      [
+        "settings.json",
+        JSON.stringify({
+          version: 1,
+          language: "zh-CN",
+          blacklistedApps: [],
+          overlayPlacement: { buttonOffset: null, buttonPosition: null },
+          floatingButton: { visible: true },
+          promptInsertion: { mode: "paste_and_submit" },
+          permissions: { accessibilityPromptRequested: false },
+          promptLibraryLink: {
+            mode: "linked",
+            path: "/Users/example/Desktop/prompts.json",
+            lastKnownSignature: "10:1000",
+            lastSyncedAt: "2026-07-06T00:00:00.000Z",
+          },
+        }),
+      ],
+    ]);
+    const { readTextFile, writeTextFile } = await import("@tauri-apps/plugin-fs");
+    (readTextFile as ReturnType<typeof vi.fn>).mockImplementation(async (path: string) => {
+      const value = files.get(path);
+      if (!value) throw new Error("missing file: " + path);
+      return value;
+    });
+    (writeTextFile as ReturnType<typeof vi.fn>).mockImplementation(async (path: string, value: string) => {
+      files.set(path, value);
+    });
+    const { invoke } = await import("@tauri-apps/api/core");
+    vi.mocked(invoke).mockImplementation(async (command: string) => {
+      if (command === "read_prompt_library_file") {
+        return { content: files.get("prompts.json"), signature: "10:1000" };
+      }
+      if (command === "prompt_library_file_metadata") return { signature: "changed" };
+      return undefined;
+    });
+
+    await act(async () => {
+      render(<App />);
+    });
+    fireEvent.click(await screen.findByRole("button", { name: "编辑" }));
+    fireEvent.change(screen.getByDisplayValue("Conflict Prompt"), {
+      target: { value: "Edited Conflict Prompt" },
+    });
+    fireEvent.click(screen.getByRole("button", { name: "保存" }));
+
+    await waitFor(() => {
+      expect(screen.getByDisplayValue("Edited Conflict Prompt")).toBeTruthy();
+    });
   });
 
   it("does not show floating button controls on the main prompt management page", async () => {

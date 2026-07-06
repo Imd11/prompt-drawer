@@ -13,6 +13,7 @@ La aplicación está construida con Tauri, React y Rust. Los datos de prompts se
 - Soporte de categorías para organizar colecciones de prompts.
 - Modos de inserción: solo pegar y pegar y enviar.
 - Importación y exportación de bibliotecas de prompts como JSON.
+- Modo opcional de enlace y sincronización para mantener sincronizado un archivo JSON elegido con las ediciones hechas en la app.
 - Almacenamiento local-first; los datos de prompts no se suben a ningún servidor.
 - Empaquetado como app de barra de menús en macOS con firma Developer ID y notarización.
 - Construcción del instalador de Windows mediante GitHub Actions.
@@ -45,8 +46,9 @@ Para usar una de ellas:
 2. Ve al administrador de prompts.
 3. Haz clic en Import.
 4. Selecciona uno de los archivos JSON desde `examples/prompts/`.
+5. Elige importarlo como copia interna de la app o enlazar y sincronizar el archivo JSON seleccionado.
 
-Importar un archivo JSON reemplaza la biblioteca de prompts actual, así que exporta tus prompts actuales primero si quieres conservar una copia de seguridad.
+Importar como copia reemplaza la biblioteca interna actual, así que exporta tus prompts actuales primero si quieres conservar una copia de seguridad. Si eliges enlazar y sincronizar, Prompt Picker guarda la ruta del archivo seleccionado y escribe las futuras ediciones hechas en la app de vuelta en ese JSON. La app no escanea tu escritorio ni elige automáticamente un archivo de prompts.
 
 ## Datos locales
 
@@ -65,6 +67,8 @@ La configuración se almacena junto a ellos:
 ```
 
 Exportar prompts crea una copia de seguridad JSON separada. No cambia la ubicación de almacenamiento predeterminada de la app.
+
+Cuando importas un JSON, Prompt Picker usa el `prompts.json` interno por defecto. Enlazar y sincronizar es una opción explícita por archivo importado, y se puede desactivar desde el administrador de prompts sin eliminar el JSON externo.
 
 ## Desarrollo
 

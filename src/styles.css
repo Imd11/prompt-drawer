@@ -1033,6 +1033,47 @@ button {
   gap: 14px;
 }
 
+.prompt-library-status {
+  display: flex;
+  min-height: 42px;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 8px 10px;
+  color: #344054;
+  background: rgba(255, 255, 255, 0.78);
+  border: 1px solid var(--pp-border);
+  border-radius: var(--pp-radius-sm);
+}
+
+.prompt-library-status-main {
+  display: flex;
+  min-width: 0;
+  flex-direction: column;
+  gap: 3px;
+}
+
+.prompt-library-status-main strong {
+  overflow: hidden;
+  color: var(--pp-text);
+  font-size: 12px;
+  font-weight: 680;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.prompt-library-error {
+  color: var(--pp-danger);
+  font-size: 11px;
+  font-weight: 620;
+}
+
+.prompt-library-status-actions {
+  display: flex;
+  flex: 0 0 auto;
+  gap: 8px;
+}
+
 .category-rail {
   position: sticky;
   top: 12px;
@@ -1510,6 +1551,79 @@ button {
   background: #f8fafc;
 }
 
+.import-choice-backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 80;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 24px;
+  background: rgba(15, 23, 42, 0.22);
+}
+
+.import-choice-dialog {
+  display: grid;
+  width: min(440px, 100%);
+  gap: 14px;
+  padding: 18px;
+  color: var(--pp-text);
+  background: var(--pp-surface);
+  border: 1px solid var(--pp-border);
+  border-radius: var(--pp-radius-md);
+  box-shadow: 0 18px 48px rgba(15, 23, 42, 0.18);
+}
+
+.import-choice-dialog h2 {
+  margin: 0;
+  font-size: 17px;
+}
+
+.import-choice-dialog p {
+  overflow: hidden;
+  margin: 4px 0 0;
+  color: var(--pp-muted);
+  font-size: 12px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.import-choice-option {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr);
+  gap: 10px;
+  align-items: flex-start;
+  padding: 12px;
+  border: 1px solid var(--pp-border);
+  border-radius: var(--pp-radius-sm);
+  cursor: pointer;
+}
+
+.import-choice-option input {
+  margin-top: 3px;
+}
+
+.import-choice-option span {
+  display: grid;
+  gap: 3px;
+}
+
+.import-choice-option strong {
+  font-size: 13px;
+}
+
+.import-choice-option small {
+  color: var(--pp-muted);
+  font-size: 12px;
+  line-height: 1.35;
+}
+
+.import-choice-actions {
+  display: flex;
+  gap: 8px;
+  justify-content: flex-end;
+}
+
 @media (max-width: 700px) {
   .app-window-main {
     padding: 18px;
@@ -1547,6 +1661,13 @@ button {
 
   .category-rail {
     position: static;
+  }
+
+  .prompt-library-status,
+  .prompt-library-status-actions,
+  .import-choice-actions {
+    align-items: stretch;
+    flex-direction: column;
   }
 
   .prompt-manager .group-prompt-row {

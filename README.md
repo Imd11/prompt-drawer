@@ -13,6 +13,7 @@ The app is built with Tauri, React, and Rust. Prompt data is stored locally on t
 - Category support for organizing prompt collections.
 - Paste-only and paste-and-submit insertion modes.
 - Import and export prompt libraries as JSON.
+- Optional link-and-sync mode for keeping a chosen JSON file in sync with edits made in the app.
 - Local-first storage; prompt data is not uploaded to a server.
 - macOS menu bar app packaging with Developer ID signing and notarization.
 - Windows installer build through GitHub Actions.
@@ -45,8 +46,9 @@ To use one of them:
 2. Go to the prompt manager.
 3. Click Import.
 4. Select one of the JSON files from `examples/prompts/`.
+5. Choose whether to import it as the app's internal copy or link and sync the selected JSON file.
 
-Importing a JSON file replaces the current prompt library, so export your current prompts first if you want a backup.
+Importing as a copy replaces the current internal prompt library, so export your current prompts first if you want a backup. If you choose link and sync, Prompt Picker stores the selected file path and writes future in-app prompt edits back to that JSON file. The app never scans your Desktop or automatically chooses a prompt file.
 
 ## Local Data
 
@@ -65,6 +67,8 @@ Settings are stored next to it:
 ```
 
 Exporting prompts creates a separate JSON backup. It does not change the app's default storage location.
+
+When you import a JSON file, Prompt Picker uses the internal `prompts.json` by default. Link and sync is opt-in per imported file, and it can be removed from the prompt manager without deleting the external JSON file.
 
 ## Development
 

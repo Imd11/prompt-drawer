@@ -8,6 +8,8 @@ import {
   getPromptContainerPreviewLines,
 } from "../shared/promptTypes";
 import type { Messages } from "../shared/i18n";
+import type { PromptLibraryLink } from "../shared/settingsStore";
+import type { PromptLibrarySyncError } from "../storage/promptLibrarySyncStorage";
 import { CategoryRail } from "./CategoryRail";
 
 type EditorMode = "single" | "group";
@@ -34,6 +36,12 @@ interface PromptManagerProps {
   onDeleteCategory: (categoryId: string) => void | Promise<void>;
   getCategoryDisplayName: (category: PromptCategory) => string;
   categoryActionError?: string | null;
+  promptLibraryLink?: PromptLibraryLink;
+  promptLibrarySyncError?: PromptLibrarySyncError | null;
+  promptLibraryDraftActive?: boolean;
+  onSyncPromptLibraryNow?: () => void | Promise<void>;
+  onUnlinkPromptLibrary?: () => void | Promise<void>;
+  onDraftActivityChange?: (active: boolean) => void;
   onCreate: (input: { title: string; body: string }) => void | Promise<void>;
   onCreateGroup: (input: {
     title: string;
@@ -49,11 +57,11 @@ interface PromptManagerProps {
       prompts?: Array<{ body: string; order: number }>;
       intervalMs?: number;
     }
-  ) => void;
-  onDelete: (id: string) => void;
-  onReorder: (orderedIds: string[]) => void;
-  onImport: () => void;
-  onExport: () => void;
+  ) => void | Promise<void>;
+  onDelete: (id: string) => void | Promise<void>;
+  onReorder: (orderedIds: string[]) => void | Promise<void>;
+  onImport: () => void | Promise<void>;
+  onExport: () => void | Promise<void>;
 }
 
 const emptyDraft = (): Draft => ({
@@ -124,6 +132,11 @@ function PromptKindBadge({ prompt, messages }: { prompt: PromptContainer; messag
   );
 }
 
+function promptFileName(path: string): string {
+  const parts = path.split(/[\\/]/).filter(Boolean);
+  return parts[parts.length - 1] ?? path;
+}
+
 export function PromptManager({
   prompts,
   categories,
@@ -138,6 +151,17 @@ export function PromptManager({
   onDeleteCategory,
   getCategoryDisplayName,
   categoryActionError = null,
+  promptLibraryLink = {
+    mode: "copy",
+    path: null,
+    lastKnownSignature: null,
+    lastSyncedAt: null,
+  },
+  promptLibrarySyncError = null,
+  promptLibraryDraftActive = false,
+  onSyncPromptLibraryNow = () => {},
+  onUnlinkPromptLibrary = () => {},
+  onDraftActivityChange,
   onCreate,
   onCreateGroup,
   onUpdate,
@@ -179,6 +203,12 @@ export function PromptManager({
     setCreatePanelOpen(false);
     setDraft(emptyDraft());
   }, [activeCategoryId]);
+
+  const hasDraftActivity = createPanelOpen || editingId !== null || deleteConfirmId !== null;
+
+  useEffect(() => {
+    onDraftActivityChange?.(hasDraftActivity);
+  }, [hasDraftActivity, onDraftActivityChange]);
 
   const setDraftPrompt = (index: number, value: string) => {
     const next = [...draft.prompts];
@@ -264,17 +294,17 @@ export function PromptManager({
     setCreatePanelOpen(false);
   };
 
-  const handleSaveEdit = (id: string, sourceDraft = editDraft) => {
+  const handleSaveEdit = async (id: string, sourceDraft = editDraft) => {
     if (!hasValidDraft(sourceDraft)) return;
     if (sourceDraft.type === "group") {
-      onUpdate(id, {
+      await onUpdate(id, {
         title: sourceDraft.title.trim(),
         type: "group",
         prompts: cleanBodies(sourceDraft.prompts),
         intervalMs: sourceDraft.intervalMs,
       });
     } else {
-      onUpdate(id, {
+      await onUpdate(id, {
         title: sourceDraft.title.trim(),
         type: "single",
         body: sourceDraft.body.trim(),
@@ -288,15 +318,17 @@ export function PromptManager({
     if (index === 0) return;
     const newOrder = [...prompts.map((p) => p.id)];
     [newOrder[index - 1], newOrder[index]] = [newOrder[index], newOrder[index - 1]];
-    onReorder(newOrder);
+    runSubmitOnce(() => onReorder(newOrder));
   };
 
   const handleMoveDown = (index: number) => {
     if (index === prompts.length - 1) return;
     const newOrder = [...prompts.map((p) => p.id)];
     [newOrder[index], newOrder[index + 1]] = [newOrder[index + 1], newOrder[index]];
-    onReorder(newOrder);
+    runSubmitOnce(() => onReorder(newOrder));
   };
+
+  const linkedPath = promptLibraryLink.mode === "linked" ? promptLibraryLink.path : null;
 
   return (
     <div className="prompt-manager page-stack">
@@ -317,6 +349,43 @@ export function PromptManager({
           </button>
         </div>
       </header>
+
+      <div className="prompt-library-status">
+        <div className="prompt-library-status-main">
+          <strong>
+            {linkedPath
+              ? messages.manager.promptLibraryLinked(promptFileName(linkedPath))
+              : messages.manager.promptLibraryLocal}
+          </strong>
+          {promptLibrarySyncError ? (
+            <span className="prompt-library-error">
+              {messages.manager.promptLibrarySyncFailed}
+            </span>
+          ) : null}
+        </div>
+        {linkedPath ? (
+          <div className="prompt-library-status-actions">
+            <button
+              className="button button-secondary"
+              type="button"
+              disabled={promptLibraryDraftActive || hasDraftActivity}
+              title={promptLibraryDraftActive || hasDraftActivity
+                ? messages.manager.promptLibrarySyncBlockedByDraft
+                : undefined}
+              onClick={() => runSubmitOnce(onSyncPromptLibraryNow)}
+            >
+              {messages.manager.syncPromptLibraryNow}
+            </button>
+            <button
+              className="button button-secondary"
+              type="button"
+              onClick={() => runSubmitOnce(onUnlinkPromptLibrary)}
+            >
+              {messages.manager.unlinkPromptLibrary}
+            </button>
+          </div>
+        ) : null}
+      </div>
 
       <div className="prompt-manager-body">
         <CategoryRail
@@ -562,7 +631,10 @@ export function PromptManager({
                       <div className="confirm-actions">
                         <button
                           className="button button-danger"
-                          onClick={() => { onDelete(prompt.id); setDeleteConfirmId(null); }}
+                          onClick={() => runSubmitOnce(async () => {
+                            await onDelete(prompt.id);
+                            setDeleteConfirmId(null);
+                          })}
                         >
                           {messages.manager.confirm}
                         </button>
