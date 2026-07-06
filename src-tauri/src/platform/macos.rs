@@ -44,6 +44,13 @@ pub struct AutosendOutcome {
     pub reason: Option<AutosendFailureReason>,
 }
 
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum NativeSubmitKey {
+    None,
+    Enter,
+    CommandEnter,
+}
+
 impl AutosendOutcome {
     pub fn sent() -> Self {
         Self {
@@ -427,6 +434,41 @@ fn post_return_key() -> Result<(), String> {
     post_key_tap(KEY_CODE_RETURN, 0)
 }
 
+pub fn post_focus_preserving_paste() -> Result<(), String> {
+    post_paste_shortcut()
+}
+
+pub fn post_focus_preserving_submit_key(submit_key: NativeSubmitKey) -> Result<(), String> {
+    match submit_key {
+        NativeSubmitKey::None => Ok(()),
+        NativeSubmitKey::Enter => post_return_key(),
+        NativeSubmitKey::CommandEnter => post_command_return_key(),
+    }
+}
+
+#[allow(dead_code)]
+pub fn focus_preserving_paste_and_submit(submit_key: NativeSubmitKey) -> AutosendOutcome {
+    if let Err(error) = post_focus_preserving_paste() {
+        return AutosendOutcome::paste_event_failed(format_autosend_error(
+            "focus-preserving-paste",
+            &error,
+        ));
+    }
+    if let Err(error) = post_focus_preserving_submit_key(submit_key) {
+        return AutosendOutcome::return_event_failed(format_autosend_error(
+            "focus-preserving-submit",
+            &error,
+        ));
+    }
+    AutosendOutcome::sent()
+}
+
+fn post_command_return_key() -> Result<(), String> {
+    post_key_event(KEY_CODE_COMMAND, true, CG_EVENT_FLAG_MASK_COMMAND)?;
+    post_key_tap(KEY_CODE_RETURN, CG_EVENT_FLAG_MASK_COMMAND)?;
+    post_key_event(KEY_CODE_COMMAND, false, 0)
+}
+
 #[cfg(test)]
 fn native_autosend_event_sequence() -> Vec<&'static str> {
     vec![
@@ -523,6 +565,7 @@ where
     Ok(())
 }
 
+#[allow(dead_code)]
 pub fn paste_prompt_and_submit_to_app_clipboard_with_copier<C>(
     body: &str,
     bundle_id: &str,
@@ -779,6 +822,7 @@ fn run_system_events_script(script: &str) -> Result<(), String> {
     }
 }
 
+#[allow(dead_code)]
 fn click_target_point(x: f64, y: f64) -> Result<(), String> {
     run_system_events_script(&click_target_point_script(x, y))
 }
@@ -1255,6 +1299,29 @@ mod tests {
     #[test]
     fn native_autosend_does_not_depend_on_osascript() {
         assert!(!native_autosend_uses_osascript());
+    }
+
+    #[test]
+    fn focus_preserving_autosend_main_path_does_not_activate_or_click() {
+        let source = include_str!("macos.rs");
+        let start = source
+            .find("pub fn focus_preserving_paste_and_submit")
+            .expect("focus-preserving autosend function should exist");
+        let end = source[start..]
+            .find("fn paste_prompt_with_accessibility_gate")
+            .expect("next paste function should exist");
+        let main_path = &source[start..start + end];
+
+        assert!(!main_path.contains("activate_app_by_bundle_id"));
+        assert!(!main_path.contains("click_target_point"));
+        assert!(!main_path.contains("cmd_tab_refocus"));
+        assert!(main_path.contains("post_focus_preserving_paste"));
+        assert!(main_path.contains("post_focus_preserving_submit_key"));
+    }
+
+    #[test]
+    fn native_submit_key_supports_command_enter() {
+        assert_eq!(NativeSubmitKey::CommandEnter, NativeSubmitKey::CommandEnter);
     }
 
     #[test]

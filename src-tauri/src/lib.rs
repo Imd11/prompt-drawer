@@ -179,15 +179,23 @@ where
 #[tauri::command]
 async fn paste_prompt_and_submit_to_last_target(
     body: String,
+    submit_key: Option<String>,
     session_state: tauri::State<'_, PromptPickSessionState>,
     recent_state: tauri::State<'_, LastInputTargetState>,
     app: tauri::AppHandle,
 ) -> Result<AutosendOutcome, String> {
+    let submit_key = native_submit_key_from_arg(submit_key)?;
     let session_state = session_state.inner().clone();
     let recent_state = recent_state.inner().clone();
     let app = app.clone();
     tauri::async_runtime::spawn_blocking(move || {
-        paste_prompt_and_submit_to_last_target_impl(&body, &session_state, &recent_state, &app)
+        paste_prompt_and_submit_to_last_target_impl(
+            &body,
+            &session_state,
+            &recent_state,
+            &app,
+            submit_key,
+        )
     })
     .await
     .map_err(|error| format!("Autosend task failed: {}", error))?
@@ -231,10 +239,12 @@ impl AutosendSequenceOutcome {
 async fn paste_prompt_sequence_and_submit_to_last_target(
     bodies: Vec<String>,
     interval_ms: u64,
+    submit_key: Option<String>,
     session_state: tauri::State<'_, PromptPickSessionState>,
     recent_state: tauri::State<'_, LastInputTargetState>,
     app: tauri::AppHandle,
 ) -> Result<AutosendSequenceOutcome, String> {
+    let submit_key = native_submit_key_from_arg(submit_key)?;
     let session_state = session_state.inner().clone();
     let recent_state = recent_state.inner().clone();
     let app = app.clone();
@@ -245,6 +255,7 @@ async fn paste_prompt_sequence_and_submit_to_last_target(
             &session_state,
             &recent_state,
             &app,
+            submit_key,
         )
     })
     .await
@@ -257,22 +268,18 @@ fn paste_prompt_sequence_and_submit_to_last_target_impl(
     state: &PromptPickSessionState,
     recent_state: &LastInputTargetState,
     app: &tauri::AppHandle,
+    submit_key: platform::macos::NativeSubmitKey,
 ) -> Result<AutosendSequenceOutcome, String> {
-    let clipboard_app = app.clone();
-    paste_prompt_sequence_and_submit_to_session_target_with_senders(
+    focus_preserving_prompt_sequence_to_last_target_impl(
         bodies,
         interval_ms,
         state,
         Some(recent_state),
-        |body, bundle_id, click_point| {
-            platform::macos::paste_prompt_and_submit_to_app_clipboard_with_copier(
-                body,
-                bundle_id,
-                click_point.map(|point| (point.x, point.y)),
-                |text| copy_text_to_clipboard(&clipboard_app, text),
-            )
-        },
+        submit_key,
         |text| copy_text_to_clipboard(app, text),
+        platform::frontmost_app_with_pid,
+        platform::macos::post_focus_preserving_paste,
+        platform::macos::post_focus_preserving_submit_key,
         |delay_ms| std::thread::sleep(std::time::Duration::from_millis(delay_ms)),
     )
 }
@@ -282,21 +289,18 @@ fn paste_prompt_and_submit_to_last_target_impl(
     state: &PromptPickSessionState,
     recent_state: &LastInputTargetState,
     app: &tauri::AppHandle,
+    submit_key: platform::macos::NativeSubmitKey,
 ) -> Result<AutosendOutcome, String> {
-    let clipboard_app = app.clone();
-    paste_prompt_and_submit_to_session_target_with_senders(
+    focus_preserving_prompt_to_last_target_impl(
         body,
         state,
         Some(recent_state),
-        |body, bundle_id, click_point| {
-            platform::macos::paste_prompt_and_submit_to_app_clipboard_with_copier(
-                body,
-                bundle_id,
-                click_point.map(|point| (point.x, point.y)),
-                |text| copy_text_to_clipboard(&clipboard_app, text),
-            )
-        },
+        submit_key,
         |text| copy_text_to_clipboard(app, text),
+        platform::frontmost_app_with_pid,
+        platform::macos::post_focus_preserving_paste,
+        platform::macos::post_focus_preserving_submit_key,
+        |delay_ms| std::thread::sleep(std::time::Duration::from_millis(delay_ms)),
     )
 }
 
@@ -311,6 +315,19 @@ const MAX_SEQUENCE_INTERVAL_MS: u64 = 3_000;
 
 fn clamp_sequence_interval_ms(interval_ms: u64) -> u64 {
     interval_ms.clamp(MIN_SEQUENCE_INTERVAL_MS, MAX_SEQUENCE_INTERVAL_MS)
+}
+
+const FOCUS_PRESERVING_PASTE_SETTLE_MS: u64 = 180;
+
+fn native_submit_key_from_arg(
+    submit_key: Option<String>,
+) -> Result<platform::macos::NativeSubmitKey, String> {
+    match submit_key.as_deref().unwrap_or("enter") {
+        "none" => Ok(platform::macos::NativeSubmitKey::None),
+        "enter" => Ok(platform::macos::NativeSubmitKey::Enter),
+        "command_enter" => Ok(platform::macos::NativeSubmitKey::CommandEnter),
+        value => Err(format!("Invalid submit key: {}", value)),
+    }
 }
 
 fn prompt_pick_target_or_recent(
@@ -331,6 +348,234 @@ fn prompt_pick_target_or_recent(
             observed_at_ms: now_ms(),
             click_point: target.click_point,
         })
+}
+
+fn focus_preserving_prompt_to_last_target_impl<C, F, P, S, W>(
+    body: &str,
+    state: &PromptPickSessionState,
+    recent_state: Option<&LastInputTargetState>,
+    submit_key: platform::macos::NativeSubmitKey,
+    copy_sender: C,
+    frontmost_reader: F,
+    paste_sender: P,
+    submit_sender: S,
+    sleeper: W,
+) -> Result<AutosendOutcome, String>
+where
+    C: FnOnce(&str) -> Result<(), String>,
+    F: FnMut() -> Option<FrontmostAppWithPid>,
+    P: FnOnce() -> Result<(), String>,
+    S: FnOnce(platform::macos::NativeSubmitKey) -> Result<(), String>,
+    W: FnOnce(u64),
+{
+    let Some(target) = prompt_pick_target_or_recent(state, recent_state) else {
+        return Ok(copy_without_sending(
+            body,
+            copy_sender,
+            "No prompt pick target app was recorded for autosend.",
+        ));
+    };
+
+    if is_unsafe_autosend_target(&target.app) {
+        return Ok(copy_without_sending(
+            body,
+            copy_sender,
+            "Target app is not safe for autosend.",
+        ));
+    }
+
+    if !allows_app_only_autosend(&target.app) {
+        return Ok(copy_without_sending(
+            body,
+            copy_sender,
+            "Target app is not safe for app-only autosend.",
+        ));
+    }
+
+    if !platform::macos::accessibility_status().trusted {
+        return Ok(AutosendOutcome::missing_accessibility_permission());
+    }
+
+    Ok(guarded_focus_preserving_autosend_with_senders(
+        body,
+        &target,
+        submit_key,
+        copy_sender,
+        frontmost_reader,
+        paste_sender,
+        submit_sender,
+        sleeper,
+    ))
+}
+
+fn focus_preserving_prompt_sequence_to_last_target_impl<C, F, P, S, W>(
+    bodies: &[String],
+    interval_ms: u64,
+    state: &PromptPickSessionState,
+    recent_state: Option<&LastInputTargetState>,
+    submit_key: platform::macos::NativeSubmitKey,
+    copy_sender: C,
+    frontmost_reader: F,
+    paste_sender: P,
+    submit_sender: S,
+    sleeper: W,
+) -> Result<AutosendSequenceOutcome, String>
+where
+    C: FnMut(&str) -> Result<(), String>,
+    F: FnMut() -> Option<FrontmostAppWithPid>,
+    P: FnMut() -> Result<(), String>,
+    S: FnMut(platform::macos::NativeSubmitKey) -> Result<(), String>,
+    W: FnMut(u64),
+{
+    let clean_bodies: Vec<String> = bodies
+        .iter()
+        .map(|body| body.trim().to_string())
+        .filter(|body| !body.is_empty())
+        .collect();
+    let Some(first_body) = clean_bodies.first() else {
+        return Ok(AutosendSequenceOutcome::from_failure(
+            AutosendOutcome::copy_failed("Prompt group is empty.".to_string()),
+            0,
+            1,
+        ));
+    };
+
+    let Some(target) = prompt_pick_target_or_recent(state, recent_state) else {
+        let outcome = copy_without_sending(
+            first_body,
+            copy_sender,
+            "No prompt pick target app was recorded for autosend.",
+        );
+        return Ok(AutosendSequenceOutcome::from_failure(outcome, 0, 1));
+    };
+
+    if is_unsafe_autosend_target(&target.app) || !allows_app_only_autosend(&target.app) {
+        let outcome = copy_without_sending(
+            first_body,
+            copy_sender,
+            "Target app is not safe for app-only autosend.",
+        );
+        return Ok(AutosendSequenceOutcome::from_failure(outcome, 0, 1));
+    }
+
+    if !platform::macos::accessibility_status().trusted {
+        return Ok(AutosendSequenceOutcome::from_failure(
+            AutosendOutcome::missing_accessibility_permission(),
+            0,
+            1,
+        ));
+    }
+
+    Ok(focus_preserving_prompt_sequence_for_target_with_senders(
+        &clean_bodies,
+        interval_ms,
+        &target,
+        submit_key,
+        copy_sender,
+        frontmost_reader,
+        paste_sender,
+        submit_sender,
+        sleeper,
+    ))
+}
+
+fn focus_preserving_prompt_sequence_for_target_with_senders<C, F, P, S, W>(
+    clean_bodies: &[String],
+    interval_ms: u64,
+    target: &PromptPickSessionTarget,
+    submit_key: platform::macos::NativeSubmitKey,
+    mut copy_sender: C,
+    mut frontmost_reader: F,
+    mut paste_sender: P,
+    mut submit_sender: S,
+    mut sleeper: W,
+) -> AutosendSequenceOutcome
+where
+    C: FnMut(&str) -> Result<(), String>,
+    F: FnMut() -> Option<FrontmostAppWithPid>,
+    P: FnMut() -> Result<(), String>,
+    S: FnMut(platform::macos::NativeSubmitKey) -> Result<(), String>,
+    W: FnMut(u64),
+{
+    let delay_ms = clamp_sequence_interval_ms(interval_ms);
+    for (index, body) in clean_bodies.iter().enumerate() {
+        let outcome = guarded_focus_preserving_autosend_with_senders(
+            body,
+            target,
+            submit_key,
+            |text| copy_sender(text),
+            || frontmost_reader(),
+            || paste_sender(),
+            |key| submit_sender(key),
+            |delay_ms| sleeper(delay_ms),
+        );
+        if !outcome.sent {
+            return AutosendSequenceOutcome::from_failure(outcome, index, index + 1);
+        }
+        if index + 1 < clean_bodies.len() {
+            sleeper(delay_ms);
+        }
+    }
+
+    AutosendSequenceOutcome::sent_all(clean_bodies.len())
+}
+
+fn guarded_focus_preserving_autosend_with_senders<C, F, P, S, W>(
+    body: &str,
+    target: &PromptPickSessionTarget,
+    submit_key: platform::macos::NativeSubmitKey,
+    copy_sender: C,
+    mut frontmost_reader: F,
+    paste_sender: P,
+    submit_sender: S,
+    sleeper: W,
+) -> AutosendOutcome
+where
+    C: FnOnce(&str) -> Result<(), String>,
+    F: FnMut() -> Option<FrontmostAppWithPid>,
+    P: FnOnce() -> Result<(), String>,
+    S: FnOnce(platform::macos::NativeSubmitKey) -> Result<(), String>,
+    W: FnOnce(u64),
+{
+    if let Err(error) = copy_sender(body) {
+        return AutosendOutcome::copy_failed(error);
+    }
+
+    let before_paste = frontmost_reader();
+    if !captured_target_matches_frontmost(target, before_paste.as_ref()) {
+        return AutosendOutcome::copied_without_send(
+            "Target app changed before paste; prompt was copied instead.".to_string(),
+        );
+    }
+
+    if let Err(error) = paste_sender() {
+        return AutosendOutcome::paste_event_failed(format!(
+            "Focus-preserving paste failed: {}",
+            error
+        ));
+    }
+
+    sleeper(FOCUS_PRESERVING_PASTE_SETTLE_MS);
+
+    if submit_key == platform::macos::NativeSubmitKey::None {
+        return AutosendOutcome::sent();
+    }
+
+    let before_submit = frontmost_reader();
+    if !captured_target_matches_frontmost(target, before_submit.as_ref()) {
+        return AutosendOutcome::return_event_failed(
+            "Target app changed after paste; submit was skipped.".to_string(),
+        );
+    }
+
+    if let Err(error) = submit_sender(submit_key) {
+        return AutosendOutcome::return_event_failed(format!(
+            "Focus-preserving submit failed: {}",
+            error
+        ));
+    }
+
+    AutosendOutcome::sent()
 }
 
 fn paste_prompt_and_submit_to_session_target_with_senders<A, C>(
@@ -1151,6 +1396,7 @@ pub fn run() {
 mod last_input_target_tests {
     use super::*;
     use crate::platform::macos::AutosendFailureReason;
+    use std::{cell::RefCell, collections::VecDeque};
 
     fn frontmost_target(name: &str, bundle_id: &str, pid: Option<u32>) -> FrontmostAppWithPid {
         FrontmostAppWithPid {
@@ -1159,6 +1405,18 @@ mod last_input_target_tests {
                 bundle_id: bundle_id.to_string(),
             },
             pid,
+        }
+    }
+
+    fn prompt_target(name: &str, bundle_id: &str, pid: Option<u32>) -> PromptPickSessionTarget {
+        PromptPickSessionTarget {
+            app: FrontmostApp {
+                name: name.to_string(),
+                bundle_id: bundle_id.to_string(),
+            },
+            pid,
+            observed_at_ms: now_ms(),
+            click_point: None,
         }
     }
 
@@ -1513,6 +1771,231 @@ mod last_input_target_tests {
         let frontmost = frontmost_target("Notes", "com.apple.Notes", Some(123));
 
         assert!(captured_target_matches_frontmost(&target, Some(&frontmost)));
+    }
+
+    #[test]
+    fn focus_preserving_autosend_stops_before_paste_when_frontmost_changed() {
+        let target = prompt_target("WeChat", "com.tencent.xinWeChat", Some(123));
+        let events = RefCell::new(Vec::new());
+        let mut frontmost = VecDeque::from([frontmost_target("Notes", "com.apple.Notes", Some(9))]);
+
+        let outcome = guarded_focus_preserving_autosend_with_senders(
+            "hello",
+            &target,
+            platform::macos::NativeSubmitKey::Enter,
+            |body| {
+                assert_eq!(body, "hello");
+                events.borrow_mut().push("copy");
+                Ok(())
+            },
+            || frontmost.pop_front(),
+            || {
+                events.borrow_mut().push("paste");
+                Ok(())
+            },
+            |_| {
+                events.borrow_mut().push("submit");
+                Ok(())
+            },
+            |_| events.borrow_mut().push("sleep"),
+        );
+
+        assert!(outcome.copied);
+        assert!(!outcome.sent);
+        assert_eq!(outcome.reason, Some(AutosendFailureReason::NoSafeTarget));
+        assert_eq!(&*events.borrow(), &["copy"]);
+    }
+
+    #[test]
+    fn focus_preserving_autosend_skips_submit_when_frontmost_changes_after_paste() {
+        let target = prompt_target("WeChat", "com.tencent.xinWeChat", Some(123));
+        let events = RefCell::new(Vec::new());
+        let mut frontmost = VecDeque::from([
+            frontmost_target("WeChat", "com.tencent.xinWeChat", Some(123)),
+            frontmost_target("Notes", "com.apple.Notes", Some(9)),
+        ]);
+
+        let outcome = guarded_focus_preserving_autosend_with_senders(
+            "hello",
+            &target,
+            platform::macos::NativeSubmitKey::Enter,
+            |_| {
+                events.borrow_mut().push("copy");
+                Ok(())
+            },
+            || frontmost.pop_front(),
+            || {
+                events.borrow_mut().push("paste");
+                Ok(())
+            },
+            |_| {
+                events.borrow_mut().push("submit");
+                Ok(())
+            },
+            |_| events.borrow_mut().push("sleep"),
+        );
+
+        assert!(outcome.copied);
+        assert!(!outcome.sent);
+        assert_eq!(
+            outcome.reason,
+            Some(AutosendFailureReason::ReturnEventFailed)
+        );
+        assert_eq!(&*events.borrow(), &["copy", "paste", "sleep"]);
+    }
+
+    #[test]
+    fn focus_preserving_autosend_pastes_and_submits_when_target_stays_frontmost() {
+        let target = prompt_target("WeChat", "com.tencent.xinWeChat", Some(123));
+        let events = RefCell::new(Vec::new());
+        let submitted = RefCell::new(None);
+        let mut frontmost = VecDeque::from([
+            frontmost_target("WeChat", "com.tencent.xinWeChat", Some(123)),
+            frontmost_target("WeChat", "com.tencent.xinWeChat", Some(123)),
+        ]);
+
+        let outcome = guarded_focus_preserving_autosend_with_senders(
+            "hello",
+            &target,
+            platform::macos::NativeSubmitKey::Enter,
+            |_| {
+                events.borrow_mut().push("copy");
+                Ok(())
+            },
+            || frontmost.pop_front(),
+            || {
+                events.borrow_mut().push("paste");
+                Ok(())
+            },
+            |key| {
+                events.borrow_mut().push("submit");
+                submitted.replace(Some(key));
+                Ok(())
+            },
+            |_| events.borrow_mut().push("sleep"),
+        );
+
+        assert!(outcome.sent);
+        assert_eq!(*submitted.borrow(), Some(platform::macos::NativeSubmitKey::Enter));
+        assert_eq!(&*events.borrow(), &["copy", "paste", "sleep", "submit"]);
+    }
+
+    #[test]
+    fn focus_preserving_sequence_stops_before_first_paste_when_frontmost_changed() {
+        let target = prompt_target("WeChat", "com.tencent.xinWeChat", Some(123));
+        let events = RefCell::new(Vec::new());
+        let bodies = vec!["one".to_string(), "two".to_string()];
+        let mut frontmost = VecDeque::from([frontmost_target("Notes", "com.apple.Notes", Some(9))]);
+
+        let outcome = focus_preserving_prompt_sequence_for_target_with_senders(
+            &bodies,
+            700,
+            &target,
+            platform::macos::NativeSubmitKey::Enter,
+            |_| {
+                events.borrow_mut().push("copy");
+                Ok(())
+            },
+            || frontmost.pop_front(),
+            || {
+                events.borrow_mut().push("paste");
+                Ok(())
+            },
+            |_| {
+                events.borrow_mut().push("submit");
+                Ok(())
+            },
+            |_| events.borrow_mut().push("sleep"),
+        );
+
+        assert!(!outcome.sent);
+        assert_eq!(outcome.sent_count, 0);
+        assert_eq!(outcome.failed_index, Some(1));
+        assert_eq!(outcome.reason, Some(AutosendFailureReason::NoSafeTarget));
+        assert_eq!(&*events.borrow(), &["copy"]);
+    }
+
+    #[test]
+    fn focus_preserving_sequence_stops_before_second_paste_when_frontmost_changed() {
+        let target = prompt_target("WeChat", "com.tencent.xinWeChat", Some(123));
+        let events = RefCell::new(Vec::new());
+        let bodies = vec!["one".to_string(), "two".to_string()];
+        let mut frontmost = VecDeque::from([
+            frontmost_target("WeChat", "com.tencent.xinWeChat", Some(123)),
+            frontmost_target("WeChat", "com.tencent.xinWeChat", Some(123)),
+            frontmost_target("Notes", "com.apple.Notes", Some(9)),
+        ]);
+
+        let outcome = focus_preserving_prompt_sequence_for_target_with_senders(
+            &bodies,
+            700,
+            &target,
+            platform::macos::NativeSubmitKey::Enter,
+            |_| {
+                events.borrow_mut().push("copy");
+                Ok(())
+            },
+            || frontmost.pop_front(),
+            || {
+                events.borrow_mut().push("paste");
+                Ok(())
+            },
+            |_| {
+                events.borrow_mut().push("submit");
+                Ok(())
+            },
+            |_| events.borrow_mut().push("sleep"),
+        );
+
+        assert!(!outcome.sent);
+        assert_eq!(outcome.sent_count, 1);
+        assert_eq!(outcome.failed_index, Some(2));
+        assert_eq!(outcome.reason, Some(AutosendFailureReason::NoSafeTarget));
+        assert_eq!(
+            &*events.borrow(),
+            &["copy", "paste", "sleep", "submit", "sleep", "copy"]
+        );
+    }
+
+    #[test]
+    fn focus_preserving_sequence_skips_submit_when_frontmost_changes_after_paste() {
+        let target = prompt_target("WeChat", "com.tencent.xinWeChat", Some(123));
+        let events = RefCell::new(Vec::new());
+        let bodies = vec!["one".to_string()];
+        let mut frontmost = VecDeque::from([
+            frontmost_target("WeChat", "com.tencent.xinWeChat", Some(123)),
+            frontmost_target("Notes", "com.apple.Notes", Some(9)),
+        ]);
+
+        let outcome = focus_preserving_prompt_sequence_for_target_with_senders(
+            &bodies,
+            700,
+            &target,
+            platform::macos::NativeSubmitKey::Enter,
+            |_| {
+                events.borrow_mut().push("copy");
+                Ok(())
+            },
+            || frontmost.pop_front(),
+            || {
+                events.borrow_mut().push("paste");
+                Ok(())
+            },
+            |_| {
+                events.borrow_mut().push("submit");
+                Ok(())
+            },
+            |_| events.borrow_mut().push("sleep"),
+        );
+
+        assert!(!outcome.sent);
+        assert_eq!(outcome.sent_count, 0);
+        assert_eq!(outcome.failed_index, Some(1));
+        assert_eq!(
+            outcome.reason,
+            Some(AutosendFailureReason::ReturnEventFailed)
+        );
+        assert_eq!(&*events.borrow(), &["copy", "paste", "sleep"]);
     }
 
     #[test]

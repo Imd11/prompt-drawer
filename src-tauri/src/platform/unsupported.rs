@@ -36,6 +36,13 @@ pub struct AutosendOutcome {
     pub reason: Option<AutosendFailureReason>,
 }
 
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum NativeSubmitKey {
+    None,
+    Enter,
+    CommandEnter,
+}
+
 impl AutosendOutcome {
     pub fn sent() -> Self {
         Self {
@@ -166,6 +173,14 @@ where
     C: FnOnce(&str) -> Result<(), String>,
 {
     copy_sender(body)
+}
+
+pub fn post_focus_preserving_paste() -> Result<(), String> {
+    Err("Focus-preserving paste is only implemented for macOS targets.".to_string())
+}
+
+pub fn post_focus_preserving_submit_key(_submit_key: NativeSubmitKey) -> Result<(), String> {
+    Err("Focus-preserving submit is only implemented for macOS targets.".to_string())
 }
 
 pub fn paste_prompt_and_submit_to_app_clipboard_with_copier<C>(
