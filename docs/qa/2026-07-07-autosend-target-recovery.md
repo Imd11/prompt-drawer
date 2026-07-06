@@ -72,11 +72,13 @@ The following scenarios require real foreground apps and may send text into acti
 
 | Scenario | Status | Notes |
 |---|---|---|
-| Codex visible, input not manually focused, choose prompt | Pending user-safe manual test | Requires active Codex UI. |
-| Claude input focused once, choose prompt | Pending user-safe manual test | Requires active Claude UI. |
-| WeChat chat input focused once, choose prompt | Pending user-safe manual test | Requires safe scratch chat or user confirmation. |
-| Start from Codex, switch to third app before selecting prompt | Pending user-safe manual test | Must confirm copy-only/no wrong-target send. |
+| Codex visible, input not manually focused, choose prompt | Not executed by agent | Requires active Codex UI. Must be run in a safe scratch thread/input before marking pass. |
+| Claude input focused once, choose prompt | Not executed by agent | Requires active Claude UI. Must be run in a safe scratch thread/input before marking pass. |
+| WeChat chat input focused once, choose prompt | Not executed by agent | Requires safe scratch chat or explicit user confirmation before sending any text. |
+| Start from Codex, switch to third app before selecting prompt | Not executed by agent | Must be run manually to confirm copy-only/no wrong-target send in the user's desktop context. |
+
+Manual real-app tests were not executed by the agent because they require interacting with active third-party application windows/accounts. This is intentionally left as user-owned verification to avoid sending text into the wrong conversation or account.
 
 ## Acceptance Notes
 
-Pending.
+Code-level implementation and automated verification are complete. Final product acceptance still requires user-side real-app manual verification for Codex, Claude, WeChat, and third-app switching.
