@@ -47,7 +47,24 @@ Coverage relevant to this task:
 
 ## Build Verification
 
-Pending.
+Passed.
+
+Commands run:
+
+```bash
+npm run build
+npm run tauri -- build
+```
+
+Observed results:
+
+- `npm run build`: TypeScript and Vite production build passed.
+- `npm run tauri -- build`: release build passed.
+- macOS bundle produced:
+  - `src-tauri/target/release/bundle/macos/Prompt Picker.app`
+  - `src-tauri/target/release/bundle/dmg/Prompt Picker_1.0.4_aarch64.dmg`
+- The build signed the app and dmg with `Developer ID Application: Jinhang Yang (2GWPG8KGW5)`.
+- Notarization was skipped by Tauri because the current shell did not provide `APPLE_ID` / `APPLE_PASSWORD` / `APPLE_TEAM_ID` or `APPLE_API_KEY` / `APPLE_API_ISSUER` / `APPLE_API_KEY_PATH`. This is a build-environment limitation, not an autosend implementation failure.
 
 ## Real-App Manual Verification
 
