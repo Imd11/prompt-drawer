@@ -134,18 +134,18 @@ describe("Calico idle director", () => {
   it("uses long quiet delays when the next idle callback runs after deep idle begins", async () => {
     const { createCalicoIdleDirector } = await loadDirectorModule();
     const applied: IdleDirectorPayload[] = [];
+    const scheduledCallbacks: Array<() => void> = [];
     const scheduledDelays: number[] = [];
     let now = 0;
-    let pendingTimer: (() => void) | null = null;
 
     const setTimer = ((callback: TimerHandler, delay?: number) => {
       if (typeof callback !== "function") {
         throw new Error("Calico idle director should schedule function callbacks");
       }
-      pendingTimer = callback as () => void;
+      scheduledCallbacks.push(callback as () => void);
       scheduledDelays.push(delay ?? 0);
-      return scheduledDelays.length as unknown as ReturnType<typeof window.setTimeout>;
-    }) as typeof window.setTimeout;
+      return scheduledCallbacks.length;
+    }) as unknown as typeof window.setTimeout;
 
     const director = createCalicoIdleDirector({
       applyMotion: (payload) => {
@@ -166,7 +166,7 @@ describe("Calico idle director", () => {
     expect(scheduledDelays[0]).toBe(7_000);
 
     now = 10 * 60_000;
-    pendingTimer?.();
+    scheduledCallbacks[0]();
 
     expect(applied[0]).toMatchObject({
       state: "idle",
