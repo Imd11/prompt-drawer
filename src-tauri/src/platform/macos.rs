@@ -463,6 +463,33 @@ pub fn focus_preserving_paste_and_submit(submit_key: NativeSubmitKey) -> Autosen
     AutosendOutcome::sent()
 }
 
+pub fn recover_target_app_for_autosend(
+    bundle_id: &str,
+    click_point: Option<(f64, f64)>,
+) -> Result<(), String> {
+    if let Err(error) = activate_app_by_bundle_id(bundle_id) {
+        return Err(format_autosend_error("activate-target", &error));
+    }
+
+    if !wait_for_frontmost_bundle_id(bundle_id, Duration::from_millis(1_500)) {
+        return Err(format!(
+            "Target app did not become frontmost: {}",
+            bundle_id
+        ));
+    }
+
+    std::thread::sleep(Duration::from_millis(160));
+
+    if let Some((x, y)) = click_point {
+        if let Err(error) = click_target_point(x, y) {
+            return Err(format_autosend_error("click-input-target", &error));
+        }
+        std::thread::sleep(Duration::from_millis(120));
+    }
+
+    Ok(())
+}
+
 pub fn repair_focus_to_editable_element(pid: u32) -> Result<(), String> {
     ensure_accessibility_trusted_with(is_accessibility_trusted)?;
     run_system_events_script(&repair_focus_to_editable_element_script(pid))
@@ -637,30 +664,8 @@ where
         return AutosendOutcome::copy_failed(error);
     }
 
-    if let Err(error) = activate_app_by_bundle_id(bundle_id) {
-        return AutosendOutcome::target_focus_failed(format_autosend_error(
-            "activate-target",
-            &error,
-        ));
-    }
-
-    if !wait_for_frontmost_bundle_id(bundle_id, Duration::from_millis(1_500)) {
-        return AutosendOutcome::target_focus_failed(format!(
-            "Target app did not become frontmost: {}",
-            bundle_id
-        ));
-    }
-
-    std::thread::sleep(Duration::from_millis(160));
-
-    if let Some((x, y)) = click_point {
-        if let Err(error) = click_target_point(x, y) {
-            return AutosendOutcome::target_focus_failed(format_autosend_error(
-                "click-input-target",
-                &error,
-            ));
-        }
-        std::thread::sleep(Duration::from_millis(120));
+    if let Err(error) = recover_target_app_for_autosend(bundle_id, click_point) {
+        return AutosendOutcome::target_focus_failed(error);
     }
 
     if let Err(error) = post_paste_shortcut() {
@@ -1347,21 +1352,20 @@ mod tests {
     }
 
     #[test]
-    fn focus_preserving_autosend_main_path_does_not_activate_or_click() {
+    fn pure_focus_preserving_event_sender_does_not_activate_or_click() {
         let source = include_str!("macos.rs");
         let start = source
             .find("pub fn focus_preserving_paste_and_submit")
             .expect("focus-preserving autosend function should exist");
         let end = source[start..]
-            .find("fn paste_prompt_with_accessibility_gate")
-            .expect("next paste function should exist");
-        let main_path = &source[start..start + end];
+            .find("pub fn recover_target_app_for_autosend")
+            .expect("target recovery function should follow pure sender");
+        let pure_sender_source = &source[start..start + end];
 
-        assert!(!main_path.contains("activate_app_by_bundle_id"));
-        assert!(!main_path.contains("click_target_point"));
-        assert!(!main_path.contains("cmd_tab_refocus"));
-        assert!(main_path.contains("post_focus_preserving_paste"));
-        assert!(main_path.contains("post_focus_preserving_submit_key"));
+        assert!(!pure_sender_source.contains("activate_app_by_bundle_id"));
+        assert!(!pure_sender_source.contains("click_target_point"));
+        assert!(pure_sender_source.contains("post_focus_preserving_paste"));
+        assert!(pure_sender_source.contains("post_focus_preserving_submit_key"));
     }
 
     #[test]
@@ -1420,6 +1424,23 @@ mod tests {
         assert!(script.contains("click at {640, 720}"));
         assert!(!script.contains("keystroke"));
         assert!(!script.contains("key code 36"));
+    }
+
+    #[test]
+    fn target_recovery_function_activates_waits_and_clicks_optional_point() {
+        let source = include_str!("macos.rs");
+        let start = source
+            .find("pub fn recover_target_app_for_autosend")
+            .expect("target recovery function should exist");
+        let end = source[start..]
+            .find("fn paste_and_submit_to_app_script")
+            .expect("next helper should exist");
+        let recovery_source = &source[start..start + end];
+
+        assert!(recovery_source.contains("activate_app_by_bundle_id"));
+        assert!(recovery_source.contains("wait_for_frontmost_bundle_id"));
+        assert!(recovery_source.contains("click_target_point"));
+        assert!(recovery_source.contains("Duration::from_millis(1_500)"));
     }
 
     #[test]
