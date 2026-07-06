@@ -1410,6 +1410,38 @@ describe("app", () => {
     expectCalicoMotion("error");
   });
 
+  it("emits a manual paste status when guarded autosend only copied", async () => {
+    const { invoke } = await import("@tauri-apps/api/core");
+    vi.mocked(invoke).mockImplementation(async (command: string) => {
+      if (command === "paste_prompt_and_submit_to_last_target") {
+        return {
+          copied: true,
+          sent: false,
+          error: "Target app changed before paste; prompt was copied instead.",
+          reason: "no_safe_target",
+        };
+      }
+      return undefined;
+    });
+    const { readTextFile } = await import("@tauri-apps/plugin-fs");
+    (readTextFile as ReturnType<typeof vi.fn>).mockResolvedValueOnce(
+      JSON.stringify({ version: 1, prompts: mockPrompts })
+    );
+
+    await act(async () => {
+      render(<App />);
+    });
+
+    fireEvent.click(await screen.findByText("Test Prompt"));
+
+    await waitFor(() => {
+      expect(emitMock).toHaveBeenCalledWith("prompt-autosend-status", {
+        kind: "failed",
+        message: "已复制，请手动粘贴",
+      });
+    });
+  });
+
   it("hides the prompt popover before autosending the selected prompt", async () => {
     const { invoke } = await import("@tauri-apps/api/core");
     vi.mocked(invoke).mockClear();
