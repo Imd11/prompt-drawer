@@ -472,29 +472,72 @@ pub fn repair_focus_to_editable_element(pid: u32) -> Result<(), String> {
 fn repair_focus_to_editable_element_script(pid: u32) -> String {
     format!(
         r#"on run
-tell application "System Events"
-    tell (first process whose unix id is {})
-        set frontWin to front window
-        try
-            set focusedElem to value of attribute "AXFocusedUIElement" of frontWin
-            if focusedElem is not missing value then
-                set focused of focusedElem to true
-                return "focused-current"
-            end if
-        end try
-        set editableRoles to {{"AXTextArea", "AXTextField", "AXSearchField", "AXComboBox", "AXWebArea"}}
-        repeat with elem in entire contents of frontWin
-            try
-                if role of elem is in editableRoles then
-                    set focused of elem to true
-                    return "focused-editable"
-                end if
-            end try
-        end repeat
-    end tell
-end tell
-error "No editable AX element found"
-end run"#,
+	tell application "System Events"
+	    tell (first process whose unix id is {})
+	        set frontWin to front window
+	        set editableRoles to {{"AXTextArea", "AXTextField", "AXSearchField", "AXComboBox", "AXWebArea"}}
+	        try
+	            set focusedElem to value of attribute "AXFocusedUIElement" of frontWin
+	            if focusedElem is not missing value then
+	                try
+	                    set focusedRole to role of focusedElem as string
+	                    if focusedRole is in editableRoles then
+	                        set focused of focusedElem to true
+	                        return "focused-current-editable"
+	                    end if
+	                end try
+	            end if
+	        end try
+	        try
+	            set winPos to position of frontWin
+	            set winSize to size of frontWin
+	        on error
+	            set winPos to {{0, 0}}
+	            set winSize to {{0, 0}}
+	        end try
+	        set bestElem to missing value
+	        set bestScore to -100000
+	        repeat with elem in entire contents of frontWin
+	            try
+	                set elemRole to role of elem as string
+	                if elemRole is in editableRoles then
+	                    set elemScore to 0
+	                    if elemRole is "AXTextArea" then
+	                        set elemScore to elemScore + 60
+	                    else if elemRole is "AXTextField" then
+	                        set elemScore to elemScore + 35
+	                    else if elemRole is "AXComboBox" then
+	                        set elemScore to elemScore + 25
+	                    else if elemRole is "AXWebArea" then
+	                        set elemScore to elemScore + 20
+	                    else if elemRole is "AXSearchField" then
+	                        set elemScore to elemScore - 35
+	                    end if
+	                    try
+	                        if enabled of elem is true then set elemScore to elemScore + 10
+	                    end try
+	                    try
+	                        set elemPos to position of elem
+	                        set elemSize to size of elem
+	                        if item 1 of elemSize > 80 and item 2 of elemSize > 18 then set elemScore to elemScore + 10
+	                        if item 2 of elemSize > 40 then set elemScore to elemScore + 20
+	                        if item 2 of elemPos > (item 2 of winPos + (item 2 of winSize * 0.45)) then set elemScore to elemScore + 12
+	                    end try
+	                    if elemScore > bestScore then
+	                        set bestScore to elemScore
+	                        set bestElem to elem
+	                    end if
+	                end if
+	            end try
+	        end repeat
+	        if bestElem is not missing value then
+	            set focused of bestElem to true
+	            return "focused-best-editable"
+	        end if
+	    end tell
+	end tell
+	error "No editable AX element found"
+	end run"#,
         pid
     )
 }
@@ -1348,6 +1391,12 @@ mod tests {
         assert!(script.contains("AXComboBox"));
         assert!(script.contains("AXWebArea"));
         assert!(script.contains("entire contents of frontWin"));
+        assert!(script.contains("focusedRole"));
+        assert!(script.contains("bestScore"));
+        assert!(script.contains("bestElem"));
+        assert!(script.contains("set elemScore to elemScore - 35"));
+        assert!(script.contains("item 2 of elemPos >"));
+        assert!(script.contains("item 1 of elemSize > 80"));
         assert!(!script.contains("WeChat"));
         assert!(!script.contains("Claude"));
         assert!(!script.contains("Codex"));
