@@ -47,7 +47,6 @@ pub fn configure_non_activating_panel(window: &tauri::WebviewWindow) -> Result<(
 
     unsafe {
         let ns_window = &*(ns_window_ptr.cast::<NSWindow>());
-        apply_never_key_panel_class(ns_window)?;
         let mask = ns_window.styleMask()
             | NSWindowStyleMask::NonactivatingPanel
             | NSWindowStyleMask::UtilityWindow;
@@ -64,6 +63,7 @@ pub fn configure_non_activating_panel(window: &tauri::WebviewWindow) -> Result<(
                 | NSWindowCollectionBehavior::Transient
                 | NSWindowCollectionBehavior::IgnoresCycle,
         );
+        apply_never_key_panel_class(ns_window)?;
         ns_window.orderFrontRegardless();
     }
 
