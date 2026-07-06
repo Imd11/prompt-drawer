@@ -239,7 +239,7 @@ fn paste_prompt_sequence_and_submit_to_last_target_impl(
         submit_key,
         |text| copy_text_to_clipboard(app, text),
         platform::frontmost_app_with_pid,
-        repair_target_focus,
+        recover_target_for_autosend,
         platform::macos::post_focus_preserving_paste,
         platform::macos::post_focus_preserving_submit_key,
         |delay_ms| std::thread::sleep(std::time::Duration::from_millis(delay_ms)),
@@ -260,7 +260,7 @@ fn paste_prompt_and_submit_to_last_target_impl(
         submit_key,
         |text| copy_text_to_clipboard(app, text),
         platform::frontmost_app_with_pid,
-        repair_target_focus,
+        recover_target_for_autosend,
         platform::macos::post_focus_preserving_paste,
         platform::macos::post_focus_preserving_submit_key,
         |delay_ms| std::thread::sleep(std::time::Duration::from_millis(delay_ms)),
@@ -300,6 +300,19 @@ fn repair_target_focus(target: &PromptPickSessionTarget) -> Result<(), String> {
     platform::macos::repair_focus_to_editable_element(pid)
 }
 
+fn recover_target_for_autosend(target: &PromptPickSessionTarget) -> Result<(), String> {
+    platform::macos::recover_target_app_for_autosend(
+        &target.app.bundle_id,
+        target.click_point.map(|point| (point.x, point.y)),
+    )?;
+
+    if target.click_point.is_none() {
+        repair_target_focus(target)?;
+    }
+
+    Ok(())
+}
+
 fn prompt_pick_target_or_recent(
     session_state: &PromptPickSessionState,
     recent_state: Option<&LastInputTargetState>,
@@ -327,7 +340,7 @@ fn focus_preserving_prompt_to_last_target_impl<C, F, R, P, S, W>(
     submit_key: platform::macos::NativeSubmitKey,
     copy_sender: C,
     frontmost_reader: F,
-    focus_repair: R,
+    recover_target: R,
     paste_sender: P,
     submit_sender: S,
     sleeper: W,
@@ -374,7 +387,7 @@ where
         submit_key,
         copy_sender,
         frontmost_reader,
-        focus_repair,
+        recover_target,
         paste_sender,
         submit_sender,
         sleeper,
@@ -389,7 +402,7 @@ fn focus_preserving_prompt_sequence_to_last_target_impl<C, F, R, P, S, W>(
     submit_key: platform::macos::NativeSubmitKey,
     copy_sender: C,
     frontmost_reader: F,
-    focus_repair: R,
+    recover_target: R,
     paste_sender: P,
     submit_sender: S,
     sleeper: W,
@@ -448,7 +461,7 @@ where
         submit_key,
         copy_sender,
         frontmost_reader,
-        focus_repair,
+        recover_target,
         paste_sender,
         submit_sender,
         sleeper,
@@ -462,7 +475,7 @@ fn focus_preserving_prompt_sequence_for_target_with_senders<C, F, R, P, S, W>(
     submit_key: platform::macos::NativeSubmitKey,
     mut copy_sender: C,
     mut frontmost_reader: F,
-    mut focus_repair: R,
+    mut recover_target: R,
     mut paste_sender: P,
     mut submit_sender: S,
     mut sleeper: W,
@@ -483,7 +496,7 @@ where
             submit_key,
             |text| copy_sender(text),
             || frontmost_reader(),
-            |target| focus_repair(target),
+            |target| recover_target(target),
             || paste_sender(),
             |key| submit_sender(key),
             |delay_ms| sleeper(delay_ms),
@@ -505,7 +518,7 @@ fn guarded_focus_preserving_autosend_with_senders<C, F, R, P, S, W>(
     submit_key: platform::macos::NativeSubmitKey,
     copy_sender: C,
     mut frontmost_reader: F,
-    mut focus_repair: R,
+    mut recover_target: R,
     paste_sender: P,
     submit_sender: S,
     sleeper: W,
@@ -523,14 +536,22 @@ where
     }
 
     let before_paste = frontmost_reader();
-    if !captured_target_matches_frontmost(target, before_paste.as_ref()) {
-        if focus_repair(target).is_err() {
-            return AutosendOutcome::copied_without_send(
-                "Target app changed before paste; prompt was copied instead.".to_string(),
-            );
+    match classify_target_frontmost(target, before_paste.as_ref()) {
+        TargetFrontmostStatus::Target => {}
+        TargetFrontmostStatus::PromptPicker => {
+            if recover_target(target).is_err() {
+                return AutosendOutcome::copied_without_send(
+                    "Target app changed before paste; prompt was copied instead.".to_string(),
+                );
+            }
+            let after_recovery = frontmost_reader();
+            if !captured_target_matches_frontmost(target, after_recovery.as_ref()) {
+                return AutosendOutcome::copied_without_send(
+                    "Target app changed before paste; prompt was copied instead.".to_string(),
+                );
+            }
         }
-        let after_repair = frontmost_reader();
-        if !captured_target_matches_frontmost(target, after_repair.as_ref()) {
+        TargetFrontmostStatus::OtherOrUnknown => {
             return AutosendOutcome::copied_without_send(
                 "Target app changed before paste; prompt was copied instead.".to_string(),
             );
@@ -1941,11 +1962,11 @@ mod last_input_target_tests {
     }
 
     #[test]
-    fn ax_repair_can_recover_before_paste_if_target_matches_after_repair() {
+    fn target_recovery_can_recover_before_paste_if_picker_is_frontmost() {
         let target = prompt_target("WeChat", "com.tencent.xinWeChat", Some(123));
         let events = RefCell::new(Vec::new());
         let mut frontmost = VecDeque::from([
-            frontmost_target("Notes", "com.apple.Notes", Some(9)),
+            frontmost_target("Prompt Picker", "local.promptpicker.dev", Some(1)),
             frontmost_target("WeChat", "com.tencent.xinWeChat", Some(123)),
             frontmost_target("WeChat", "com.tencent.xinWeChat", Some(123)),
         ]);
@@ -1960,7 +1981,7 @@ mod last_input_target_tests {
             },
             || frontmost.pop_front(),
             |_| {
-                events.borrow_mut().push("repair");
+                events.borrow_mut().push("recover");
                 Ok(())
             },
             || {
@@ -1977,8 +1998,119 @@ mod last_input_target_tests {
         assert!(outcome.sent);
         assert_eq!(
             &*events.borrow(),
-            &["copy", "repair", "paste", "sleep", "submit"]
+            &["copy", "recover", "paste", "sleep", "submit"]
         );
+    }
+
+    #[test]
+    fn autosend_recovers_app_only_target_with_recorded_click_point_when_picker_is_frontmost() {
+        let target = PromptPickSessionTarget {
+            app: FrontmostApp {
+                name: "Codex".to_string(),
+                bundle_id: "com.openai.codex".to_string(),
+            },
+            pid: None,
+            observed_at_ms: now_ms(),
+            click_point: Some(TargetClickPoint { x: 640.0, y: 720.0 }),
+        };
+        let mut frontmost = vec![
+            Some(frontmost_target("Prompt Picker", "local.promptpicker.dev", Some(1))),
+            Some(frontmost_target("Codex", "com.openai.codex", Some(42))),
+            Some(frontmost_target("Codex", "com.openai.codex", Some(42))),
+        ]
+        .into_iter();
+        let recovered = RefCell::new(false);
+        let pasted = RefCell::new(false);
+        let submitted = RefCell::new(false);
+
+        let outcome = guarded_focus_preserving_autosend_with_senders(
+            "hello",
+            &target,
+            platform::macos::NativeSubmitKey::Enter,
+            |_| Ok(()),
+            || frontmost.next().flatten(),
+            |recover_target| {
+                recovered.replace(true);
+                assert_eq!(recover_target.app.bundle_id, "com.openai.codex");
+                assert_eq!(recover_target.click_point.unwrap().x, 640.0);
+                Ok(())
+            },
+            || {
+                pasted.replace(true);
+                Ok(())
+            },
+            |_| {
+                submitted.replace(true);
+                Ok(())
+            },
+            |_| {},
+        );
+
+        assert!(outcome.sent);
+        assert!(*recovered.borrow());
+        assert!(*pasted.borrow());
+        assert!(*submitted.borrow());
+    }
+
+    #[test]
+    fn autosend_refuses_when_another_app_is_frontmost_before_paste() {
+        let target = PromptPickSessionTarget {
+            app: FrontmostApp {
+                name: "Codex".to_string(),
+                bundle_id: "com.openai.codex".to_string(),
+            },
+            pid: Some(42),
+            observed_at_ms: now_ms(),
+            click_point: None,
+        };
+        let outcome = guarded_focus_preserving_autosend_with_senders(
+            "hello",
+            &target,
+            platform::macos::NativeSubmitKey::Enter,
+            |_| Ok(()),
+            || Some(frontmost_target("Notes", "com.apple.Notes", Some(9))),
+            |_| panic!("must not recover when a third-party app is frontmost"),
+            || panic!("must not paste into the wrong app"),
+            |_| panic!("must not submit into the wrong app"),
+            |_| {},
+        );
+
+        assert_eq!(outcome.reason, Some(AutosendFailureReason::NoSafeTarget));
+        assert!(outcome.copied);
+        assert!(!outcome.sent);
+    }
+
+    #[test]
+    fn autosend_refuses_when_prompt_picker_recovery_does_not_restore_target() {
+        let target = PromptPickSessionTarget {
+            app: FrontmostApp {
+                name: "Codex".to_string(),
+                bundle_id: "com.openai.codex".to_string(),
+            },
+            pid: Some(42),
+            observed_at_ms: now_ms(),
+            click_point: None,
+        };
+        let mut frontmost = vec![
+            Some(frontmost_target("Prompt Picker", "local.promptpicker.dev", Some(1))),
+            Some(frontmost_target("Prompt Picker", "local.promptpicker.dev", Some(1))),
+        ]
+        .into_iter();
+        let outcome = guarded_focus_preserving_autosend_with_senders(
+            "hello",
+            &target,
+            platform::macos::NativeSubmitKey::Enter,
+            |_| Ok(()),
+            || frontmost.next().flatten(),
+            |_| Ok(()),
+            || panic!("must not paste before target is restored"),
+            |_| panic!("must not submit before target is restored"),
+            |_| {},
+        );
+
+        assert_eq!(outcome.reason, Some(AutosendFailureReason::NoSafeTarget));
+        assert!(outcome.copied);
+        assert!(!outcome.sent);
     }
 
     #[test]
@@ -2058,6 +2190,59 @@ mod last_input_target_tests {
         assert!(outcome.sent);
         assert_eq!(*submitted.borrow(), Some(platform::macos::NativeSubmitKey::Enter));
         assert_eq!(&*events.borrow(), &["copy", "paste", "sleep", "submit"]);
+    }
+
+    #[test]
+    fn sequence_autosend_recovers_target_when_prompt_picker_is_frontmost() {
+        let target = PromptPickSessionTarget {
+            app: FrontmostApp {
+                name: "Codex".to_string(),
+                bundle_id: "com.openai.codex".to_string(),
+            },
+            pid: Some(42),
+            observed_at_ms: now_ms(),
+            click_point: Some(TargetClickPoint { x: 640.0, y: 720.0 }),
+        };
+        let bodies = vec!["one".to_string(), "two".to_string()];
+        let mut frontmost = vec![
+            Some(frontmost_target("Prompt Picker", "local.promptpicker.dev", Some(1))),
+            Some(frontmost_target("Codex", "com.openai.codex", Some(42))),
+            Some(frontmost_target("Codex", "com.openai.codex", Some(42))),
+            Some(frontmost_target("Codex", "com.openai.codex", Some(42))),
+            Some(frontmost_target("Codex", "com.openai.codex", Some(42))),
+        ]
+        .into_iter();
+        let recovered_count = RefCell::new(0);
+        let pasted_count = RefCell::new(0);
+        let submitted_count = RefCell::new(0);
+
+        let outcome = focus_preserving_prompt_sequence_for_target_with_senders(
+            &bodies,
+            700,
+            &target,
+            platform::macos::NativeSubmitKey::Enter,
+            |_| Ok(()),
+            || frontmost.next().flatten(),
+            |_| {
+                *recovered_count.borrow_mut() += 1;
+                Ok(())
+            },
+            || {
+                *pasted_count.borrow_mut() += 1;
+                Ok(())
+            },
+            |_| {
+                *submitted_count.borrow_mut() += 1;
+                Ok(())
+            },
+            |_| {},
+        );
+
+        assert!(outcome.sent);
+        assert_eq!(outcome.sent_count, 2);
+        assert_eq!(*recovered_count.borrow(), 1);
+        assert_eq!(*pasted_count.borrow(), 2);
+        assert_eq!(*submitted_count.borrow(), 2);
     }
 
     #[test]
