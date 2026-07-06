@@ -137,46 +137,6 @@ fn paste_prompt(body: String, app: tauri::AppHandle) -> Result<(), String> {
 }
 
 #[tauri::command]
-fn paste_prompt_to_app(
-    body: String,
-    bundle_id: String,
-    app: tauri::AppHandle,
-) -> Result<(), String> {
-    platform::macos::paste_prompt_to_app_with_copier(&body, &bundle_id, |text| {
-        copy_text_to_clipboard(&app, text)
-    })
-}
-
-#[tauri::command]
-async fn paste_prompt_to_last_target(
-    body: String,
-    state: tauri::State<'_, LastInputTargetState>,
-    app: tauri::AppHandle,
-) -> Result<(), String> {
-    let state = state.inner().clone();
-    let app = app.clone();
-    tauri::async_runtime::spawn_blocking(move || {
-        paste_prompt_to_last_target_impl(&body, &state, |text| copy_text_to_clipboard(&app, text))
-    })
-    .await
-    .map_err(|error| format!("Paste task failed: {}", error))?
-}
-
-fn paste_prompt_to_last_target_impl<C>(
-    body: &str,
-    state: &LastInputTargetState,
-    copy_sender: C,
-) -> Result<(), String>
-where
-    C: FnOnce(&str) -> Result<(), String>,
-{
-    let Some(target) = state.get() else {
-        return Err("Click into a text field first, then choose a prompt.".to_string());
-    };
-    platform::macos::paste_prompt_to_app_with_copier(body, &target.app.bundle_id, copy_sender)
-}
-
-#[tauri::command]
 async fn paste_prompt_and_submit_to_last_target(
     body: String,
     submit_key: Option<String>,
@@ -1376,8 +1336,6 @@ pub fn run() {
             current_input_target,
             begin_prompt_pick_session,
             paste_prompt,
-            paste_prompt_to_app,
-            paste_prompt_to_last_target,
             paste_prompt_and_submit_to_last_target,
             paste_prompt_sequence_and_submit_to_last_target,
             show_prompt_button,
@@ -1511,10 +1469,25 @@ mod last_input_target_tests {
         let source = include_str!("lib.rs");
 
         assert!(source.contains("async fn begin_prompt_pick_session"));
-        assert!(source.contains("async fn paste_prompt_to_last_target"));
         assert!(source.contains("async fn paste_prompt_and_submit_to_last_target"));
         assert!(source.contains("async fn paste_prompt_sequence_and_submit_to_last_target"));
-        assert!(source.matches("tauri::async_runtime::spawn_blocking(move ||").count() >= 4);
+        assert!(source.matches("tauri::async_runtime::spawn_blocking(move ||").count() >= 3);
+    }
+
+    #[test]
+    fn legacy_activating_paste_commands_are_not_registered() {
+        let source = include_str!("lib.rs");
+        let handler_start = source
+            .find("tauri::generate_handler![")
+            .expect("invoke handler should be registered");
+        let handler_rest = &source[handler_start..];
+        let handler_end = handler_rest
+            .find("])")
+            .expect("invoke handler should close");
+        let handler_source = &handler_rest[..handler_end];
+
+        assert!(!handler_source.contains("paste_prompt_to_app,"));
+        assert!(!handler_source.contains("paste_prompt_to_last_target,"));
     }
 
     #[test]
@@ -2186,19 +2159,6 @@ mod last_input_target_tests {
 
         assert_eq!(target.app.bundle_id, "com.tencent.xinWeChat");
         assert_eq!(target.click_point.unwrap().x, 400.0);
-    }
-
-    #[test]
-    fn missing_last_target_returns_clear_error() {
-        let state = LastInputTargetState::default();
-        let result = paste_prompt_to_last_target_impl("hello", &state, |_| {
-            panic!("copy sender must not run without a target")
-        });
-
-        assert_eq!(
-            result.unwrap_err(),
-            "Click into a text field first, then choose a prompt."
-        );
     }
 
     #[test]

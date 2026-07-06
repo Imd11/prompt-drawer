@@ -66,10 +66,6 @@ export async function pastePrompt(body: string): Promise<void> {
   return invoke("paste_prompt", { body });
 }
 
-export async function pastePromptToLastTarget(body: string): Promise<void> {
-  return invoke("paste_prompt_to_last_target", { body });
-}
-
 export async function pastePromptAndSubmitToLastTarget(
   body: string,
   submitKey: NativeSubmitKey = "enter"
@@ -123,9 +119,6 @@ export async function showPromptPopoverFromButton(sessionId: number): Promise<vo
   return invoke("show_prompt_popover_from_button", { sessionId });
 }
 
-export async function pastePromptToApp(body: string, bundle_id: string): Promise<void> {
-  return invoke("paste_prompt_to_app", { body, bundle_id });
-}
 export async function openMainWindow(): Promise<void> {
   return invoke("open_main_window");
 }

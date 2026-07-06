@@ -550,31 +550,6 @@ where
     paste_prompt_with_accessibility_gate(body, copy_sender, is_accessibility_trusted)
 }
 
-pub fn paste_prompt_to_app_with_copier<C>(
-    body: &str,
-    bundle_id: &str,
-    copy_sender: C,
-) -> Result<(), String>
-where
-    C: FnOnce(&str) -> Result<(), String>,
-{
-    ensure_accessibility_trusted_with(is_accessibility_trusted)?;
-    copy_sender(body)?;
-    let script = paste_to_app_script(bundle_id);
-    let output = Command::new("osascript")
-        .arg("-e")
-        .arg(&script)
-        .output()
-        .map_err(|e| e.to_string())?;
-    if !output.status.success() {
-        return Err(format_autosend_error(
-            "paste",
-            String::from_utf8_lossy(&output.stderr).as_ref(),
-        ));
-    }
-    Ok(())
-}
-
 #[allow(dead_code)]
 pub fn paste_prompt_and_submit_to_app_with_copier<C>(
     body: &str,
@@ -813,15 +788,6 @@ where
         ));
     }
     Ok(())
-}
-
-fn paste_to_app_script(bundle_id: &str) -> String {
-    format!(
-        r#"tell application id "{}" to activate
-delay 0.1
-tell application "System Events" to keystroke "v" using command down"#,
-        bundle_id
-    )
 }
 
 fn paste_and_submit_to_app_script(bundle_id: &str) -> String {
@@ -1356,6 +1322,18 @@ mod tests {
     }
 
     #[test]
+    fn legacy_activating_paste_script_is_not_present() {
+        let source = include_str!("macos.rs");
+        let production_source = source
+            .split("#[cfg(test)]")
+            .next()
+            .expect("production source should precede tests");
+
+        assert!(!production_source.contains("fn paste_to_app_script"));
+        assert!(!production_source.contains("pub fn paste_prompt_to_app_with_copier"));
+    }
+
+    #[test]
     fn native_submit_key_supports_command_enter() {
         assert_eq!(NativeSubmitKey::CommandEnter, NativeSubmitKey::CommandEnter);
     }
@@ -1698,11 +1676,4 @@ mod tests {
         );
     }
 
-    #[test]
-    fn paste_to_app_script_activates_target_bundle_before_paste() {
-        let script = paste_to_app_script("com.apple.Notes");
-
-        assert!(script.contains("tell application id \"com.apple.Notes\" to activate"));
-        assert!(script.contains("keystroke \"v\" using command down"));
-    }
 }

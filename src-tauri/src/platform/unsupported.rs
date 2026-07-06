@@ -164,17 +164,6 @@ where
     copy_sender(body)
 }
 
-pub fn paste_prompt_to_app_with_copier<C>(
-    body: &str,
-    _bundle_id: &str,
-    copy_sender: C,
-) -> Result<(), String>
-where
-    C: FnOnce(&str) -> Result<(), String>,
-{
-    copy_sender(body)
-}
-
 pub fn post_focus_preserving_paste() -> Result<(), String> {
     Err("Focus-preserving paste is only implemented for macOS targets.".to_string())
 }
