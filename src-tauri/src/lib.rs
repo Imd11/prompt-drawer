@@ -984,6 +984,29 @@ fn captured_target_matches_frontmost(
     }
 }
 
+#[derive(Debug, PartialEq, Eq)]
+enum TargetFrontmostStatus {
+    Target,
+    PromptPicker,
+    OtherOrUnknown,
+}
+
+fn classify_target_frontmost(
+    target: &PromptPickSessionTarget,
+    frontmost: Option<&FrontmostAppWithPid>,
+) -> TargetFrontmostStatus {
+    let Some(frontmost) = frontmost else {
+        return TargetFrontmostStatus::OtherOrUnknown;
+    };
+    if captured_target_matches_frontmost(target, Some(frontmost)) {
+        return TargetFrontmostStatus::Target;
+    }
+    if is_prompt_picker_app(&frontmost.app) {
+        return TargetFrontmostStatus::PromptPicker;
+    }
+    TargetFrontmostStatus::OtherOrUnknown
+}
+
 fn is_prompt_picker_app(app: &FrontmostApp) -> bool {
     app.bundle_id == "local.promptpicker.dev" || app.name == "Prompt Picker"
 }
@@ -1818,6 +1841,45 @@ mod last_input_target_tests {
         let frontmost = frontmost_target("Notes", "com.apple.Notes", Some(123));
 
         assert!(captured_target_matches_frontmost(&target, Some(&frontmost)));
+    }
+
+    #[test]
+    fn classifies_frontmost_target_status() {
+        let target = PromptPickSessionTarget {
+            app: FrontmostApp {
+                name: "Codex".to_string(),
+                bundle_id: "com.openai.codex".to_string(),
+            },
+            pid: Some(123),
+            observed_at_ms: now_ms(),
+            click_point: None,
+        };
+
+        assert_eq!(
+            classify_target_frontmost(
+                &target,
+                Some(&frontmost_target("Codex", "com.openai.codex", Some(123)))
+            ),
+            TargetFrontmostStatus::Target
+        );
+        assert_eq!(
+            classify_target_frontmost(
+                &target,
+                Some(&frontmost_target("Prompt Picker", "local.promptpicker.dev", Some(1)))
+            ),
+            TargetFrontmostStatus::PromptPicker
+        );
+        assert_eq!(
+            classify_target_frontmost(
+                &target,
+                Some(&frontmost_target("Notes", "com.apple.Notes", Some(456)))
+            ),
+            TargetFrontmostStatus::OtherOrUnknown
+        );
+        assert_eq!(
+            classify_target_frontmost(&target, None),
+            TargetFrontmostStatus::OtherOrUnknown
+        );
     }
 
     #[test]
