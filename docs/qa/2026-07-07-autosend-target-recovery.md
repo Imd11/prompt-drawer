@@ -18,7 +18,32 @@ The implementation goal is:
 
 ## Automated Verification
 
-Pending.
+Passed.
+
+Commands run:
+
+```bash
+npm test -- src/overlay/overlayHtml.test.ts
+cd src-tauri
+cargo test --lib
+```
+
+Observed results:
+
+- `src/overlay/overlayHtml.test.ts`: 1 test file passed, 23 tests passed.
+- `cargo test --lib`: 148 tests passed.
+
+Coverage relevant to this task:
+
+- Overlay click flow captures the prompt target before opening the prompt list.
+- `begin_prompt_pick_session` owns session startup before target capture.
+- Opening the prompt popover preserves a target already captured for the same session.
+- Frontmost target classification distinguishes original target, Prompt Picker, and other/unknown apps.
+- Single prompt autosend recovers only when Prompt Picker is frontmost.
+- Third-party foreground apps copy only and do not receive paste/submit.
+- Prompt groups use the same recovery rule as single prompts.
+- macOS pure focus-preserving sender remains free of activation/click logic.
+- macOS recovery primitive uses target activation, frontmost wait, and optional recorded click point.
 
 ## Build Verification
 
