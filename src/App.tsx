@@ -133,7 +133,7 @@ function effectiveSubmitKey(
 function statusForAutosendOutcome(
   outcome: AutosendOutcome,
   t: Messages,
-  successMessage = t.autosend.sent
+  successMessage: string = t.autosend.sent
 ): {
   kind: AutosendStatusKind;
   message: string;

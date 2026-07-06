@@ -35,7 +35,7 @@ type PromptStoreDataV2 = {
 type PromptStoreDataV3 = {
   version: 3;
   categories: PromptCategory[];
-  containers: PromptContainer[];
+  containers: LegacyPromptContainer[];
   activeCategoryId: string | null;
 };
 
@@ -45,6 +45,12 @@ type NormalizedPromptStore = {
   categories: PromptCategory[];
   containers: PromptContainer[];
   activeCategoryId: string;
+};
+
+type RawPromptStore = {
+  categories?: Partial<PromptCategory>[];
+  containers?: LegacyPromptContainer[];
+  activeCategoryId?: string | null;
 };
 
 export const DEFAULT_CATEGORY_ID = "category-default";
@@ -181,33 +187,43 @@ function legacyPromptToContainer(
   };
 }
 
-function normalizeStore(raw: Partial<NormalizedPromptStore>): NormalizedPromptStore {
+function normalizeStore(raw: RawPromptStore): NormalizedPromptStore {
   const now = nowIso();
   const fallback = defaultCategory(now);
   const categories = sortCategories(
     (raw.categories && raw.categories.length > 0 ? raw.categories : [fallback])
-      .map((category, index) =>
-        normalizeCategory(category, Number.isFinite(category.order) ? category.order : index, now)
-      )
+      .map((category, index) => {
+        const order = typeof category.order === "number" && Number.isFinite(category.order)
+          ? category.order
+          : index;
+        return normalizeCategory(category, order, now);
+      })
   ).map((category, index) => ({ ...category, order: index }));
 
   const categoryIds = new Set(categories.map((category) => category.id));
   const fallbackCategoryId = categories[0]?.id ?? DEFAULT_CATEGORY_ID;
   const containers = sortContainers(
     (raw.containers ?? []).map((container, index) => {
-      const categoryId = categoryIds.has(container.categoryId)
+      const rawCategoryId = typeof container.categoryId === "string"
         ? container.categoryId
+        : undefined;
+      const categoryId = rawCategoryId && categoryIds.has(rawCategoryId)
+        ? rawCategoryId
         : fallbackCategoryId;
+      const order = typeof container.order === "number" && Number.isFinite(container.order)
+        ? container.order
+        : index;
+      const updatedAt = container.updatedAt || now;
       return normalizeContainer(
         containerToInput(container),
-        Number.isFinite(container.order) ? container.order : index,
-        container.updatedAt || now,
+        order,
+        updatedAt,
         categoryId,
         {
           ...container,
           categoryId,
           createdAt: container.createdAt || now,
-          updatedAt: container.updatedAt || now,
+          updatedAt,
         }
       );
     })

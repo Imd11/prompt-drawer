@@ -163,8 +163,8 @@ describe("prompt manager", () => {
   });
 
   it("passes selected command-enter send behavior when creating a prompt", () => {
-    let created: { title: string; body: string; sendBehavior: string } | null = null;
-    renderManager({ onCreate: (input) => { created = input; } });
+    const created: Array<{ title: string; body: string; sendBehavior: string }> = [];
+    renderManager({ onCreate: (input) => { created.push(input); } });
 
     openCreatePanel();
     fireEvent.click(screen.getByRole("button", { name: "填入 + Cmd Enter" }));
@@ -176,7 +176,7 @@ describe("prompt manager", () => {
     });
     fireEvent.click(screen.getByRole("button", { name: "添加提示词" }));
 
-    expect(created?.sendBehavior).toBe("paste_command_enter");
+    expect(created[0]?.sendBehavior).toBe("paste_command_enter");
   });
 
   it("renders prompt list as a unified row list", () => {
@@ -233,7 +233,7 @@ describe("prompt manager", () => {
   });
 
   it("preserves existing send behavior while editing a prompt", () => {
-    let updated: { sendBehavior?: string } | null = null;
+    const updated: Array<{ sendBehavior?: string }> = [];
     renderManager({
       prompts: [
         makePrompt({
@@ -242,7 +242,7 @@ describe("prompt manager", () => {
           sendBehavior: "paste_command_enter",
         }),
       ],
-      onUpdate: (_id, input) => { updated = input; },
+      onUpdate: (_id, input) => { updated.push(input); },
     });
 
     fireEvent.click(screen.getByRole("button", { name: "编辑" }));
@@ -251,7 +251,7 @@ describe("prompt manager", () => {
       .toBe("true");
     fireEvent.click(screen.getByRole("button", { name: "保存" }));
 
-    expect(updated?.sendBehavior).toBe("paste_command_enter");
+    expect(updated[0]?.sendBehavior).toBe("paste_command_enter");
   });
 
   it("creates a single prompt container", async () => {

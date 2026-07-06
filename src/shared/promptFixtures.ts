@@ -7,6 +7,7 @@ export const samplePrompts: PromptContainer[] = [
     categoryId: "category-default",
     title: "Code Review",
     type: "single",
+    sendBehavior: "inherit",
     prompts: [
       {
         id: "sample-code-review-entry",
@@ -17,6 +18,6 @@ export const samplePrompts: PromptContainer[] = [
     intervalMs: DEFAULT_GROUP_INTERVAL_MS,
     order: 0,
     createdAt: "2026-05-26T00:00:00.000Z",
-    updatedAt: "2026-05-26T00:00:00.000Z"
+    updatedAt: "2026-05-26T00:00:00.000Z",
   }
 ];

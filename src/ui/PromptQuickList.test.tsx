@@ -11,6 +11,7 @@ const prompts: PromptContainer[] = [
     categoryId: "category-default",
     title: "讨论方案",
     type: "single",
+    sendBehavior: "inherit",
     prompts: [
       {
         id: "1-entry",
@@ -21,13 +22,14 @@ const prompts: PromptContainer[] = [
     intervalMs: 700,
     order: 0,
     createdAt: "2026-05-26T00:00:00.000Z",
-    updatedAt: "2026-05-26T00:00:00.000Z"
+    updatedAt: "2026-05-26T00:00:00.000Z",
   },
   {
     id: "2",
     categoryId: "category-default",
     title: "修复流程",
     type: "group",
+    sendBehavior: "inherit",
     prompts: [
       { id: "2-entry-1", body: "分析根本原因。", order: 0 },
       { id: "2-entry-2", body: "执行修复。", order: 1 },
@@ -36,7 +38,7 @@ const prompts: PromptContainer[] = [
     intervalMs: 700,
     order: 1,
     createdAt: "2026-05-26T00:00:00.000Z",
-    updatedAt: "2026-05-26T00:00:00.000Z"
+    updatedAt: "2026-05-26T00:00:00.000Z",
   }
 ];
 
