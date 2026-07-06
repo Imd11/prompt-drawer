@@ -15,7 +15,7 @@ const protectedStates = [
 ];
 
 type IdleRhythmPhase = {
-  name: "early" | "settled" | "longIdle";
+  name: "early" | "settled" | "longIdle" | "deepIdle";
   availableAfterMs: number;
   delayRangeMs: [number, number];
 };
@@ -69,6 +69,7 @@ describe("Calico idle director", () => {
       { name: "early", availableAfterMs: 7_000, delayRangeMs: [2_500, 5_000] },
       { name: "settled", availableAfterMs: 30_000, delayRangeMs: [2_000, 4_500] },
       { name: "longIdle", availableAfterMs: 90_000, delayRangeMs: [3_000, 6_000] },
+      { name: "deepIdle", availableAfterMs: 10 * 60_000, delayRangeMs: [45_000, 90_000] },
     ]);
   });
 
@@ -119,6 +120,60 @@ describe("Calico idle director", () => {
     expect(sleeping?.weights.longIdle).toBeGreaterThan(sleeping?.weights.settled ?? 0);
     expect(miniSleep?.weights.longIdle).toBeGreaterThan(miniSleep?.weights.settled ?? 0);
     expect(yawning?.weights.settled).toBeGreaterThan(yawning?.weights.early ?? 0);
+  });
+
+  it("limits deep idle to non-replay static states", async () => {
+    const { IDLE_MOTION_POOL } = await loadDirectorModule();
+    const deepIdleStates = IDLE_MOTION_POOL.filter((entry) => (entry.weights.deepIdle ?? 0) > 0)
+      .map((entry) => entry.state)
+      .sort();
+
+    expect(deepIdleStates).toEqual(["idle", "mini-idle", "mini-sleep", "sleeping"].sort());
+  });
+
+  it("uses long quiet delays when the next idle callback runs after deep idle begins", async () => {
+    const { createCalicoIdleDirector } = await loadDirectorModule();
+    const applied: IdleDirectorPayload[] = [];
+    const scheduledDelays: number[] = [];
+    let now = 0;
+    let pendingTimer: (() => void) | null = null;
+
+    const setTimer = ((callback: TimerHandler, delay?: number) => {
+      if (typeof callback !== "function") {
+        throw new Error("Calico idle director should schedule function callbacks");
+      }
+      pendingTimer = callback as () => void;
+      scheduledDelays.push(delay ?? 0);
+      return scheduledDelays.length as unknown as ReturnType<typeof window.setTimeout>;
+    }) as typeof window.setTimeout;
+
+    const director = createCalicoIdleDirector({
+      applyMotion: (payload) => {
+        applied.push(payload);
+        return true;
+      },
+      resetMotion: vi.fn(),
+      getCurrentState: () => "idle-follow",
+      isUserActive: () => false,
+      random: () => 0,
+      setTimeout: setTimer,
+      clearTimeout: vi.fn(),
+      now: () => now,
+      motionDurations: { idle: 5_200 },
+    });
+
+    director.start();
+    expect(scheduledDelays[0]).toBe(7_000);
+
+    now = 10 * 60_000;
+    pendingTimer?.();
+
+    expect(applied[0]).toMatchObject({
+      state: "idle",
+      reason: "idle-director",
+      priority: 1,
+    });
+    expect(scheduledDelays[scheduledDelays.length - 1]).toBe(5_200 + 45_000);
   });
 
   it("starts from idle-follow and schedules low-priority idle flourishes", async () => {

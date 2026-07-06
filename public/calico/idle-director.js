@@ -2,24 +2,33 @@ export const IDLE_RHYTHM_PHASES = [
   { name: "early", availableAfterMs: 7_000, delayRangeMs: [2_500, 5_000] },
   { name: "settled", availableAfterMs: 30_000, delayRangeMs: [2_000, 4_500] },
   { name: "longIdle", availableAfterMs: 90_000, delayRangeMs: [3_000, 6_000] },
+  { name: "deepIdle", availableAfterMs: 10 * 60_000, delayRangeMs: [45_000, 90_000] },
 ];
 
 export const IDLE_MOTION_POOL = [
-  { state: "idle", category: "light", weights: { early: 8, settled: 5, longIdle: 3 } },
-  { state: "react-left", category: "light", weights: { early: 6, settled: 4, longIdle: 3 } },
-  { state: "mini-peek", category: "mini", weights: { early: 5, settled: 5, longIdle: 4 } },
-  { state: "yawning", category: "life", weights: { early: 1, settled: 6, longIdle: 4 } },
-  { state: "dozing", category: "rest", weights: { early: 0, settled: 4, longIdle: 5 } },
-  { state: "react-poke", category: "attention", weights: { early: 1, settled: 2, longIdle: 1 } },
-  { state: "mini-enter", category: "mini", weights: { early: 1, settled: 3, longIdle: 3 } },
-  { state: "mini-idle", category: "mini", weights: { early: 0, settled: 3, longIdle: 4 } },
-  { state: "mini-crabwalk", category: "mini", weights: { early: 0, settled: 3, longIdle: 3 } },
-  { state: "collapsing", category: "rest", weights: { early: 0, settled: 1, longIdle: 4 } },
-  { state: "sleeping", category: "rest", weights: { early: 0, settled: 1, longIdle: 7 } },
-  { state: "waking", category: "rest", weights: { early: 0, settled: 2, longIdle: 5 } },
-  { state: "mini-happy", category: "mini", weights: { early: 2, settled: 4, longIdle: 5 } },
-  { state: "mini-sleep", category: "rest", weights: { early: 0, settled: 1, longIdle: 7 } },
-  { state: "mini-alert", category: "attention", weights: { early: 0, settled: 1, longIdle: 2 } },
+  { state: "idle", category: "light", weights: { early: 8, settled: 5, longIdle: 3, deepIdle: 2 } },
+  { state: "react-left", category: "light", weights: { early: 6, settled: 4, longIdle: 3, deepIdle: 0 } },
+  { state: "mini-peek", category: "mini", weights: { early: 5, settled: 5, longIdle: 4, deepIdle: 0 } },
+  { state: "yawning", category: "life", weights: { early: 1, settled: 6, longIdle: 4, deepIdle: 0 } },
+  { state: "dozing", category: "rest", weights: { early: 0, settled: 4, longIdle: 5, deepIdle: 0 } },
+  {
+    state: "react-poke",
+    category: "attention",
+    weights: { early: 1, settled: 2, longIdle: 1, deepIdle: 0 },
+  },
+  { state: "mini-enter", category: "mini", weights: { early: 1, settled: 3, longIdle: 3, deepIdle: 0 } },
+  { state: "mini-idle", category: "mini", weights: { early: 0, settled: 3, longIdle: 4, deepIdle: 4 } },
+  {
+    state: "mini-crabwalk",
+    category: "mini",
+    weights: { early: 0, settled: 3, longIdle: 3, deepIdle: 0 },
+  },
+  { state: "collapsing", category: "rest", weights: { early: 0, settled: 1, longIdle: 4, deepIdle: 0 } },
+  { state: "sleeping", category: "rest", weights: { early: 0, settled: 1, longIdle: 7, deepIdle: 5 } },
+  { state: "waking", category: "rest", weights: { early: 0, settled: 2, longIdle: 5, deepIdle: 0 } },
+  { state: "mini-happy", category: "mini", weights: { early: 2, settled: 4, longIdle: 5, deepIdle: 0 } },
+  { state: "mini-sleep", category: "rest", weights: { early: 0, settled: 1, longIdle: 7, deepIdle: 5 } },
+  { state: "mini-alert", category: "attention", weights: { early: 0, settled: 1, longIdle: 2, deepIdle: 0 } },
 ];
 
 const BASELINE_STATE = "idle-follow";
