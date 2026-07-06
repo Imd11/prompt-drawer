@@ -3,7 +3,7 @@ name = "prompt-picker"
 version = "1.0.3"
 description = "Local macOS Prompt Picker"
 authors = [""]
-license = ""
+license = "MIT"
 repository = ""
 edition = "2021"
 
