@@ -108,13 +108,13 @@ async fn begin_prompt_pick_session(
     session_id: u64,
     session_state: tauri::State<'_, PromptPickSessionState>,
     recent_state: tauri::State<'_, LastInputTargetState>,
-    ) -> Result<Option<FrontmostApp>, String> {
-        let session_state = session_state.inner().clone();
-        let recent_state = recent_state.inner().clone();
-        session_state.begin(session_id);
+) -> Result<Option<FrontmostApp>, String> {
+    let session_state = session_state.inner().clone();
+    let recent_state = recent_state.inner().clone();
+    session_state.begin(session_id);
 
-        tauri::async_runtime::spawn_blocking(move || {
-            if let Some(input_target) = platform::macos::current_input_target() {
+    tauri::async_runtime::spawn_blocking(move || {
+        if let Some(input_target) = platform::macos::current_input_target() {
             record_last_input_target_if_valid(&recent_state, &input_target);
         }
 
@@ -536,22 +536,53 @@ where
     }
 
     let before_paste = frontmost_reader();
-    match classify_target_frontmost(target, before_paste.as_ref()) {
+    let classification = classify_target_frontmost(target, before_paste.as_ref());
+    emit_autosend_diagnostic(
+        "before-paste",
+        target,
+        before_paste.as_ref(),
+        Some(classification),
+    );
+    match classification {
         TargetFrontmostStatus::Target => {}
         TargetFrontmostStatus::PromptPicker => {
             if recover_target(target).is_err() {
+                emit_autosend_diagnostic(
+                    "recovery-failed",
+                    target,
+                    before_paste.as_ref(),
+                    Some(classification),
+                );
                 return AutosendOutcome::copied_without_send(
                     "Target app changed before paste; prompt was copied instead.".to_string(),
                 );
             }
             let after_recovery = frontmost_reader();
             if !captured_target_matches_frontmost(target, after_recovery.as_ref()) {
+                emit_autosend_diagnostic(
+                    "post-recovery-mismatch",
+                    target,
+                    after_recovery.as_ref(),
+                    Some(classification),
+                );
                 return AutosendOutcome::copied_without_send(
                     "Target app changed before paste; prompt was copied instead.".to_string(),
                 );
             }
+            emit_autosend_diagnostic(
+                "post-recovery-target",
+                target,
+                after_recovery.as_ref(),
+                Some(TargetFrontmostStatus::Target),
+            );
         }
         TargetFrontmostStatus::OtherOrUnknown => {
+            emit_autosend_diagnostic(
+                "other-or-unknown",
+                target,
+                before_paste.as_ref(),
+                Some(classification),
+            );
             return AutosendOutcome::copied_without_send(
                 "Target app changed before paste; prompt was copied instead.".to_string(),
             );
@@ -568,11 +599,18 @@ where
     sleeper(FOCUS_PRESERVING_PASTE_SETTLE_MS);
 
     if submit_key == platform::macos::NativeSubmitKey::None {
+        emit_autosend_diagnostic("sent-without-submit", target, None, None);
         return AutosendOutcome::sent();
     }
 
     let before_submit = frontmost_reader();
     if !captured_target_matches_frontmost(target, before_submit.as_ref()) {
+        emit_autosend_diagnostic(
+            "before-submit-mismatch",
+            target,
+            before_submit.as_ref(),
+            None,
+        );
         return AutosendOutcome::return_event_failed(
             "Target app changed after paste; submit was skipped.".to_string(),
         );
@@ -585,6 +623,7 @@ where
         ));
     }
 
+    emit_autosend_diagnostic("sent", target, before_submit.as_ref(), None);
     AutosendOutcome::sent()
 }
 
@@ -1056,7 +1095,7 @@ fn captured_target_matches_frontmost(
     }
 }
 
-#[derive(Debug, PartialEq, Eq)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
 enum TargetFrontmostStatus {
     Target,
     PromptPicker,
@@ -1077,6 +1116,50 @@ fn classify_target_frontmost(
         return TargetFrontmostStatus::PromptPicker;
     }
     TargetFrontmostStatus::OtherOrUnknown
+}
+
+fn autosend_diagnostic_line(
+    stage: &str,
+    target_bundle_id: Option<&str>,
+    has_click_point: bool,
+    frontmost_bundle_id: Option<&str>,
+    classification: Option<TargetFrontmostStatus>,
+) -> String {
+    format!(
+        "prompt-picker-autosend stage={} target={} has_click_point={} frontmost={} classification={}",
+        stage,
+        target_bundle_id.unwrap_or("unknown"),
+        has_click_point,
+        frontmost_bundle_id.unwrap_or("unknown"),
+        classification
+            .map(|status| format!("{:?}", status))
+            .unwrap_or_else(|| "unknown".to_string())
+    )
+}
+
+fn autosend_diagnostics_enabled() -> bool {
+    std::env::var("PROMPT_PICKER_FOCUS_DIAGNOSTICS").is_ok()
+}
+
+fn emit_autosend_diagnostic(
+    stage: &str,
+    target: &PromptPickSessionTarget,
+    frontmost: Option<&FrontmostAppWithPid>,
+    classification: Option<TargetFrontmostStatus>,
+) {
+    if !autosend_diagnostics_enabled() {
+        return;
+    }
+    eprintln!(
+        "{}",
+        autosend_diagnostic_line(
+            stage,
+            Some(&target.app.bundle_id),
+            target.click_point.is_some(),
+            frontmost.map(|app| app.app.bundle_id.as_str()),
+            classification,
+        )
+    );
 }
 
 fn is_prompt_picker_app(app: &FrontmostApp) -> bool {
@@ -1474,7 +1557,11 @@ pub fn run() {
                 else {
                     return;
                 };
-                let _ = (payload.started_at, payload.updated_at, payload.motion_state.as_deref());
+                let _ = (
+                    payload.started_at,
+                    payload.updated_at,
+                    payload.motion_state.as_deref(),
+                );
                 let now = std::time::Instant::now();
                 let mut snapshot = health_state
                     .snapshot
@@ -1661,7 +1748,12 @@ mod last_input_target_tests {
         assert!(source.contains("async fn begin_prompt_pick_session"));
         assert!(source.contains("async fn paste_prompt_and_submit_to_last_target"));
         assert!(source.contains("async fn paste_prompt_sequence_and_submit_to_last_target"));
-        assert!(source.matches("tauri::async_runtime::spawn_blocking(move ||").count() >= 3);
+        assert!(
+            source
+                .matches("tauri::async_runtime::spawn_blocking(move ||")
+                .count()
+                >= 3
+        );
     }
 
     #[test]
@@ -1926,7 +2018,11 @@ mod last_input_target_tests {
     #[test]
     fn prompt_pick_session_uses_frontmost_business_app() {
         let target = prompt_pick_session_target(
-            Some(frontmost_target("WeChat", "com.tencent.xinWeChat", Some(123))),
+            Some(frontmost_target(
+                "WeChat",
+                "com.tencent.xinWeChat",
+                Some(123),
+            )),
             vec![],
             None,
         )
@@ -2001,7 +2097,11 @@ mod last_input_target_tests {
         assert_eq!(
             classify_target_frontmost(
                 &target,
-                Some(&frontmost_target("Prompt Picker", "local.promptpicker.dev", Some(1)))
+                Some(&frontmost_target(
+                    "Prompt Picker",
+                    "local.promptpicker.dev",
+                    Some(1)
+                ))
             ),
             TargetFrontmostStatus::PromptPicker
         );
@@ -2016,6 +2116,24 @@ mod last_input_target_tests {
             classify_target_frontmost(&target, None),
             TargetFrontmostStatus::OtherOrUnknown
         );
+    }
+
+    #[test]
+    fn autosend_diagnostic_line_includes_classification_and_click_point_state() {
+        let line = autosend_diagnostic_line(
+            "before-paste",
+            Some("com.openai.codex"),
+            true,
+            Some("local.promptpicker.dev"),
+            Some(TargetFrontmostStatus::PromptPicker),
+        );
+
+        assert!(line.contains("before-paste"));
+        assert!(line.contains("target=com.openai.codex"));
+        assert!(line.contains("has_click_point=true"));
+        assert!(line.contains("frontmost=local.promptpicker.dev"));
+        assert!(line.contains("classification=PromptPicker"));
+        assert!(!line.contains("prompt body"));
     }
 
     #[test]
@@ -2129,7 +2247,11 @@ mod last_input_target_tests {
             click_point: Some(TargetClickPoint { x: 640.0, y: 720.0 }),
         };
         let mut frontmost = vec![
-            Some(frontmost_target("Prompt Picker", "local.promptpicker.dev", Some(1))),
+            Some(frontmost_target(
+                "Prompt Picker",
+                "local.promptpicker.dev",
+                Some(1),
+            )),
             Some(frontmost_target("Codex", "com.openai.codex", Some(42))),
             Some(frontmost_target("Codex", "com.openai.codex", Some(42))),
         ]
@@ -2207,8 +2329,16 @@ mod last_input_target_tests {
             click_point: None,
         };
         let mut frontmost = vec![
-            Some(frontmost_target("Prompt Picker", "local.promptpicker.dev", Some(1))),
-            Some(frontmost_target("Prompt Picker", "local.promptpicker.dev", Some(1))),
+            Some(frontmost_target(
+                "Prompt Picker",
+                "local.promptpicker.dev",
+                Some(1),
+            )),
+            Some(frontmost_target(
+                "Prompt Picker",
+                "local.promptpicker.dev",
+                Some(1),
+            )),
         ]
         .into_iter();
         let outcome = guarded_focus_preserving_autosend_with_senders(
@@ -2303,7 +2433,10 @@ mod last_input_target_tests {
         );
 
         assert!(outcome.sent);
-        assert_eq!(*submitted.borrow(), Some(platform::macos::NativeSubmitKey::Enter));
+        assert_eq!(
+            *submitted.borrow(),
+            Some(platform::macos::NativeSubmitKey::Enter)
+        );
         assert_eq!(&*events.borrow(), &["copy", "paste", "sleep", "submit"]);
     }
 
@@ -2320,7 +2453,11 @@ mod last_input_target_tests {
         };
         let bodies = vec!["one".to_string(), "two".to_string()];
         let mut frontmost = vec![
-            Some(frontmost_target("Prompt Picker", "local.promptpicker.dev", Some(1))),
+            Some(frontmost_target(
+                "Prompt Picker",
+                "local.promptpicker.dev",
+                Some(1),
+            )),
             Some(frontmost_target("Codex", "com.openai.codex", Some(42))),
             Some(frontmost_target("Codex", "com.openai.codex", Some(42))),
             Some(frontmost_target("Codex", "com.openai.codex", Some(42))),
@@ -2484,7 +2621,11 @@ mod last_input_target_tests {
     #[test]
     fn prompt_pick_session_falls_back_from_prompt_picker_to_visible_business_app() {
         let target = prompt_pick_session_target(
-            Some(frontmost_target("Prompt Picker", "local.promptpicker.dev", Some(1))),
+            Some(frontmost_target(
+                "Prompt Picker",
+                "local.promptpicker.dev",
+                Some(1),
+            )),
             vec![FrontmostApp {
                 name: "Codex".to_string(),
                 bundle_id: "com.openai.codex".to_string(),
@@ -2499,7 +2640,11 @@ mod last_input_target_tests {
     #[test]
     fn prompt_pick_session_does_not_skip_unsafe_visible_app_to_stale_recent_target() {
         let target = prompt_pick_session_target(
-            Some(frontmost_target("Prompt Picker", "local.promptpicker.dev", Some(1))),
+            Some(frontmost_target(
+                "Prompt Picker",
+                "local.promptpicker.dev",
+                Some(1),
+            )),
             vec![
                 FrontmostApp {
                     name: "Finder".to_string(),
@@ -2527,7 +2672,11 @@ mod last_input_target_tests {
     #[test]
     fn prompt_pick_session_uses_recent_target_when_prompt_picker_has_no_visible_app() {
         let target = prompt_pick_session_target(
-            Some(frontmost_target("Prompt Picker", "local.promptpicker.dev", Some(1))),
+            Some(frontmost_target(
+                "Prompt Picker",
+                "local.promptpicker.dev",
+                Some(1),
+            )),
             vec![],
             Some(LastInputTarget {
                 app: FrontmostApp {
@@ -2548,7 +2697,11 @@ mod last_input_target_tests {
     #[test]
     fn prompt_pick_session_prefers_recent_target_over_visible_app_when_picker_is_frontmost() {
         let target = prompt_pick_session_target(
-            Some(frontmost_target("Prompt Picker", "local.promptpicker.dev", Some(1))),
+            Some(frontmost_target(
+                "Prompt Picker",
+                "local.promptpicker.dev",
+                Some(1),
+            )),
             vec![FrontmostApp {
                 name: "Codex".to_string(),
                 bundle_id: "com.openai.codex".to_string(),

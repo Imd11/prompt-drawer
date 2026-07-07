@@ -47,6 +47,8 @@ pub fn configure_non_activating_panel(window: &tauri::WebviewWindow) -> Result<(
 
     unsafe {
         let ns_window = &*(ns_window_ptr.cast::<NSWindow>());
+        let object: &AnyObject = ns_window.as_ref();
+        let class_name = object.class().name().to_string_lossy().to_string();
         let mask = ns_window.styleMask()
             | NSWindowStyleMask::NonactivatingPanel
             | NSWindowStyleMask::UtilityWindow;
@@ -63,8 +65,20 @@ pub fn configure_non_activating_panel(window: &tauri::WebviewWindow) -> Result<(
                 | NSWindowCollectionBehavior::Transient
                 | NSWindowCollectionBehavior::IgnoresCycle,
         );
-        apply_never_key_panel_class(ns_window)?;
+        let action = apply_never_key_panel_class(ns_window)?;
         ns_window.orderFrontRegardless();
+        if focus_diagnostics_enabled() {
+            let can_become_key: Bool = objc2::msg_send![ns_window, canBecomeKeyWindow];
+            let can_become_main: Bool = objc2::msg_send![ns_window, canBecomeMainWindow];
+            let report = PanelKeyBehaviorReport {
+                label: window.label().to_string(),
+                class_name,
+                action,
+                can_become_key: Some(can_become_key.as_bool()),
+                can_become_main: Some(can_become_main.as_bool()),
+            };
+            eprintln!("{}", format_panel_key_behavior_report(&report));
+        }
     }
 
     Ok(())
@@ -76,31 +90,83 @@ extern "C-unwind" fn never_key_window(_: &AnyObject, _: Sel) -> Bool {
 }
 
 #[cfg(target_os = "macos")]
-fn apply_never_key_panel_class(ns_window: &NSWindow) -> Result<(), String> {
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+enum PanelClassAction {
+    AlreadyNeverKey,
+    ManagedTauriRuntime,
+    ApplyNeverKeySubclass,
+}
+
+fn panel_class_action_for_name(class_name: &str) -> PanelClassAction {
+    if class_name.contains("PromptPickerNeverKeyPanel") {
+        PanelClassAction::AlreadyNeverKey
+    } else if class_name.contains("Tao") || class_name.contains("Wry") {
+        PanelClassAction::ManagedTauriRuntime
+    } else {
+        PanelClassAction::ApplyNeverKeySubclass
+    }
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+struct PanelKeyBehaviorReport {
+    label: String,
+    class_name: String,
+    action: PanelClassAction,
+    can_become_key: Option<bool>,
+    can_become_main: Option<bool>,
+}
+
+fn format_panel_key_behavior_report(report: &PanelKeyBehaviorReport) -> String {
+    format!(
+        "prompt-picker-panel label={} class={} action={:?} can_become_key={} can_become_main={}",
+        report.label,
+        report.class_name,
+        report.action,
+        option_bool_label(report.can_become_key),
+        option_bool_label(report.can_become_main)
+    )
+}
+
+fn option_bool_label(value: Option<bool>) -> &'static str {
+    match value {
+        Some(true) => "true",
+        Some(false) => "false",
+        None => "unknown",
+    }
+}
+
+fn focus_diagnostics_enabled() -> bool {
+    std::env::var("PROMPT_PICKER_FOCUS_DIAGNOSTICS").is_ok()
+}
+
+fn apply_never_key_panel_class(ns_window: &NSWindow) -> Result<PanelClassAction, String> {
     let object: &AnyObject = ns_window.as_ref();
     let current_class = object.class();
     let current_class_name = current_class.name().to_string_lossy();
-    if current_class_name.contains("PromptPickerNeverKeyPanel") {
-        return Ok(());
-    }
-    if current_class_name.contains("Tao") || current_class_name.contains("Wry") {
-        return Ok(());
+    let action = panel_class_action_for_name(&current_class_name);
+    if action != PanelClassAction::ApplyNeverKeySubclass {
+        return Ok(action);
     }
 
     let never_key_class = never_key_panel_class(current_class)?;
     unsafe {
         let previous_class = AnyObject::set_class(object, never_key_class);
         if previous_class as *const AnyClass != current_class as *const AnyClass {
-            return Err("Unexpected window class changed while configuring overlay panel.".to_string());
+            return Err(
+                "Unexpected window class changed while configuring overlay panel.".to_string(),
+            );
         }
     }
 
-    Ok(())
+    Ok(action)
 }
 
 #[cfg(target_os = "macos")]
 fn never_key_panel_class(superclass: &'static AnyClass) -> Result<&'static AnyClass, String> {
-    let class_name = format!("PromptPickerNeverKeyPanel_{}", sanitized_class_name(superclass));
+    let class_name = format!(
+        "PromptPickerNeverKeyPanel_{}",
+        sanitized_class_name(superclass)
+    );
     let class_name = CString::new(class_name).map_err(|e| e.to_string())?;
     if let Some(existing) = AnyClass::get(&class_name) {
         return Ok(existing);
@@ -173,6 +239,46 @@ pub fn configure_transparent_webview_window(_window: &tauri::WebviewWindow) -> R
 
 #[cfg(test)]
 mod tests {
+    use super::*;
+
+    #[test]
+    fn panel_class_action_keeps_existing_never_key_panel() {
+        assert_eq!(
+            panel_class_action_for_name("PromptPickerNeverKeyPanel_TaoWindow"),
+            PanelClassAction::AlreadyNeverKey
+        );
+    }
+
+    #[test]
+    fn panel_class_action_marks_tao_wry_as_managed_runtime() {
+        assert_eq!(
+            panel_class_action_for_name("TaoWindow"),
+            PanelClassAction::ManagedTauriRuntime
+        );
+        assert_eq!(
+            panel_class_action_for_name("WryWindow"),
+            PanelClassAction::ManagedTauriRuntime
+        );
+    }
+
+    #[test]
+    fn panel_diagnostic_format_includes_key_behavior() {
+        let report = PanelKeyBehaviorReport {
+            label: "prompt-popover".to_string(),
+            class_name: "TaoWindow".to_string(),
+            action: PanelClassAction::ManagedTauriRuntime,
+            can_become_key: Some(true),
+            can_become_main: Some(true),
+        };
+
+        let formatted = format_panel_key_behavior_report(&report);
+
+        assert!(formatted.contains("prompt-popover"));
+        assert!(formatted.contains("TaoWindow"));
+        assert!(formatted.contains("can_become_key=true"));
+        assert!(formatted.contains("can_become_main=true"));
+    }
+
     #[test]
     fn non_activating_panel_configuration_mentions_never_key_window_guard() {
         let source = include_str!("macos_panels.rs");
