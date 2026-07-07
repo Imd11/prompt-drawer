@@ -89,7 +89,6 @@ extern "C-unwind" fn never_key_window(_: &AnyObject, _: Sel) -> Bool {
     Bool::NO
 }
 
-#[cfg(target_os = "macos")]
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 enum PanelClassAction {
     AlreadyNeverKey,
@@ -139,6 +138,7 @@ fn focus_diagnostics_enabled() -> bool {
     std::env::var("PROMPT_PICKER_FOCUS_DIAGNOSTICS").is_ok()
 }
 
+#[cfg(target_os = "macos")]
 fn apply_never_key_panel_class(ns_window: &NSWindow) -> Result<PanelClassAction, String> {
     let object: &AnyObject = ns_window.as_ref();
     let current_class = object.class();

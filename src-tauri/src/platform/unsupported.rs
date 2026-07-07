@@ -180,6 +180,13 @@ pub fn repair_focus_to_editable_element(_pid: u32) -> Result<(), String> {
     Err("AX focus repair is only implemented for macOS targets.".to_string())
 }
 
+pub fn recover_target_app_for_autosend(
+    _bundle_id: &str,
+    _click_point: Option<(f64, f64)>,
+) -> Result<(), String> {
+    Err("Target recovery is only implemented for macOS targets.".to_string())
+}
+
 pub fn paste_prompt_and_submit_to_app_clipboard_with_copier<C>(
     body: &str,
     _bundle_id: &str,
