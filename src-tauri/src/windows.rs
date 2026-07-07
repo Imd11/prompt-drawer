@@ -446,6 +446,37 @@ fn show_popover_mode(x: f64, y: f64, mode: &str, app: &tauri::AppHandle) -> Resu
     Ok(())
 }
 
+fn build_prompt_button_window(
+    app: &tauri::AppHandle,
+    x: f64,
+    y: f64,
+) -> Result<tauri::WebviewWindow, String> {
+    let monitor = app.primary_monitor().map_err(|e| e.to_string())?;
+    let (x, y) = clamp_button_position_for_monitor(x, y, monitor.as_ref());
+    let (window_x, window_y) = prompt_button_visual_to_window_position(x, y);
+    let window = WebviewWindowBuilder::new(
+        app,
+        BUTTON_WINDOW_LABEL,
+        WebviewUrl::App("overlay.html".into()),
+    )
+    .title("Prompt Button")
+    .inner_size(BUTTON_WINDOW_WIDTH, BUTTON_WINDOW_HEIGHT)
+    .resizable(false)
+    .decorations(false)
+    .always_on_top(true)
+    .accept_first_mouse(true)
+    .skip_taskbar(true)
+    .position(window_x, window_y)
+    .build()
+    .map_err(|e| e.to_string())?;
+
+    if BUTTON_WINDOW_TRANSPARENT {
+        crate::macos_panels::configure_transparent_webview_window(&window)?;
+    }
+    crate::macos_panels::configure_non_activating_panel(&window)?;
+    Ok(window)
+}
+
 #[tauri::command]
 pub fn show_prompt_button(x: f64, y: f64, app: tauri::AppHandle) -> Result<(), String> {
     if let Some(window) = app.get_webview_window(BUTTON_WINDOW_LABEL) {
@@ -482,30 +513,22 @@ pub fn show_prompt_button(x: f64, y: f64, app: tauri::AppHandle) -> Result<(), S
         }
         Ok(())
     } else {
-        let monitor = app.primary_monitor().map_err(|e| e.to_string())?;
-        let (x, y) = clamp_button_position_for_monitor(x, y, monitor.as_ref());
-        let (window_x, window_y) = prompt_button_visual_to_window_position(x, y);
-        let window = WebviewWindowBuilder::new(
-            &app,
-            BUTTON_WINDOW_LABEL,
-            WebviewUrl::App("overlay.html".into()),
-        )
-        .title("Prompt Button")
-        .inner_size(BUTTON_WINDOW_WIDTH, BUTTON_WINDOW_HEIGHT)
-        .resizable(false)
-        .decorations(false)
-        .always_on_top(true)
-        .accept_first_mouse(true)
-        .skip_taskbar(true)
-        .position(window_x, window_y)
-        .build()
-        .map_err(|e| e.to_string())?;
-        if BUTTON_WINDOW_TRANSPARENT {
-            crate::macos_panels::configure_transparent_webview_window(&window)?;
-        }
-        crate::macos_panels::configure_non_activating_panel(&window)?;
+        build_prompt_button_window(&app, x, y)?;
         Ok(())
     }
+}
+
+pub fn rebuild_prompt_button_window(app: &tauri::AppHandle) -> Result<(), String> {
+    let position = prompt_button_position_cmd(app.clone())?
+        .map(|point| (point.x, point.y))
+        .unwrap_or((960.0, 700.0));
+
+    if let Some(window) = app.get_webview_window(BUTTON_WINDOW_LABEL) {
+        let _ = window.close();
+    }
+
+    build_prompt_button_window(app, position.0, position.1)?;
+    Ok(())
 }
 
 #[tauri::command]
@@ -1240,5 +1263,15 @@ mod tests {
         assert!(command_source.contains("should_use_transparent_popover_window(Some(mode))"));
         assert!(command_source.contains("configure_transparent_webview_window(&window)?"));
         assert!(command_source.contains("configure_non_activating_panel(&window)?"));
+    }
+
+    #[test]
+    fn prompt_button_rebuild_closes_existing_window_and_rebuilds_at_same_position() {
+        let source = include_str!("windows.rs");
+
+        assert!(source.contains("pub fn rebuild_prompt_button_window"));
+        assert!(source.contains("prompt_button_position_cmd(app.clone())"));
+        assert!(source.contains("window.close()"));
+        assert!(source.contains("build_prompt_button_window(app"));
     }
 }
