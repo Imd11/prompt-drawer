@@ -5,8 +5,8 @@ use std::ffi::c_void;
 use std::process::Command;
 use std::time::{Duration, Instant};
 
-use objc2::MainThreadMarker;
-use objc2_app_kit::{NSEvent, NSScreen};
+use core_graphics::event::CGEvent;
+use core_graphics::event_source::{CGEventSource, CGEventSourceStateID};
 
 const ACCESSIBILITY_PERMISSION_REQUIRED_ERROR: &str =
     "Accessibility permission required for prompt insertion.";
@@ -321,16 +321,16 @@ pub fn current_input_target() -> Option<InputTarget> {
     get_focused_input_element(app_info.pid, app_info.app.clone())
 }
 
-pub fn current_pointer_location() -> Option<(f64, f64)> {
-    let mtm = MainThreadMarker::new()?;
-    let screen = NSScreen::mainScreen(mtm)?;
-    let screen_frame = screen.frame();
-    let point = NSEvent::mouseLocation();
+fn pointer_location_from_quartz_point(x: f64, y: f64) -> (f64, f64) {
+    (x, y)
+}
 
-    Some((
-        point.x,
-        screen_frame.origin.y + screen_frame.size.height - point.y,
-    ))
+pub fn current_pointer_location() -> Option<(f64, f64)> {
+    let source = CGEventSource::new(CGEventSourceStateID::CombinedSessionState).ok()?;
+    let event = CGEvent::new(source).ok()?;
+    let point = event.location();
+
+    Some(pointer_location_from_quartz_point(point.x, point.y))
 }
 
 fn get_focused_input_element(pid: u32, app: FrontmostApp) -> Option<InputTarget> {
@@ -1573,6 +1573,26 @@ mod tests {
 
         assert_eq!(point.x, 500.0);
         assert_eq!(point.y, 735.0);
+    }
+
+    #[test]
+    fn pointer_location_does_not_depend_on_appkit_main_thread_marker() {
+        let production_source = include_str!("macos.rs")
+            .split("#[cfg(test)]")
+            .next()
+            .expect("production source should precede tests");
+
+        assert!(!production_source.contains("MainThreadMarker::new()?"));
+        assert!(production_source.contains("CGEvent::new"));
+        assert!(!production_source.contains("NSEvent::mouseLocation"));
+    }
+
+    #[test]
+    fn quartz_pointer_location_uses_global_screen_coordinates_without_main_display_shift() {
+        assert_eq!(
+            pointer_location_from_quartz_point(120.0, 140.0),
+            (120.0, 140.0)
+        );
     }
 
     #[test]
