@@ -157,6 +157,10 @@ pub fn current_input_target() -> Option<InputTarget> {
     None
 }
 
+pub fn current_pointer_location() -> Option<(f64, f64)> {
+    None
+}
+
 pub fn paste_prompt_with_copier<C>(body: &str, copy_sender: C) -> Result<(), String>
 where
     C: FnOnce(&str) -> Result<(), String>,

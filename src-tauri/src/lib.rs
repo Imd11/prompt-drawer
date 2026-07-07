@@ -792,7 +792,7 @@ pub struct LastInputTarget {
     pub click_point: Option<TargetClickPoint>,
 }
 
-#[derive(Clone, Copy, Debug, serde::Serialize)]
+#[derive(Clone, Copy, Debug, PartialEq, serde::Serialize)]
 pub struct TargetClickPoint {
     pub x: f64,
     pub y: f64,
@@ -1038,17 +1038,28 @@ fn record_last_input_target_if_valid(state: &LastInputTargetState, target: &plat
         state.clear();
         return;
     }
-    let click_point = if has_focused_input_frame(&target.frame) || allows_fallback_click_point(&app)
-    {
-        Some(TargetClickPoint {
-            x: target.click_point.0,
-            y: target.click_point.1,
-        })
-    } else if allows_app_only_autosend(&app) {
-        None
-    } else {
+    if !allows_app_only_autosend(&app) {
         state.clear();
         return;
+    };
+
+    let recorded_click_point = target_click_point_from_tuple(target.click_point);
+    let recent_click_point = state
+        .get()
+        .filter(|recent| recent.app.bundle_id == app.bundle_id)
+        .filter(is_recent_prompt_target)
+        .and_then(|recent| recent.click_point);
+    let pointer_click_point =
+        platform::current_pointer_location().map(target_click_point_from_tuple);
+    let click_point = if has_focused_input_frame(&target.frame) {
+        Some(recorded_click_point)
+    } else {
+        choose_recovery_click_point(
+            recent_click_point,
+            pointer_click_point,
+            Some(&target.window_frame),
+            Some(recorded_click_point),
+        )
     };
 
     state.set(LastInputTarget {
@@ -1180,8 +1191,33 @@ fn has_focused_input_frame(frame: &CandidateInput) -> bool {
     frame.width > 1.0 && frame.height > 1.0
 }
 
-fn allows_fallback_click_point(app: &FrontmostApp) -> bool {
-    app.bundle_id == "com.openai.codex" || app.name == "Codex"
+fn target_click_point_from_tuple(point: (f64, f64)) -> TargetClickPoint {
+    TargetClickPoint {
+        x: point.0,
+        y: point.1,
+    }
+}
+
+fn point_inside_candidate(point: TargetClickPoint, frame: &CandidateInput) -> bool {
+    point.x >= frame.x
+        && point.x <= frame.x + frame.width
+        && point.y >= frame.y
+        && point.y <= frame.y + frame.height
+}
+
+fn choose_recovery_click_point(
+    recorded_click_point: Option<TargetClickPoint>,
+    pointer_click_point: Option<TargetClickPoint>,
+    target_window_frame: Option<&CandidateInput>,
+    fallback_click_point: Option<TargetClickPoint>,
+) -> Option<TargetClickPoint> {
+    recorded_click_point
+        .or_else(|| {
+            let point = pointer_click_point?;
+            let frame = target_window_frame?;
+            point_inside_candidate(point, frame).then_some(point)
+        })
+        .or(fallback_click_point)
 }
 
 fn allows_app_only_autosend(app: &FrontmostApp) -> bool {
@@ -1915,7 +1951,7 @@ mod last_input_target_tests {
 
         let stored = state.get().unwrap();
         assert_eq!(stored.app.bundle_id, "com.tencent.xinWeChat");
-        assert!(stored.click_point.is_none());
+        assert!(stored.click_point.is_some());
     }
 
     #[test]
@@ -1957,7 +1993,7 @@ mod last_input_target_tests {
     }
 
     #[test]
-    fn records_codex_fallback_target_without_focused_input_frame() {
+    fn records_recovery_fallback_target_without_focused_input_frame() {
         let state = LastInputTargetState::default();
         let target = platform::InputTarget {
             frame: CandidateInput {
@@ -1975,15 +2011,69 @@ mod last_input_target_tests {
             button_position: (876.0, 776.0),
             click_point: (500.0, 735.0),
             app: Some(FrontmostApp {
-                name: "Codex".to_string(),
-                bundle_id: "com.openai.codex".to_string(),
+                name: "Claude".to_string(),
+                bundle_id: "com.anthropic.claudefordesktop".to_string(),
             }),
         };
 
         record_last_input_target_if_valid(&state, &target);
 
-        assert_eq!(state.get().unwrap().app.bundle_id, "com.openai.codex");
-        assert_eq!(state.get().unwrap().click_point.unwrap().y, 735.0);
+        assert_eq!(
+            state.get().unwrap().app.bundle_id,
+            "com.anthropic.claudefordesktop"
+        );
+        assert!(state.get().unwrap().click_point.is_some());
+    }
+
+    #[test]
+    fn recovery_click_point_prefers_recorded_input_point_over_pointer_fallback() {
+        let recorded = Some(TargetClickPoint { x: 400.0, y: 700.0 });
+        let pointer = Some(TargetClickPoint { x: 100.0, y: 100.0 });
+        let window = CandidateInput {
+            x: 0.0,
+            y: 0.0,
+            width: 1000.0,
+            height: 1000.0,
+        };
+
+        assert_eq!(
+            choose_recovery_click_point(recorded, pointer, Some(&window), None),
+            recorded
+        );
+    }
+
+    #[test]
+    fn recovery_click_point_uses_pointer_only_inside_target_window() {
+        let pointer = Some(TargetClickPoint { x: 100.0, y: 100.0 });
+        let fallback = Some(TargetClickPoint { x: 500.0, y: 735.0 });
+        let window = CandidateInput {
+            x: 0.0,
+            y: 0.0,
+            width: 200.0,
+            height: 200.0,
+        };
+
+        assert_eq!(
+            choose_recovery_click_point(None, pointer, Some(&window), fallback),
+            pointer
+        );
+    }
+
+    #[test]
+    fn recovery_click_point_rejects_pointer_outside_target_window() {
+        let pointer = Some(TargetClickPoint { x: 300.0, y: 300.0 });
+        let fallback = Some(TargetClickPoint { x: 500.0, y: 735.0 });
+        let window = CandidateInput {
+            x: 0.0,
+            y: 0.0,
+            width: 200.0,
+            height: 200.0,
+        };
+
+        assert_eq!(
+            choose_recovery_click_point(None, pointer, Some(&window), fallback),
+            fallback
+        );
     }
 
     #[test]

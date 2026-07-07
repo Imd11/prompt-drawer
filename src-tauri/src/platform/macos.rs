@@ -5,6 +5,9 @@ use std::ffi::c_void;
 use std::process::Command;
 use std::time::{Duration, Instant};
 
+use objc2::MainThreadMarker;
+use objc2_app_kit::{NSEvent, NSScreen};
+
 const ACCESSIBILITY_PERMISSION_REQUIRED_ERROR: &str =
     "Accessibility permission required for prompt insertion.";
 
@@ -316,6 +319,18 @@ pub fn current_input_target() -> Option<InputTarget> {
     }
 
     get_focused_input_element(app_info.pid, app_info.app.clone())
+}
+
+pub fn current_pointer_location() -> Option<(f64, f64)> {
+    let mtm = MainThreadMarker::new()?;
+    let screen = NSScreen::mainScreen(mtm)?;
+    let screen_frame = screen.frame();
+    let point = NSEvent::mouseLocation();
+
+    Some((
+        point.x,
+        screen_frame.origin.y + screen_frame.size.height - point.y,
+    ))
 }
 
 fn get_focused_input_element(pid: u32, app: FrontmostApp) -> Option<InputTarget> {
@@ -1169,19 +1184,14 @@ pub struct TargetClickPoint {
 }
 
 pub fn fallback_click_point_for_app(
-    app: &FrontmostApp,
+    _app: &FrontmostApp,
     window_frame: &CandidateInput,
 ) -> TargetClickPoint {
-    if app.bundle_id == "com.openai.codex" || app.name == "Codex" {
-        return TargetClickPoint {
-            x: window_frame.x + (window_frame.width / 2.0),
-            y: window_frame.y + window_frame.height - 65.0,
-        };
-    }
-
     TargetClickPoint {
-        x: window_frame.x + (window_frame.width / 2.0),
-        y: window_frame.y + (window_frame.height / 2.0),
+        x: (window_frame.x + (window_frame.width / 2.0))
+            .clamp(window_frame.x, window_frame.x + window_frame.width),
+        y: (window_frame.y + window_frame.height - 65.0)
+            .clamp(window_frame.y, window_frame.y + window_frame.height),
     }
 }
 
@@ -1377,10 +1387,7 @@ mod tests {
             .expect("production source should precede tests");
 
         assert!(!production_source.contains(concat!("fn paste", "_to_app_script")));
-        assert!(!production_source.contains(concat!(
-            "pub fn paste_prompt",
-            "_to_app_with_copier"
-        )));
+        assert!(!production_source.contains(concat!("pub fn paste_prompt", "_to_app_with_copier")));
     }
 
     #[test]
@@ -1550,11 +1557,11 @@ mod tests {
     }
 
     #[test]
-    fn codex_fallback_click_point_uses_bottom_center_of_window() {
+    fn generic_fallback_click_point_uses_bottom_center_of_window() {
         let point = fallback_click_point_for_app(
             &FrontmostApp {
-                name: "Codex".to_string(),
-                bundle_id: "com.openai.codex".to_string(),
+                name: "WeChat".to_string(),
+                bundle_id: "com.tencent.xinWeChat".to_string(),
             },
             &CandidateInput {
                 x: 100.0,
@@ -1748,5 +1755,4 @@ mod tests {
                 < script.find("keystroke \"v\" using command down").unwrap()
         );
     }
-
 }
