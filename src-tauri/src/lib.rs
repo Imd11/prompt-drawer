@@ -1001,6 +1001,15 @@ fn prompt_pick_session_target(
     recent_target: Option<LastInputTarget>,
 ) -> Option<PromptPickSessionTarget> {
     let frontmost = frontmost?;
+
+    // Reject PP itself. PID comparison is authoritative regardless of launch mode.
+    // This prevents PP from recording itself as the autosend target when its
+    // popover becomes frontmost (lsappinfo considers PP "in front" while the
+    // popover is open, even though the popover window cannot become key).
+    if frontmost.pid == Some(std::process::id()) {
+        return None;
+    }
+
     if is_usable_autosend_app(&frontmost.app) {
         let click_point = recent_target
             .as_ref()
@@ -1086,7 +1095,7 @@ fn record_last_input_target_if_valid(state: &LastInputTargetState, target: &plat
 }
 
 fn record_last_app_if_valid(state: &LastInputTargetState, target: FrontmostAppWithPid) {
-    if is_prompt_picker_app(&target.app) {
+    if target.pid == Some(std::process::id()) || is_prompt_picker_app(&target.app) {
         return;
     }
     if is_unsafe_autosend_target(&target.app) {

@@ -314,7 +314,14 @@ pub struct CandidateInput {
 pub fn current_input_target() -> Option<InputTarget> {
     let app_info = frontmost_app_info()?;
 
-    if app_info.app.bundle_id == "local.promptpicker.dev" || app_info.app.name == "Prompt Picker" {
+    // Reject PP itself. PID comparison is authoritative regardless of how PP was
+    // launched (.app bundle vs raw binary). The string checks remain as a
+    // secondary defense for callers that might construct FrontmostAppInfo without
+    // a real pid.
+    if app_info.pid == std::process::id()
+        || app_info.app.bundle_id == "local.promptpicker.dev"
+        || app_info.app.name == "Prompt Picker"
+    {
         return None;
     }
 
@@ -979,7 +986,6 @@ fn format_autosend_error(method: &str, stderr: &str) -> String {
     }
 }
 
-#[allow(dead_code)]
 fn activate_app_by_bundle_id(bundle_id: &str) -> Result<(), String> {
     let script = format!(r#"tell application id "{}" to activate"#, bundle_id);
     let output = Command::new("osascript")
@@ -994,7 +1000,6 @@ fn activate_app_by_bundle_id(bundle_id: &str) -> Result<(), String> {
     }
 }
 
-#[allow(dead_code)]
 fn wait_for_frontmost_bundle_id(bundle_id: &str, timeout: Duration) -> bool {
     let deadline = Instant::now() + timeout;
     while Instant::now() < deadline {
@@ -1047,7 +1052,6 @@ fn refocus_previous_app_if_prompt_picker_frontmost() {
     }
 }
 
-#[allow(dead_code)]
 fn restore_focus_before_autosend(bundle_id: &str) {
     refocus_previous_app_if_prompt_picker_frontmost();
     let script = format!(r#"tell application id "{}" to activate"#, bundle_id);
@@ -1115,9 +1119,19 @@ pub fn parse_bundle_id(s: &str) -> Option<String> {
         // Handle bundleID="..." or bundleID = "..."
         if line.starts_with("bundleID") || line.starts_with("CFBundleIdentifier") {
             if let Some(eq) = line.find('=') {
-                let val = &line[eq + 1..].trim().trim_matches('"').trim_matches('\'');
-                if !val.is_empty() {
-                    return Some(val.to_string());
+                let raw = line[eq + 1..].trim();
+                // lsappinfo always wraps real bundle ids in double quotes
+                // (e.g., `bundleID="com.openai.codex"`). An unquoted value like
+                // `bundleID=[ NULL ]` means the bundle id is unavailable — this
+                // happens when a process is launched directly from a binary
+                // rather than an .app bundle. Returning None here lets the caller
+                // fall back to `unknown.{asn}`, which downstream code correctly
+                // treats as "not a real target".
+                if raw.starts_with('"') {
+                    let val = raw.trim_matches('"').trim();
+                    if !val.is_empty() {
+                        return Some(val.to_string());
+                    }
                 }
             }
         }
@@ -1681,6 +1695,19 @@ mod tests {
             parse_bundle_id("CFBundleIdentifier = \"com.github.GitHubDesktop\"\n"),
             Some("com.github.GitHubDesktop".to_string())
         );
+    }
+
+    #[test]
+    fn parses_bundle_id_rejects_lsappinfo_null_placeholder() {
+        // lsappinfo outputs `bundleID=[ NULL ]` (unquoted) when a process has no
+        // registered bundle id — e.g., when launched directly from a binary instead
+        // of an .app bundle. The parser must treat this as missing.
+        assert_eq!(parse_bundle_id("bundleID=[ NULL ]\n"), None);
+        assert_eq!(parse_bundle_id("    bundleID=[ NULL ]\n"), None);
+        assert_eq!(parse_bundle_id("bundleID=[NULL]\n"), None);
+        assert_eq!(parse_bundle_id("bundleID=\n"), None);
+        // Quoted empty string is also missing.
+        assert_eq!(parse_bundle_id("bundleID=\"\"\n"), None);
     }
 
     #[test]
