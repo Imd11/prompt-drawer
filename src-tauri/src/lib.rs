@@ -1002,15 +1002,16 @@ fn prompt_pick_session_target(
 ) -> Option<PromptPickSessionTarget> {
     let frontmost = frontmost?;
 
-    // Reject PP itself. PID comparison is authoritative regardless of launch mode.
-    // This prevents PP from recording itself as the autosend target when its
-    // popover becomes frontmost (lsappinfo considers PP "in front" while the
-    // popover is open, even though the popover window cannot become key).
-    if frontmost.pid == Some(std::process::id()) {
-        return None;
-    }
+    // Identify PP itself — by authoritative PID comparison first, then by the
+    // pre-existing bundle-id / name heuristics as a secondary defense. When the
+    // frontmost app is PP (e.g. our own popover became "front" per lsappinfo),
+    // we must NOT use it as the autosend target. Instead we fall through to the
+    // recent_target fallback below — returning early would drop that fallback
+    // and surface "Copied. Paste manually." in the UI.
+    let is_prompt_picker = frontmost.pid == Some(std::process::id())
+        || is_prompt_picker_app(&frontmost.app);
 
-    if is_usable_autosend_app(&frontmost.app) {
+    if !is_prompt_picker && is_usable_autosend_app(&frontmost.app) {
         let click_point = recent_target
             .as_ref()
             .filter(|target| target.app.bundle_id == frontmost.app.bundle_id)
@@ -1023,7 +1024,7 @@ fn prompt_pick_session_target(
         });
     }
 
-    if !is_prompt_picker_app(&frontmost.app) {
+    if !is_prompt_picker {
         return None;
     }
 
@@ -2879,6 +2880,53 @@ mod last_input_target_tests {
 
         assert_eq!(target.app.bundle_id, "com.tencent.xinWeChat");
         assert_eq!(target.click_point.unwrap().x, 400.0);
+    }
+
+    #[test]
+    fn prompt_pick_session_uses_recent_target_when_frontmost_pid_is_picker_process() {
+        // Regression: when PP's own popover becomes frontmost, lsappinfo may
+        // report PP's PID (== std::process::id()) even if name/bundle look
+        // foreign (binary launch mode). The function must NOT return None
+        // early — it must fall through to the recent_target fallback so the
+        // user's last used app (e.g. Codex) is picked.
+        let target = prompt_pick_session_target(
+            Some(frontmost_target(
+                "UnknownApp",
+                "unknown.bundle.id",
+                Some(std::process::id()),
+            )),
+            vec![],
+            Some(LastInputTarget {
+                app: FrontmostApp {
+                    name: "Codex".to_string(),
+                    bundle_id: "com.openai.codex".to_string(),
+                },
+                pid: Some(456),
+                observed_at_ms: now_ms(),
+                click_point: None,
+            }),
+        )
+        .unwrap();
+
+        assert_eq!(target.app.bundle_id, "com.openai.codex");
+        assert_eq!(target.pid, Some(456));
+    }
+
+    #[test]
+    fn prompt_pick_session_returns_none_when_picker_pid_frontmost_and_no_recent_target() {
+        // Same PID-match scenario but with no recent target → no fallback
+        // possible, so return None (UI will show "Copied. Paste manually.").
+        let target = prompt_pick_session_target(
+            Some(frontmost_target(
+                "UnknownApp",
+                "unknown.bundle.id",
+                Some(std::process::id()),
+            )),
+            vec![],
+            None,
+        );
+
+        assert!(target.is_none());
     }
 
     #[test]
