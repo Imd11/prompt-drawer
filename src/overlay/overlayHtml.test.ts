@@ -157,6 +157,16 @@ describe("overlay button html", () => {
     expect(html).toContain("startCalicoSpriteHealthWatchdog();");
   });
 
+  it("emits prompt button health heartbeats for native recovery", () => {
+    const html = readOverlayHtml();
+
+    expect(html).toContain("prompt-button-health");
+    expect(html).toContain("OVERLAY_HEARTBEAT_MS");
+    expect(html).toContain("isSafeToRebuildPromptButtonNow");
+    expect(html).toContain("safeToRebuild");
+    expect(html).toContain("startOverlayHealthHeartbeat();");
+  });
+
   it("keeps click-to-open neutral and separate from hover attention", () => {
     const html = readFileSync("public/overlay.html", "utf8");
     const clickBlock = html.slice(

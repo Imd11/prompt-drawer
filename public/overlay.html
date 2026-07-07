@@ -174,10 +174,12 @@ const sprite = document.getElementById('calicoSprite');
 const statusBubble = document.getElementById('statusBubble');
 const tauri = window.__TAURI__;
 const DRAG_START_DISTANCE_PX = 10;
+const OVERLAY_HEARTBEAT_MS = 10_000;
 const fallbackSprites = {
   'idle-follow': '/calico/calico-idle-follow.svg',
   'react-drag': '/calico/calico-react-drag.apng'
 };
+const overlayStartedAt = Date.now();
 let start = null;
 let dragging = false;
 let lastMove = null;
@@ -190,6 +192,7 @@ let dragPopoverHidden = false;
 let motionResetTimer = 0;
 let statusTimer = 0;
 let lastAccessibilitySettingsOpenAt = 0;
+let lastUserInteractionAt = Date.now();
 let calicoMotion = null;
 let calicoIdleDirector = null;
 const permissionMessages = {
@@ -209,6 +212,21 @@ const permissionMessages = {
 
 function clearMotionTimers() {
   window.clearTimeout(motionResetTimer);
+}
+
+function markOverlayInteraction() {
+  lastUserInteractionAt = Date.now();
+}
+
+function isSafeToRebuildPromptButtonNow() {
+  const motionState = btn.dataset.motionState || 'idle-follow';
+  const quietForMs = Date.now() - lastUserInteractionAt;
+  return quietForMs > 15_000
+    && !start
+    && !dragging
+    && !contextMenuOpened
+    && !statusBubble?.classList.contains('is-visible')
+    && (motionState === 'idle-follow' || motionState === 'idle');
 }
 
 function applyFallbackMotion(payload = {}) {
@@ -307,6 +325,20 @@ async function emit(event, payload) {
   }
 }
 
+function emitOverlayHeartbeat() {
+  emit('prompt-button-health', {
+    startedAt: overlayStartedAt,
+    updatedAt: Date.now(),
+    motionState: btn.dataset.motionState || 'idle-follow',
+    safeToRebuild: isSafeToRebuildPromptButtonNow(),
+  }).catch(() => {});
+}
+
+function startOverlayHealthHeartbeat() {
+  emitOverlayHeartbeat();
+  window.setInterval(emitOverlayHeartbeat, OVERLAY_HEARTBEAT_MS);
+}
+
 async function hidePromptPopoverForDrag() {
   if (dragPopoverHidden) return;
   dragPopoverHidden = true;
@@ -320,6 +352,7 @@ function hideStatusBubble() {
 
 function showStatusBubble(payload) {
   if (!statusBubble || !payload) return;
+  markOverlayInteraction();
   const kind = payload.kind || 'failed';
   const message = payload.message || '未能自动发送';
   window.clearTimeout(statusTimer);
@@ -399,6 +432,7 @@ function listenForPromptPopoverDismissed() {
 
 async function openButtonControls(event) {
   event.preventDefault();
+  markOverlayInteraction();
   contextMenuOpened = true;
   start = null;
   dragging = false;
@@ -423,6 +457,7 @@ function handleCalicoPointerEnter() {
 }
 
 btn.addEventListener('pointerdown', (event) => {
+  markOverlayInteraction();
   if (event.button === 2 || (event.button === 0 && event.ctrlKey)) {
     openButtonControls(event);
     return;
@@ -469,6 +504,7 @@ btn.addEventListener('pointermove', (event) => {
   const current = { screenX: event.screenX, screenY: event.screenY };
   if (!dragging && distance(start, current) < DRAG_START_DISTANCE_PX) return;
   if (!dragStartedEmitted) {
+    markOverlayInteraction();
     dragStartedEmitted = true;
     calicoIdleDirector?.pause(4000);
     hidePromptPopoverForDrag().catch(() => {});
@@ -488,6 +524,7 @@ btn.addEventListener('pointermove', (event) => {
 });
 
 btn.addEventListener('pointerup', async (event) => {
+  markOverlayInteraction();
   if (contextMenuOpened) {
     contextMenuOpened = false;
     start = null;
@@ -553,6 +590,7 @@ startCalicoSpriteHealthWatchdog();
 listenForAutosendStatus();
 listenForCalicoMotion();
 listenForPromptPopoverDismissed();
+startOverlayHealthHeartbeat();
 </script>
 </body>
 </html>
