@@ -166,15 +166,13 @@ body {
   <img id="calicoSprite" class="calico-sprite" src="/calico/calico-idle-follow.svg" alt="" draggable="false" />
 </button>
 <script type="module">
-import { createCalicoIdleDirector } from '/calico/idle-director.js';
-import { createCalicoMotionRuntime } from '/calico/motion-runtime.js';
-
 const btn = document.getElementById('btn');
 const sprite = document.getElementById('calicoSprite');
 const statusBubble = document.getElementById('statusBubble');
 const tauri = window.__TAURI__;
 const DRAG_START_DISTANCE_PX = 10;
 const OVERLAY_HEARTBEAT_MS = 10_000;
+const CALICO_ASSET_VERSION = '1.0.8-calico-single-sprite-v1';
 const fallbackSprites = {
   'idle-follow': '/calico/calico-idle-follow.svg',
   'react-drag': '/calico/calico-react-drag.apng'
@@ -195,6 +193,8 @@ let lastAccessibilitySettingsOpenAt = 0;
 let lastUserInteractionAt = Date.now();
 let calicoMotion = null;
 let calicoIdleDirector = null;
+let createCalicoIdleDirector = null;
+let createCalicoMotionRuntime = null;
 const permissionMessages = {
   'zh-CN': {
     nativePrompt: '请在系统弹窗中授权',
@@ -247,12 +247,30 @@ function resetCalicoMotion() {
   applyFallbackMotion({ state: 'idle-follow' });
 }
 
+function versionedCalicoAsset(path) {
+  return `${path}?v=${encodeURIComponent(CALICO_ASSET_VERSION)}`;
+}
+
+async function loadCalicoModules() {
+  if (createCalicoIdleDirector && createCalicoMotionRuntime) return;
+  const [idleDirectorModule, motionRuntimeModule] = await Promise.all([
+    import(versionedCalicoAsset('/calico/idle-director.js')),
+    import(versionedCalicoAsset('/calico/motion-runtime.js'))
+  ]);
+  createCalicoIdleDirector = idleDirectorModule.createCalicoIdleDirector;
+  createCalicoMotionRuntime = motionRuntimeModule.createCalicoMotionRuntime;
+}
+
 function startCalicoSpriteHealthWatchdog() {
   window.setInterval(() => {
     if (!sprite) return;
+    if (calicoMotion?.recoverVisibilityIfNeeded) {
+      calicoMotion.recoverVisibilityIfNeeded();
+      return;
+    }
     const source = sprite.getAttribute('src') || '';
     const failedImage = sprite.complete && sprite.naturalWidth === 0;
-    if (!source || failedImage) {
+    if (sprite.hidden || !source || failedImage) {
       resetCalicoMotion();
     }
   }, 60_000);
@@ -271,7 +289,8 @@ function pauseIdleForPointerInteraction(durationMs = 5_000) {
 
 async function initializeCalicoMotion() {
   try {
-    const response = await fetch('/calico/manifest.json');
+    await loadCalicoModules();
+    const response = await fetch(versionedCalicoAsset('/calico/manifest.json'), { cache: 'no-store' });
     const manifest = await response.json();
     calicoMotion = createCalicoMotionRuntime({ image: sprite, host: btn, manifest });
     const motionDurations = Object.fromEntries(

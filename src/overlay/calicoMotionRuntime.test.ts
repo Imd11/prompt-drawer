@@ -3,6 +3,7 @@ import { describe, expect, it, vi } from "vitest";
 type Runtime = {
   apply(payload?: Record<string, unknown>): boolean;
   reset(): boolean;
+  recoverVisibilityIfNeeded(): boolean;
 };
 
 type RuntimeModule = {
@@ -78,8 +79,8 @@ function activeActionImage(host: HTMLElement): HTMLImageElement | null {
   return host.querySelector<HTMLImageElement>(".calico-action-sprite");
 }
 
-function activeSpriteSrc(image: HTMLImageElement, host: HTMLElement): string {
-  return activeActionImage(host)?.getAttribute("src") ?? image.getAttribute("src") ?? "";
+function activeSpriteSrc(image: HTMLImageElement): string {
+  return image.getAttribute("src") ?? "";
 }
 
 describe("Calico motion runtime", () => {
@@ -91,10 +92,26 @@ describe("Calico motion runtime", () => {
     runtime.apply({ state: "working-typing" });
 
     expect(host.dataset.motionState).toBe("working-typing");
-    expect(activeSpriteSrc(image, host)).toBe("/calico/calico-working-typing.apng");
-    expect(activeActionImage(host)?.style.getPropertyValue("--calico-scale")).toBe("1.2");
-    expect(activeActionImage(host)?.style.getPropertyValue("--calico-offset-x")).toBe("-3px");
-    expect(activeActionImage(host)?.style.getPropertyValue("--calico-offset-y")).toBe("-5px");
+    expect(activeSpriteSrc(image)).toBe("/calico/calico-working-typing.apng");
+    expect(image.style.getPropertyValue("--calico-scale")).toBe("1.2");
+    expect(image.style.getPropertyValue("--calico-offset-x")).toBe("-3px");
+    expect(image.style.getPropertyValue("--calico-offset-y")).toBe("-5px");
+    expect(activeActionImage(host)).toBeNull();
+  });
+
+  it("uses one persistent sprite element instead of overlaying action sprites", async () => {
+    const { createCalicoMotionRuntime } = await loadRuntime();
+    const { image, host } = elements();
+    host.appendChild(image);
+    const runtime = createCalicoMotionRuntime({ image, host, manifest });
+
+    runtime.apply({ state: "happy" });
+    runtime.apply({ state: "working-typing" });
+
+    expect(image.hidden).toBe(false);
+    expect(host.querySelectorAll("img")).toHaveLength(1);
+    expect(activeActionImage(host)).toBeNull();
+    expect(activeSpriteSrc(image)).toBe("/calico/calico-working-typing.apng");
   });
 
   it("does not allow lower priority motion to interrupt minimum display time", async () => {
@@ -120,7 +137,7 @@ describe("Calico motion runtime", () => {
     runtime.apply({ state: "happy" });
 
     expect(host.dataset.motionState).toBe("happy");
-    expect(activeSpriteSrc(image, host)).toContain("/calico/calico-happy.apng");
+    expect(activeSpriteSrc(image)).toContain("/calico/calico-happy.apng");
     vi.useRealTimers();
   });
 
@@ -130,10 +147,10 @@ describe("Calico motion runtime", () => {
     const runtime = createCalicoMotionRuntime({ image, host, manifest });
 
     runtime.apply({ state: "happy" });
-    const firstSrc = activeSpriteSrc(image, host);
+    const firstSrc = activeSpriteSrc(image);
     runtime.apply({ state: "happy" });
 
-    expect(activeSpriteSrc(image, host)).not.toBe(firstSrc);
+    expect(activeSpriteSrc(image)).not.toBe(firstSrc);
   });
 
   it("keeps replay image URLs bounded during long-running motion loops", async () => {
@@ -144,7 +161,7 @@ describe("Calico motion runtime", () => {
 
     for (let index = 0; index < 100; index += 1) {
       runtime.apply({ state: "happy" });
-      seenSrcs.add(activeSpriteSrc(image, host));
+      seenSrcs.add(activeSpriteSrc(image));
     }
 
     expect(seenSrcs.size).toBeLessThanOrEqual(2);
@@ -162,7 +179,7 @@ describe("Calico motion runtime", () => {
 
     for (let index = 0; index < 100; index += 1) {
       runtime.apply({ state: states[index % states.length] });
-      const src = activeSpriteSrc(image, host);
+      const src = activeSpriteSrc(image);
       const file = src.split("?")[0];
       if (!seenByFile.has(file)) {
         seenByFile.set(file, new Set());
@@ -193,9 +210,24 @@ describe("Calico motion runtime", () => {
     const runtime = createCalicoMotionRuntime({ image, host, manifest });
 
     runtime.apply({ state: "happy" });
-    activeActionImage(host)?.dispatchEvent(new Event("error"));
+    image.dispatchEvent(new Event("error"));
 
     expect(host.dataset.motionState).toBe("idle-follow");
+    expect(image.getAttribute("src")).toBe("/calico/calico-idle-follow.svg");
+    expect(activeActionImage(host)).toBeNull();
+  });
+
+  it("recovers when the sprite visibility invariant is broken", async () => {
+    const { createCalicoMotionRuntime } = await loadRuntime();
+    const { image, host } = elements();
+    const runtime = createCalicoMotionRuntime({ image, host, manifest });
+
+    runtime.apply({ state: "happy" });
+    image.hidden = true;
+
+    expect(runtime.recoverVisibilityIfNeeded()).toBe(false);
+    expect(host.dataset.motionState).toBe("idle-follow");
+    expect(image.hidden).toBe(false);
     expect(image.getAttribute("src")).toBe("/calico/calico-idle-follow.svg");
     expect(activeActionImage(host)).toBeNull();
   });
@@ -212,7 +244,7 @@ describe("Calico motion runtime", () => {
     expect(image.getAttribute("src")).toBe("/calico/calico-idle-follow.svg");
   });
 
-  it("removes transient APNG action images after auto-returning to default", async () => {
+  it("auto-returns to default on the same sprite element", async () => {
     vi.useFakeTimers();
     const { createCalicoMotionRuntime } = await loadRuntime();
     const { image, host } = elements();
@@ -226,7 +258,8 @@ describe("Calico motion runtime", () => {
 
     runtime.apply({ state: "happy", durationMs: 100 });
 
-    expect(activeActionImage(host)?.getAttribute("src")).toContain("/calico/calico-happy.apng");
+    expect(image.getAttribute("src")).toContain("/calico/calico-happy.apng");
+    expect(activeActionImage(host)).toBeNull();
 
     vi.advanceTimersByTime(100);
 
@@ -260,7 +293,8 @@ describe("Calico motion runtime", () => {
 
     runtime.apply({ state: "react-drag", reason: "drag" });
 
-    expect(activeSpriteSrc(image, host)).toBe("/calico/calico-react-drag.apng");
+    expect(activeSpriteSrc(image)).toBe("/calico/calico-react-drag.apng");
+    expect(activeActionImage(host)).toBeNull();
 
     runtime.reset();
 

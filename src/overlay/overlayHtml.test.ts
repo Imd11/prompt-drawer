@@ -52,13 +52,19 @@ describe("overlay button html", () => {
   it("loads the Calico motion runtime and manifest", () => {
     const html = readOverlayHtml();
 
+    expect(html).toContain("const CALICO_ASSET_VERSION");
+    expect(html).toContain("versionedCalicoAsset('/calico/motion-runtime.js')");
     expect(html).toContain("/calico/motion-runtime.js");
     expect(html).toContain("createCalicoMotionRuntime");
+    expect(html).toContain("versionedCalicoAsset('/calico/idle-director.js')");
     expect(html).toContain("/calico/idle-director.js");
     expect(html).toContain("createCalicoIdleDirector");
     expect(html).toContain("initializeCalicoMotion");
-    expect(html).toContain("fetch('/calico/manifest.json')");
+    expect(html).toContain("fetch(versionedCalicoAsset('/calico/manifest.json'), { cache: 'no-store' })");
     expect(html).toContain("calico-motion");
+    expect(html).not.toContain("from '/calico/motion-runtime.js'");
+    expect(html).not.toContain("from '/calico/idle-director.js'");
+    expect(html).not.toContain("fetch('/calico/manifest.json')");
   });
 
   it("loads and starts the Calico idle director after the motion runtime is ready", () => {
@@ -66,6 +72,7 @@ describe("overlay button html", () => {
 
     expect(html).toContain("/calico/idle-director.js");
     expect(html).toContain("createCalicoIdleDirector");
+    expect(html).toContain("await loadCalicoModules();");
     expect(html).toContain("let calicoIdleDirector = null;");
     expect(html).toContain("calicoIdleDirector = createCalicoIdleDirector");
     expect(html).toContain("applyMotion: applyCalicoMotion");
@@ -152,6 +159,8 @@ describe("overlay button html", () => {
 
     expect(html).toContain("function startCalicoSpriteHealthWatchdog()");
     expect(html).toContain("window.setInterval");
+    expect(html).toContain("calicoMotion.recoverVisibilityIfNeeded();");
+    expect(html).toContain("sprite.hidden");
     expect(html).toContain("sprite.naturalWidth === 0");
     expect(html).toContain("resetCalicoMotion();");
     expect(html).toContain("startCalicoSpriteHealthWatchdog();");
