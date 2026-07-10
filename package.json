@@ -8,6 +8,7 @@
     "build": "tsc && vite build",
     "test": "vitest run",
     "test:calico-webview": "node scripts/run-calico-webview-probe.mjs",
+    "calico:generate-sheets": "node scripts/generate-calico-sprite-sheets.mjs",
     "test:watch": "vitest",
     "preview": "vite preview",
     "tauri": "tauri",
