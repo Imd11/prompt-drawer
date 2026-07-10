@@ -7,6 +7,7 @@
     "dev": "vite",
     "build": "tsc && vite build",
     "test": "vitest run",
+    "test:calico-webview": "node scripts/run-calico-webview-probe.mjs",
     "test:watch": "vitest",
     "preview": "vite preview",
     "tauri": "tauri",

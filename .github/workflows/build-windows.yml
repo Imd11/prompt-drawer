@@ -23,6 +23,17 @@ jobs:
       - name: Install frontend dependencies
         run: npm ci
 
+      - name: Probe Calico WebView renderer
+        run: npm run test:calico-webview
+
+      - name: Upload Calico WebView probe diagnostics
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: calico-webview-probe-windows
+          path: src-tauri/target/calico-probe-artifacts/
+          if-no-files-found: warn
+
       - name: Build Windows installer
         run: npm run tauri -- build --bundles nsis
 

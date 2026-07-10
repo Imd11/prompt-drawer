@@ -2303,11 +2303,12 @@ describe("app", () => {
     currentWindowLabel = "main";
     window.history.pushState({}, "", "/?mode=manager");
     const { readTextFile, writeTextFile } = await import("@tauri-apps/plugin-fs");
-    vi.mocked(readTextFile).mockImplementation(async (path: string) => {
-      if (path.includes("prompts")) {
+    vi.mocked(readTextFile).mockImplementation(async (path) => {
+      const filePath = String(path);
+      if (filePath.includes("prompts")) {
         return JSON.stringify({ version: 1, prompts: mockPrompts });
       }
-      if (path.includes("settings")) {
+      if (filePath.includes("settings")) {
         return JSON.stringify({
           version: 1,
           blacklistedApps: [],

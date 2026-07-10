@@ -6,6 +6,8 @@ use tauri::{
 };
 use tauri_plugin_clipboard_manager::ClipboardExt;
 
+#[cfg(debug_assertions)]
+mod calico_probe;
 mod platform;
 pub use platform::{
     accessibility_status, frontmost_app, request_accessibility_permission, AccessibilityStatus,
@@ -1750,9 +1752,16 @@ pub fn run() {
             prompt_library_file_metadata,
             read_settings_text,
             write_settings_text,
-            set_prompt_button_visibility
+            set_prompt_button_visibility,
+            #[cfg(debug_assertions)]
+            calico_probe::record_calico_surface_probe
         ])
         .setup(|app| {
+            #[cfg(debug_assertions)]
+            if calico_probe::enabled() {
+                return calico_probe::setup(app.handle()).map_err(Into::into);
+            }
+
             #[cfg(target_os = "macos")]
             app.set_activation_policy(tauri::ActivationPolicy::Accessory);
 
