@@ -281,6 +281,41 @@ describe("bounded Calico frame renderer", () => {
     expect(fatal).toHaveBeenCalledTimes(1);
   });
 
+  it("reports a later fatal commit after a successful in-place recovery", async () => {
+    const visibleContext = fakeContext();
+    let commitShouldFail = false;
+    visibleContext.drawImage.mockImplementation(() => {
+      if (commitShouldFail) throw new Error("commit");
+    });
+    const fatal = vi.fn();
+    const renderer = createCalicoFrameRenderer({
+      canvas: fakeCanvas(visibleContext),
+      createCanvas: () => fakeCanvas(),
+      loadSurface: vi.fn(async () => ({ source: {}, backend: "fake", release: vi.fn() })),
+      drawFrame: vi.fn(),
+      setTimer: vi.fn(() => 1),
+      clearTimer: vi.fn(),
+      now: () => 0,
+      onError: vi.fn(),
+      onFatalRender: fatal,
+    });
+    await renderer.play("first", sheet("/first.png"), { restart: true });
+
+    commitShouldFail = true;
+    expect(renderer.redrawCurrentFrame()).toBe(false);
+    expect(renderer.redrawCurrentFrame()).toBe(false);
+    expect(fatal).toHaveBeenCalledTimes(1);
+
+    renderer.suspend({ retainFrame: true });
+    commitShouldFail = false;
+    expect(renderer.resume()).toBe(true);
+    expect(renderer.diagnostics()).toMatchObject({ state: "ready", visualReady: true });
+
+    commitShouldFail = true;
+    expect(renderer.redrawCurrentFrame()).toBe(false);
+    expect(fatal).toHaveBeenCalledTimes(2);
+  });
+
   it("prepares DPR changes without touching visible backing size and rejects stale tokens", async () => {
     const visible = fakeCanvas();
     const renderer = createCalicoFrameRenderer({

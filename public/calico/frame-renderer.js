@@ -224,6 +224,7 @@ export function createCalicoFrameRenderer(options) {
       visibleContext.globalCompositeOperation = "copy";
       visibleContext.drawImage(scratch, 0, 0);
       visibleContext.restore();
+      fatalReported = false;
       visualReady = true;
       if (state !== "suspended") state = "ready";
       return true;
