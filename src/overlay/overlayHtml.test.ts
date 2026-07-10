@@ -188,6 +188,25 @@ describe("overlay button html", () => {
     expect(html).toContain("queuedDpr = nextDpr");
   });
 
+  it("runs one bounded in-place recovery after a fatal renderer error", () => {
+    const html = readOverlayHtml();
+    const recoveryBlock = html.slice(
+      html.indexOf("async function recoverFatalRenderer"),
+      html.indexOf("async function resizeCalicoBackingStore")
+    );
+
+    expect(html).toContain("let fatalRecoveryPromise = null;");
+    expect(recoveryBlock).toContain("for (const delay of [0, 100, 400])");
+    expect(recoveryBlock).toContain("const hidden = await reportRendererReady(false)");
+    expect(recoveryBlock).toContain("readinessTransitionApplied(hidden)");
+    expect(recoveryBlock).toContain("await resumeAndReportReady()");
+    expect(recoveryBlock).toContain("Failed to recover Calico renderer in place");
+    expect(recoveryBlock).toContain("if (fatalRecoveryPromise) return fatalRecoveryPromise;");
+    expect(recoveryBlock).toContain("calicoMotion?.suspend({ retainFrame: true });");
+    expect(recoveryBlock).not.toContain("createCalicoFrameRenderer");
+    expect(recoveryBlock).not.toContain("show_prompt_button");
+  });
+
   it("keeps click-to-open neutral and separate from hover attention", () => {
     const html = readFileSync("public/overlay.html", "utf8");
     const clickBlock = html.slice(

@@ -196,6 +196,7 @@ let calicoSheetManifest = null;
 let rendererTransitionId = 0;
 let lifecycleGeneration = 0;
 let lifecyclePromise = null;
+let fatalRecoveryPromise = null;
 let resizePromise = null;
 let queuedDpr = null;
 let currentDpr = 2;
@@ -389,13 +390,44 @@ async function resumeAndReportReady() {
   }
 }
 
+async function recoverFatalRenderer(generation) {
+  let lastError = null;
+  try {
+    const hidden = await reportRendererReady(false);
+    if (!readinessTransitionApplied(hidden) || generation !== lifecycleGeneration) return false;
+  } catch (error) {
+    console.error('Failed to hide Calico after renderer error', error);
+    return false;
+  }
+
+  for (const delay of [0, 100, 400]) {
+    if (delay) await wait(delay);
+    if (generation !== lifecycleGeneration) return false;
+    try {
+      if (await resumeAndReportReady()) return true;
+      lastError = new Error('Calico renderer redraw was not accepted');
+    } catch (error) {
+      lastError = error;
+    }
+  }
+  console.error('Failed to recover Calico renderer in place', lastError);
+  return false;
+}
+
 function reportFatalRendererError(error) {
   console.error('Fatal Calico renderer error', error);
+  if (fatalRecoveryPromise) return fatalRecoveryPromise;
   lifecycleGeneration += 1;
+  const generation = lifecycleGeneration;
   lifecyclePromise = null;
   calicoIdleDirector?.stop();
   calicoMotion?.suspend({ retainFrame: true });
-  reportRendererReady(false).catch(() => {});
+  const promise = recoverFatalRenderer(generation);
+  fatalRecoveryPromise = promise;
+  promise.finally(() => {
+    if (fatalRecoveryPromise === promise) fatalRecoveryPromise = null;
+  });
+  return promise;
 }
 
 async function resizeCalicoBackingStore(nextDpr) {
