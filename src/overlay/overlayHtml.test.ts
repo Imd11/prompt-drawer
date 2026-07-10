@@ -163,6 +163,8 @@ describe("overlay button html", () => {
     const html = readOverlayHtml();
 
     expect(html).toContain("set_prompt_button_renderer_ready");
+    expect(html).toContain("readinessTransitionApplied");
+    expect(html).toContain("outcome.applied === true");
     expect(html).toContain("rendererInstanceId");
     expect(html).toContain("prompt-button-renderer-resume-requested");
     expect(html).not.toContain("startCalicoSpriteHealthWatchdog");
@@ -183,6 +185,7 @@ describe("overlay button html", () => {
     expect(html).toContain("calicoMotion?.dispose()");
     expect(html).toContain("prepareBackingStoreResize");
     expect(html).toContain("commitPreparedResize");
+    expect(html).toContain("queuedDpr = nextDpr");
   });
 
   it("keeps click-to-open neutral and separate from hover attention", () => {

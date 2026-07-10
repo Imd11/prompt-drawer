@@ -197,6 +197,7 @@ let rendererTransitionId = 0;
 let lifecycleGeneration = 0;
 let lifecyclePromise = null;
 let resizePromise = null;
+let queuedDpr = null;
 let currentDpr = 2;
 const permissionMessages = {
   'zh-CN': {
@@ -269,6 +270,14 @@ async function reportRendererReady(ready) {
   });
 }
 
+function readinessTransitionApplied(outcome) {
+  if (!outcome?.accepted) return false;
+  if (outcome.action === 'showCurrent' || outcome.action === 'hideCurrent') {
+    return outcome.applied === true;
+  }
+  return true;
+}
+
 async function ensureCalicoResources() {
   await loadCalicoModules();
   if (!calicoManifest || !calicoSheetManifest) {
@@ -332,7 +341,7 @@ async function initializeCalicoMotionOnce() {
       buildIdleDirector();
     }
     const outcome = await reportRendererReady(true);
-    return Boolean(outcome?.accepted && generation === lifecycleGeneration);
+    return readinessTransitionApplied(outcome) && generation === lifecycleGeneration;
   })();
   lifecyclePromise = { generation, promise };
   try {
@@ -368,7 +377,7 @@ async function resumeAndReportReady() {
     const resumed = state === 'ready' || await Promise.resolve(calicoMotion.resume());
     if (!resumed || generation !== lifecycleGeneration) return false;
     const outcome = await reportRendererReady(true);
-    if (!outcome?.accepted || generation !== lifecycleGeneration) return false;
+    if (!readinessTransitionApplied(outcome) || generation !== lifecycleGeneration) return false;
     calicoIdleDirector?.start();
     return true;
   })();
@@ -391,7 +400,10 @@ function reportFatalRendererError(error) {
 
 async function resizeCalicoBackingStore(nextDpr) {
   if (!calicoRenderer || !calicoMotion || nextDpr === currentDpr) return;
-  if (resizePromise) return resizePromise;
+  if (resizePromise) {
+    queuedDpr = nextDpr;
+    return resizePromise;
+  }
   const generation = lifecycleGeneration;
   resizePromise = (async () => {
     calicoMotion.suspend({ retainFrame: true });
@@ -401,7 +413,7 @@ async function resizeCalicoBackingStore(nextDpr) {
       return;
     }
     const hidden = await reportRendererReady(false);
-    if (!hidden?.accepted || generation !== lifecycleGeneration) {
+    if (!readinessTransitionApplied(hidden) || generation !== lifecycleGeneration) {
       calicoMotion.resume();
       return;
     }
@@ -415,8 +427,17 @@ async function resizeCalicoBackingStore(nextDpr) {
       return;
     }
     await reportRendererReady(true);
-  })().finally(() => { resizePromise = null; });
-  return resizePromise;
+  })();
+  try {
+    await resizePromise;
+  } finally {
+    resizePromise = null;
+  }
+  const latestDpr = queuedDpr;
+  queuedDpr = null;
+  if (latestDpr && latestDpr !== currentDpr) {
+    return resizeCalicoBackingStore(latestDpr);
+  }
 }
 
 function distance(a, b) {
