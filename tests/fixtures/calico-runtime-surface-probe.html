@@ -13,7 +13,9 @@
     transparentPixelPreserved: false,
     opaquePixelPreserved: false,
     objectUrlRevoked: false,
+    baselineDrawn: false,
     rendererDiagnostics: null,
+    fatalRecovery: null,
     error: null
   };
 
@@ -101,6 +103,8 @@
         plays: 0
       };
     });
+    report.baselineDrawn = await renderer.showBaseline();
+    sampleRenderer();
     for (var requestIndex = 0; requestIndex < 600; requestIndex += 1) {
       void renderer.play("probe-" + requestIndex, probeSheets[requestIndex % 3], { restart: true });
       sampleRenderer();
@@ -115,11 +119,78 @@
           && beforeDispose.visualReady) break;
     }
     if (!beforeDispose.visualReady) throw new Error("Production renderer stress did not draw");
+    if (!await renderer.showBaseline()) throw new Error("Production renderer did not return to baseline");
+    sampleRenderer();
+    for (var secondPassIndex = 0; secondPassIndex < 600; secondPassIndex += 1) {
+      void renderer.play(
+        "probe-second-" + secondPassIndex,
+        probeSheets[secondPassIndex % 3],
+        { restart: true }
+      );
+      sampleRenderer();
+    }
+    settleDeadline = Date.now() + 5000;
+    beforeDispose = sampleRenderer();
+    while (Date.now() < settleDeadline) {
+      await new Promise(function (resolve) { setTimeout(resolve, 20); });
+      beforeDispose = sampleRenderer();
+      if (beforeDispose.pendingDecodeCount === 0
+          && beforeDispose.queuedRequestCount === 0
+          && beforeDispose.visualReady) break;
+    }
+    if (!beforeDispose.visualReady) throw new Error("Second production renderer stress did not draw");
     renderer.dispose();
     report.rendererDiagnostics = {
       maxima: maxima,
       beforeDispose: beforeDispose,
       afterDispose: renderer.diagnostics()
+    };
+
+    var fatalCanvas = document.createElement("canvas");
+    fatalCanvas.width = 2;
+    fatalCanvas.height = 2;
+    var fatalContext = fatalCanvas.getContext("2d", { alpha: true });
+    var originalFatalDrawImage = fatalContext.drawImage.bind(fatalContext);
+    var failVisibleCommit = false;
+    fatalContext.drawImage = function () {
+      if (failVisibleCommit) throw new Error("injected visible commit failure");
+      return originalFatalDrawImage.apply(null, arguments);
+    };
+    var fatalCount = 0;
+    var fatalRenderer = rendererModule.createCalicoFrameRenderer({
+      canvas: fatalCanvas,
+      maxDecodedSheets: 2,
+      loadSurface: async function () {
+        return { source: canvas, backend: "injected", release: function () {} };
+      },
+      drawFrame: function (targetContext, source) {
+        targetContext.drawImage(source, 0, 0, 2, 2);
+      },
+      setTimer: function () { return 1; },
+      clearTimer: function () {},
+      now: function () { return 0; },
+      onError: function () {},
+      onFatalRender: function () { fatalCount += 1; }
+    });
+    await fatalRenderer.play("fatal-probe", probeSheets[0], { restart: true });
+    failVisibleCommit = true;
+    fatalRenderer.redrawCurrentFrame();
+    var firstLost = fatalRenderer.diagnostics();
+    fatalRenderer.suspend({ retainFrame: true });
+    failVisibleCommit = false;
+    var recovered = fatalRenderer.resume();
+    var afterRecovery = fatalRenderer.diagnostics();
+    failVisibleCommit = true;
+    fatalRenderer.redrawCurrentFrame();
+    var secondLost = fatalRenderer.diagnostics();
+    fatalRenderer.dispose();
+    report.fatalRecovery = {
+      fatalCount: fatalCount,
+      firstLost: firstLost,
+      recovered: recovered,
+      afterRecovery: afterRecovery,
+      secondLost: secondLost,
+      afterDispose: fatalRenderer.diagnostics()
     };
   } catch (error) {
     report.error = error instanceof Error ? error.message : String(error);

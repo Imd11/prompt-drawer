@@ -99,6 +99,7 @@ function validate(report) {
   if (!report.transparentPixelPreserved) throw new Error("transparent alpha was not preserved");
   if (!report.opaquePixelPreserved) throw new Error("opaque pixel was not preserved");
   if (!report.objectUrlRevoked) throw new Error("compatibility object URL was not revoked");
+  if (!report.baselineDrawn) throw new Error("production renderer baseline did not draw");
   if (report.createImageBitmapAvailable
       && (!report.preferredBackendDrawn || !report.imageBitmapCloseAvailable)) {
     throw new Error("preferred backend was available without successful draw and close support");
@@ -123,6 +124,26 @@ function validate(report) {
   }
   if (afterDispose.state !== "disposed" || afterDispose.visualReady !== false) {
     throw new Error("renderer did not enter a clean disposed state");
+  }
+  const fatalRecovery = report.fatalRecovery;
+  if (!fatalRecovery) throw new Error("repeated fatal recovery evidence is missing");
+  if (fatalRecovery.fatalCount !== 2) {
+    throw new Error(`expected two separated fatal reports, got ${fatalRecovery.fatalCount}`);
+  }
+  if (fatalRecovery.firstLost.state !== "lost" || fatalRecovery.firstLost.visualReady !== false) {
+    throw new Error("first injected fatal commit did not enter lost state");
+  }
+  if (!fatalRecovery.recovered
+      || fatalRecovery.afterRecovery.state !== "ready"
+      || fatalRecovery.afterRecovery.visualReady !== true) {
+    throw new Error("renderer did not redraw successfully between fatal commits");
+  }
+  if (fatalRecovery.secondLost.state !== "lost" || fatalRecovery.secondLost.visualReady !== false) {
+    throw new Error("second injected fatal commit did not enter lost state");
+  }
+  if (fatalRecovery.afterDispose.liveSurfaceCount !== 0
+      || fatalRecovery.afterDispose.activeTimerCount !== 0) {
+    throw new Error("fatal recovery probe did not release renderer resources");
   }
 }
 
