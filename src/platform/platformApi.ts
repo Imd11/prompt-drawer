@@ -15,6 +15,13 @@ export interface PromptButtonPosition {
   y: number;
 }
 
+export interface PromptButtonVisibilityOutcome {
+  visible: boolean;
+  applied: boolean;
+  persisted: boolean;
+  error: string | null;
+}
+
 export interface PromptLibraryFile {
   content: string;
   signature: string;
@@ -99,6 +106,12 @@ export async function hidePromptButton(): Promise<void> {
   return invoke("hide_prompt_button");
 }
 
+export async function setPromptButtonVisibility(
+  visible: boolean
+): Promise<PromptButtonVisibilityOutcome> {
+  return invoke<PromptButtonVisibilityOutcome>("set_prompt_button_visibility", { visible });
+}
+
 export async function showPromptPopover(x: number, y: number): Promise<void> {
   return invoke("show_prompt_popover", { x, y });
 }
@@ -117,6 +130,13 @@ export async function movePromptButtonTo(x: number, y: number): Promise<void> {
 
 export async function showPromptPopoverFromButton(sessionId: number): Promise<void> {
   return invoke("show_prompt_popover_from_button", { sessionId });
+}
+
+export async function acknowledgePromptPopoverMode(
+  requestId: number,
+  mode: "popover" | "button-controls"
+): Promise<void> {
+  return invoke("acknowledge_prompt_popover_mode", { requestId, mode });
 }
 
 export async function openMainWindow(): Promise<void> {

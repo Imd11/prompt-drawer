@@ -2,7 +2,7 @@ use tauri::{
     image::Image,
     menu::{Menu, MenuItem, PredefinedMenuItem},
     tray::TrayIconBuilder,
-    Emitter, Listener, Manager, WindowEvent,
+    Emitter, Manager, WindowEvent,
 };
 use tauri_plugin_clipboard_manager::ClipboardExt;
 
@@ -15,9 +15,10 @@ mod overlay_position;
 pub use overlay_position::{prompt_button_position, OverlayPoint};
 mod windows;
 pub use windows::{
-    hide_prompt_button, hide_prompt_popover, move_prompt_button_to, prompt_button_position_cmd,
-    show_prompt_button, show_prompt_button_controls_from_button, show_prompt_popover,
-    show_prompt_popover_from_button, toggle_prompt_popover_from_button,
+    acknowledge_prompt_popover_mode, hide_prompt_button, hide_prompt_popover,
+    move_prompt_button_to, prompt_button_position_cmd, show_prompt_button,
+    show_prompt_button_controls_from_button, show_prompt_popover, show_prompt_popover_from_button,
+    toggle_prompt_popover_from_button,
 };
 mod macos_panels;
 pub use macos_panels::{activate_main_window, configure_non_activating_panel};
@@ -60,9 +61,9 @@ fn prompt_interaction_permission_status_from_parts(
 
 #[tauri::command]
 fn prompt_interaction_permission_status(
-    app: tauri::AppHandle,
+    settings_state: tauri::State<SettingsFileState>,
 ) -> PromptInteractionPermissionStatus {
-    let settings = read_settings_value(&app);
+    let settings = settings_state.read_value();
     prompt_interaction_permission_status_from_parts(
         cfg!(target_os = "macos"),
         accessibility_status().trusted,
@@ -72,8 +73,10 @@ fn prompt_interaction_permission_status(
 }
 
 #[tauri::command]
-fn request_prompt_interaction_permission(app: tauri::AppHandle) -> AccessibilityStatus {
-    let _ = set_accessibility_prompt_requested(&app, true);
+fn request_prompt_interaction_permission(
+    settings_state: tauri::State<SettingsFileState>,
+) -> AccessibilityStatus {
+    let _ = set_accessibility_prompt_requested(settings_state.inner(), true);
     request_accessibility_permission()
 }
 
@@ -930,55 +933,152 @@ impl PromptPickSessionState {
     }
 }
 
-#[derive(Clone, Copy)]
-struct PromptButtonHealthSnapshot {
-    first_seen: Option<std::time::Instant>,
-    last_seen: Option<std::time::Instant>,
-    safe_to_rebuild: bool,
+pub(crate) struct PromptButtonVisibilityState {
+    desired_visible: std::sync::atomic::AtomicBool,
+    generation: std::sync::atomic::AtomicU64,
 }
 
-impl Default for PromptButtonHealthSnapshot {
-    fn default() -> Self {
+impl PromptButtonVisibilityState {
+    fn new(visible: bool) -> Self {
         Self {
-            first_seen: None,
-            last_seen: None,
-            safe_to_rebuild: false,
+            desired_visible: std::sync::atomic::AtomicBool::new(visible),
+            generation: std::sync::atomic::AtomicU64::new(0),
         }
     }
-}
 
-#[derive(Clone, serde::Deserialize)]
-#[serde(rename_all = "camelCase")]
-struct PromptButtonHealthPayload {
-    started_at: Option<u64>,
-    updated_at: Option<u64>,
-    motion_state: Option<String>,
-    safe_to_rebuild: Option<bool>,
-}
-
-#[derive(Clone, Default)]
-struct PromptButtonHealthState {
-    snapshot: std::sync::Arc<std::sync::Mutex<PromptButtonHealthSnapshot>>,
-}
-
-fn should_rebuild_prompt_button(
-    now: std::time::Instant,
-    last_seen: Option<std::time::Instant>,
-    first_seen: Option<std::time::Instant>,
-    safe_to_rebuild: bool,
-    popover_visible: bool,
-) -> bool {
-    if popover_visible {
-        return false;
+    fn from_settings(settings: &serde_json::Value) -> Self {
+        let visible = settings
+            .pointer("/floatingButton/visible")
+            .and_then(serde_json::Value::as_bool)
+            .unwrap_or(true);
+        Self::new(visible)
     }
-    let stale_heartbeat = last_seen
-        .map(|seen| now.duration_since(seen) > std::time::Duration::from_secs(45))
-        .unwrap_or(false);
-    let aged_out = first_seen
-        .map(|seen| now.duration_since(seen) > std::time::Duration::from_secs(30 * 60))
-        .unwrap_or(false);
 
-    stale_heartbeat || (safe_to_rebuild && aged_out)
+    pub(crate) fn desired_visible(&self) -> bool {
+        self.desired_visible
+            .load(std::sync::atomic::Ordering::Acquire)
+    }
+
+    fn generation(&self) -> u64 {
+        self.generation.load(std::sync::atomic::Ordering::Acquire)
+    }
+
+    fn set(&self, visible: bool) -> u64 {
+        self.desired_visible
+            .store(visible, std::sync::atomic::Ordering::Release);
+        self.generation
+            .fetch_add(1, std::sync::atomic::Ordering::AcqRel)
+            + 1
+    }
+
+    fn may_show(&self, requested_generation: u64) -> bool {
+        self.desired_visible() && self.generation() == requested_generation
+    }
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+enum PromptButtonEnsureAction {
+    None,
+    ShowExisting,
+    BuildMissing,
+}
+
+fn prompt_button_ensure_action(
+    expected_visible: bool,
+    window_present: bool,
+    window_visible: bool,
+) -> PromptButtonEnsureAction {
+    if !expected_visible || (window_present && window_visible) {
+        PromptButtonEnsureAction::None
+    } else if window_present {
+        PromptButtonEnsureAction::ShowExisting
+    } else {
+        PromptButtonEnsureAction::BuildMissing
+    }
+}
+
+struct SettingsFileState {
+    path: std::path::PathBuf,
+    io_lock: std::sync::Mutex<()>,
+}
+
+impl SettingsFileState {
+    fn new(path: std::path::PathBuf) -> Self {
+        Self {
+            path,
+            io_lock: std::sync::Mutex::new(()),
+        }
+    }
+
+    fn read_text(&self) -> Result<Option<String>, String> {
+        let _guard = self.io_lock.lock().map_err(|e| e.to_string())?;
+        match std::fs::read_to_string(&self.path) {
+            Ok(contents) => Ok(Some(contents)),
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(None),
+            Err(error) => Err(error.to_string()),
+        }
+    }
+
+    fn read_value(&self) -> serde_json::Value {
+        let Ok(_guard) = self.io_lock.lock() else {
+            return default_settings_value();
+        };
+        self.read_value_unlocked()
+    }
+
+    fn read_value_unlocked(&self) -> serde_json::Value {
+        std::fs::read_to_string(&self.path)
+            .ok()
+            .and_then(|contents| serde_json::from_str(&contents).ok())
+            .unwrap_or_else(default_settings_value)
+    }
+
+    fn write_value_unlocked(&self, settings: &serde_json::Value) -> Result<(), String> {
+        if let Some(parent) = self.path.parent() {
+            std::fs::create_dir_all(parent).map_err(|e| e.to_string())?;
+        }
+        let contents = serde_json::to_string_pretty(settings).map_err(|e| e.to_string())?;
+        std::fs::write(&self.path, contents).map_err(|e| e.to_string())
+    }
+
+    fn write_frontend_text(
+        &self,
+        value: &str,
+        visibility_state: &PromptButtonVisibilityState,
+    ) -> Result<(), String> {
+        let mut settings: serde_json::Value =
+            serde_json::from_str(value).map_err(|e| format!("Invalid settings JSON: {e}"))?;
+        if !settings.is_object() {
+            return Err("Settings JSON must be an object.".to_string());
+        }
+        if !settings
+            .get("floatingButton")
+            .is_some_and(serde_json::Value::is_object)
+        {
+            settings["floatingButton"] = serde_json::json!({});
+        }
+        let _guard = self.io_lock.lock().map_err(|e| e.to_string())?;
+        settings["floatingButton"]["visible"] =
+            serde_json::Value::Bool(visibility_state.desired_visible());
+        self.write_value_unlocked(&settings)
+    }
+
+    fn patch_bool(&self, pointer: &[&str], value: bool) -> Result<(), String> {
+        let _guard = self.io_lock.lock().map_err(|e| e.to_string())?;
+        let mut settings = self.read_value_unlocked();
+        if !settings.is_object() {
+            settings = default_settings_value();
+        }
+        let (section, key) = (pointer[0], pointer[1]);
+        if !settings
+            .get(section)
+            .is_some_and(serde_json::Value::is_object)
+        {
+            settings[section] = serde_json::json!({});
+        }
+        settings[section][key] = serde_json::Value::Bool(value);
+        self.write_value_unlocked(&settings)
+    }
 }
 
 fn record_prompt_pick_session_target_if_valid(
@@ -1394,16 +1494,6 @@ fn settings_path(app: &tauri::AppHandle) -> Option<std::path::PathBuf> {
         .map(|dir| dir.join("settings.json"))
 }
 
-fn read_settings_value(app: &tauri::AppHandle) -> serde_json::Value {
-    let Some(path) = settings_path(app) else {
-        return default_settings_value();
-    };
-    let Ok(contents) = std::fs::read_to_string(path) else {
-        return default_settings_value();
-    };
-    serde_json::from_str(&contents).unwrap_or_else(|_| default_settings_value())
-}
-
 fn settings_language(settings: &serde_json::Value) -> &str {
     match settings.get("language").and_then(serde_json::Value::as_str) {
         Some("en-US") => "en-US",
@@ -1418,45 +1508,86 @@ fn accessibility_prompt_requested(settings: &serde_json::Value) -> bool {
         .unwrap_or(false)
 }
 
-fn write_settings_value(
-    app: &tauri::AppHandle,
-    settings: &serde_json::Value,
-) -> Result<(), String> {
-    let Some(path) = settings_path(app) else {
-        return Err("Could not resolve settings path.".to_string());
-    };
-    if let Some(parent) = path.parent() {
-        std::fs::create_dir_all(parent).map_err(|e| e.to_string())?;
-    }
-    let contents = serde_json::to_string_pretty(settings).map_err(|e| e.to_string())?;
-    std::fs::write(path, contents).map_err(|e| e.to_string())
-}
-
-fn set_saved_floating_button_visible(app: &tauri::AppHandle, visible: bool) -> Result<(), String> {
-    let mut settings = read_settings_value(app);
-    if !settings.is_object() {
-        settings = default_settings_value();
-    }
-    if settings.get("floatingButton").is_none() || !settings["floatingButton"].is_object() {
-        settings["floatingButton"] = serde_json::json!({});
-    }
-    settings["floatingButton"]["visible"] = serde_json::Value::Bool(visible);
-    write_settings_value(app, &settings)
-}
-
 fn set_accessibility_prompt_requested(
-    app: &tauri::AppHandle,
+    settings_state: &SettingsFileState,
     requested: bool,
 ) -> Result<(), String> {
-    let mut settings = read_settings_value(app);
-    if !settings.is_object() {
-        settings = default_settings_value();
+    settings_state.patch_bool(&["permissions", "accessibilityPromptRequested"], requested)
+}
+
+#[tauri::command]
+fn read_settings_text(
+    settings_state: tauri::State<SettingsFileState>,
+) -> Result<Option<String>, String> {
+    settings_state.read_text()
+}
+
+#[tauri::command]
+fn write_settings_text(
+    value: String,
+    settings_state: tauri::State<SettingsFileState>,
+    visibility_state: tauri::State<PromptButtonVisibilityState>,
+) -> Result<(), String> {
+    settings_state.write_frontend_text(&value, visibility_state.inner())
+}
+
+#[derive(Clone, Debug, serde::Serialize)]
+#[serde(rename_all = "camelCase")]
+struct PromptButtonVisibilityOutcome {
+    visible: bool,
+    applied: bool,
+    persisted: bool,
+    error: Option<String>,
+}
+
+fn apply_prompt_button_visibility(
+    visible: bool,
+    app: &tauri::AppHandle,
+    settings_state: &SettingsFileState,
+    visibility_state: &PromptButtonVisibilityState,
+) -> PromptButtonVisibilityOutcome {
+    visibility_state.set(visible);
+
+    let runtime_result = if visible {
+        let position = prompt_button_position_cmd(app.clone()).ok().flatten();
+        let (x, y) = position
+            .map(|point| (point.x, point.y))
+            .unwrap_or_else(|| startup_prompt_button_position(settings_state));
+        show_prompt_button(x, y, app.clone())
+    } else {
+        hide_prompt_popover(app.clone()).and_then(|_| hide_prompt_button(app.clone()))
+    };
+    let persistence_result = settings_state.patch_bool(&["floatingButton", "visible"], visible);
+    let _ = app.emit("prompt-button-visibility-changed", visible);
+
+    let error = match (&runtime_result, &persistence_result) {
+        (Err(runtime), Err(persist)) => Some(format!("{runtime}; {persist}")),
+        (Err(runtime), Ok(())) => Some(runtime.clone()),
+        (Ok(()), Err(persist)) => Some(persist.clone()),
+        (Ok(()), Ok(())) => None,
+    };
+
+    PromptButtonVisibilityOutcome {
+        visible,
+        applied: runtime_result.is_ok(),
+        persisted: persistence_result.is_ok(),
+        error,
     }
-    if settings.get("permissions").is_none() || !settings["permissions"].is_object() {
-        settings["permissions"] = serde_json::json!({});
-    }
-    settings["permissions"]["accessibilityPromptRequested"] = serde_json::Value::Bool(requested);
-    write_settings_value(app, &settings)
+}
+
+#[tauri::command]
+fn set_prompt_button_visibility(
+    visible: bool,
+    app: tauri::AppHandle,
+    settings_state: tauri::State<SettingsFileState>,
+    visibility_state: tauri::State<PromptButtonVisibilityState>,
+) -> PromptButtonVisibilityOutcome {
+    apply_prompt_button_visibility(
+        visible,
+        &app,
+        settings_state.inner(),
+        visibility_state.inner(),
+    )
 }
 
 fn build_menu_bar_menu(
@@ -1523,23 +1654,17 @@ fn build_menu_bar_menu(
     .map_err(|e| e.to_string())
 }
 
-fn startup_prompt_button_position(app: &tauri::AppHandle) -> (f64, f64) {
+fn startup_prompt_button_position(settings_state: &SettingsFileState) -> (f64, f64) {
     let fallback = (960.0, 700.0);
-    let Ok(app_data_dir) = app.path().app_data_dir() else {
-        return fallback;
-    };
-    let settings_path = app_data_dir.join("settings.json");
-    let Ok(contents) = std::fs::read_to_string(settings_path) else {
+    let Ok(Some(contents)) = settings_state.read_text() else {
         return fallback;
     };
     parse_saved_button_position(&contents).unwrap_or(fallback)
 }
 
 fn setup_menu_bar_app(app_handle: &tauri::AppHandle) -> Result<(), String> {
-    let menu = build_menu_bar_menu(
-        app_handle,
-        settings_language(&read_settings_value(app_handle)),
-    )?;
+    let settings_state = app_handle.state::<SettingsFileState>();
+    let menu = build_menu_bar_menu(app_handle, settings_language(&settings_state.read_value()))?;
 
     let tray_builder = TrayIconBuilder::with_id(TRAY_ID)
         .menu(&menu)
@@ -1555,17 +1680,24 @@ fn setup_menu_bar_app(app_handle: &tauri::AppHandle) -> Result<(), String> {
                 let _ = open_settings_window(app.clone());
             }
             TrayMenuAction::ShowFloatingButton => {
-                let _ = set_saved_floating_button_visible(app, true);
-                let position = prompt_button_position_cmd(app.clone()).ok().flatten();
-                let (x, y) = position
-                    .map(|point| (point.x, point.y))
-                    .unwrap_or_else(|| startup_prompt_button_position(app));
-                let _ = show_prompt_button(x, y, app.clone());
+                let settings_state = app.state::<SettingsFileState>();
+                let visibility_state = app.state::<PromptButtonVisibilityState>();
+                let _ = apply_prompt_button_visibility(
+                    true,
+                    app,
+                    settings_state.inner(),
+                    visibility_state.inner(),
+                );
             }
             TrayMenuAction::HideFloatingButton => {
-                let _ = set_saved_floating_button_visible(app, false);
-                let _ = hide_prompt_popover(app.clone());
-                let _ = hide_prompt_button(app.clone());
+                let settings_state = app.state::<SettingsFileState>();
+                let visibility_state = app.state::<PromptButtonVisibilityState>();
+                let _ = apply_prompt_button_visibility(
+                    false,
+                    app,
+                    settings_state.inner(),
+                    visibility_state.inner(),
+                );
             }
             TrayMenuAction::OpenAccessibilitySettings => {
                 let _ = platform::macos::open_accessibility_settings();
@@ -1583,7 +1715,6 @@ pub fn run() {
     tauri::Builder::default()
         .manage(LastInputTargetState::default())
         .manage(PromptPickSessionState::default())
-        .manage(PromptButtonHealthState::default())
         .plugin(tauri_plugin_clipboard_manager::init())
         .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_fs::init())
@@ -1607,6 +1738,7 @@ pub fn run() {
             show_prompt_popover_from_button,
             toggle_prompt_popover_from_button,
             show_prompt_button_controls_from_button,
+            acknowledge_prompt_popover_mode,
             prompt_button_position_cmd,
             move_prompt_button_to,
             open_main_window,
@@ -1615,37 +1747,25 @@ pub fn run() {
             quit_prompt_picker,
             read_prompt_library_file,
             write_prompt_library_file,
-            prompt_library_file_metadata
+            prompt_library_file_metadata,
+            read_settings_text,
+            write_settings_text,
+            set_prompt_button_visibility
         ])
         .setup(|app| {
             #[cfg(target_os = "macos")]
             app.set_activation_policy(tauri::ActivationPolicy::Accessory);
 
-            setup_menu_bar_app(app.handle())?;
+            let path = settings_path(app.handle())
+                .ok_or_else(|| "Could not resolve settings path.".to_string())?;
+            let settings_state = SettingsFileState::new(path);
+            let initial_settings = settings_state.read_value();
+            let visibility_state = PromptButtonVisibilityState::from_settings(&initial_settings);
+            app.manage(settings_state);
+            app.manage(visibility_state);
+            app.manage(crate::windows::PopoverModeRequestState::default());
 
-            let health_state = app.state::<PromptButtonHealthState>().inner().clone();
-            app.handle().listen("prompt-button-health", move |event| {
-                let Ok(payload) =
-                    serde_json::from_str::<PromptButtonHealthPayload>(event.payload())
-                else {
-                    return;
-                };
-                let _ = (
-                    payload.started_at,
-                    payload.updated_at,
-                    payload.motion_state.as_deref(),
-                );
-                let now = std::time::Instant::now();
-                let mut snapshot = health_state
-                    .snapshot
-                    .lock()
-                    .expect("prompt button health lock poisoned");
-                if snapshot.first_seen.is_none() {
-                    snapshot.first_seen = Some(now);
-                }
-                snapshot.last_seen = Some(now);
-                snapshot.safe_to_rebuild = payload.safe_to_rebuild.unwrap_or(false);
-            });
+            setup_menu_bar_app(app.handle())?;
 
             let window = app.get_webview_window("main").unwrap();
             window.set_title("Prompt Picker").unwrap();
@@ -1656,50 +1776,43 @@ pub fn run() {
                     let _ = main_window.hide();
                 }
             });
-            let (x, y) = startup_prompt_button_position(app.handle());
-            let _ = show_prompt_button(x, y, app.handle().clone());
-            let watchdog_app = app.handle().clone();
-            let watchdog_health = app.state::<PromptButtonHealthState>().inner().clone();
+            let visibility_state = app.state::<PromptButtonVisibilityState>();
+            if visibility_state.desired_visible() {
+                let settings_state = app.state::<SettingsFileState>();
+                let (x, y) = startup_prompt_button_position(settings_state.inner());
+                let _ = show_prompt_button(x, y, app.handle().clone());
+            }
+
+            let monitor_app = app.handle().clone();
             std::thread::spawn(move || loop {
                 std::thread::sleep(std::time::Duration::from_secs(15));
 
-                let Some(button) =
-                    watchdog_app.get_webview_window(crate::windows::BUTTON_WINDOW_LABEL)
-                else {
-                    continue;
-                };
-                if !button.is_visible().unwrap_or(false) {
+                let visibility = monitor_app.state::<PromptButtonVisibilityState>();
+                let expected_visible = visibility.desired_visible();
+                let requested_generation = visibility.generation();
+                let button = monitor_app.get_webview_window(crate::windows::BUTTON_WINDOW_LABEL);
+                let action = prompt_button_ensure_action(
+                    expected_visible,
+                    button.is_some(),
+                    button
+                        .as_ref()
+                        .and_then(|window| window.is_visible().ok())
+                        .unwrap_or(false),
+                );
+                if action == PromptButtonEnsureAction::None {
                     continue;
                 }
-                let popover_visible = watchdog_app
-                    .get_webview_window(crate::windows::POPOVER_WINDOW_LABEL)
-                    .and_then(|window| window.is_visible().ok())
-                    .unwrap_or(false);
 
-                let snapshot = *watchdog_health
-                    .snapshot
-                    .lock()
-                    .expect("prompt button health lock poisoned");
-
-                if should_rebuild_prompt_button(
-                    std::time::Instant::now(),
-                    snapshot.last_seen,
-                    snapshot.first_seen,
-                    snapshot.safe_to_rebuild,
-                    popover_visible,
-                ) {
-                    let rebuild_app = watchdog_app.clone();
-                    let rebuild_health = watchdog_health.clone();
-                    let _ = watchdog_app.run_on_main_thread(move || {
-                        if crate::windows::rebuild_prompt_button_window(&rebuild_app).is_ok() {
-                            *rebuild_health
-                                .snapshot
-                                .lock()
-                                .expect("prompt button health lock poisoned") =
-                                PromptButtonHealthSnapshot::default();
-                        }
-                    });
-                }
+                let ensure_app = monitor_app.clone();
+                let _ = monitor_app.run_on_main_thread(move || {
+                    let visibility = ensure_app.state::<PromptButtonVisibilityState>();
+                    if !visibility.may_show(requested_generation) {
+                        return;
+                    }
+                    let settings_state = ensure_app.state::<SettingsFileState>();
+                    let (x, y) = startup_prompt_button_position(settings_state.inner());
+                    let _ = show_prompt_button(x, y, ensure_app.clone());
+                });
             });
             Ok(())
         })
@@ -3570,50 +3683,139 @@ mod menu_bar_app_tests {
     }
 
     #[test]
-    fn prompt_button_watchdog_rebuilds_when_heartbeat_is_stale() {
-        let now = std::time::Instant::now();
-
-        assert!(should_rebuild_prompt_button(
-            now,
-            Some(now - std::time::Duration::from_secs(60)),
-            Some(now - std::time::Duration::from_secs(60)),
-            false,
-            false
-        ));
+    fn prompt_button_monitor_builds_when_enabled_button_is_missing() {
+        assert_eq!(
+            prompt_button_ensure_action(true, false, false),
+            PromptButtonEnsureAction::BuildMissing
+        );
     }
 
     #[test]
-    fn prompt_button_watchdog_does_not_rebuild_while_popover_is_visible() {
-        let now = std::time::Instant::now();
-
-        assert!(!should_rebuild_prompt_button(
-            now,
-            Some(now - std::time::Duration::from_secs(60)),
-            Some(now - std::time::Duration::from_secs(60)),
-            true,
-            true
-        ));
+    fn prompt_button_monitor_shows_enabled_hidden_button() {
+        assert_eq!(
+            prompt_button_ensure_action(true, true, false),
+            PromptButtonEnsureAction::ShowExisting
+        );
     }
 
     #[test]
-    fn prompt_button_watchdog_does_not_rebuild_only_because_overlay_is_safe() {
-        let now = std::time::Instant::now();
-
-        assert!(!should_rebuild_prompt_button(
-            now,
-            Some(now - std::time::Duration::from_secs(10)),
-            Some(now - std::time::Duration::from_secs(10)),
-            true,
-            false
-        ));
+    fn prompt_button_monitor_leaves_enabled_visible_button_alone() {
+        assert_eq!(
+            prompt_button_ensure_action(true, true, true),
+            PromptButtonEnsureAction::None
+        );
     }
 
     #[test]
-    fn prompt_button_watchdog_rebuilds_on_main_thread() {
-        let source = include_str!("lib.rs");
+    fn prompt_button_monitor_never_revives_user_disabled_button() {
+        assert_eq!(
+            prompt_button_ensure_action(false, false, false),
+            PromptButtonEnsureAction::None
+        );
+        assert_eq!(
+            prompt_button_ensure_action(false, true, false),
+            PromptButtonEnsureAction::None
+        );
+    }
 
-        assert!(source.contains("run_on_main_thread"));
-        assert!(source.contains("rebuild_prompt_button_window"));
-        assert!(source.contains("PromptButtonHealthSnapshot::default()"));
+    #[test]
+    fn disabled_visibility_wins_over_an_in_flight_show() {
+        let state = PromptButtonVisibilityState::new(true);
+        let show_generation = state.generation();
+        state.set(false);
+
+        assert!(!state.may_show(show_generation));
+    }
+
+    #[test]
+    fn saved_visibility_initializes_state_once() {
+        let settings = serde_json::json!({ "floatingButton": { "visible": false } });
+        let state = PromptButtonVisibilityState::from_settings(&settings);
+
+        assert!(!state.desired_visible());
+    }
+
+    fn temporary_settings_path(name: &str) -> std::path::PathBuf {
+        let nonce = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .expect("system clock should be after epoch")
+            .as_nanos();
+        std::env::temp_dir()
+            .join(format!("prompt-picker-{name}-{nonce}"))
+            .join("settings.json")
+    }
+
+    #[test]
+    fn malformed_frontend_settings_leave_existing_file_intact() {
+        let path = temporary_settings_path("malformed");
+        let state = SettingsFileState::new(path.clone());
+        let visibility = PromptButtonVisibilityState::new(true);
+        state
+            .write_value_unlocked(&serde_json::json!({ "preserved": true }))
+            .unwrap();
+
+        assert!(state.write_frontend_text("{", &visibility).is_err());
+        assert_eq!(state.read_value()["preserved"], true);
+        let _ = std::fs::remove_dir_all(path.parent().unwrap());
+    }
+
+    #[test]
+    fn frontend_settings_write_preserves_unknown_fields_and_native_visibility() {
+        let path = temporary_settings_path("unknown-fields");
+        let state = SettingsFileState::new(path.clone());
+        let visibility = PromptButtonVisibilityState::new(false);
+
+        state
+            .write_frontend_text(
+                r#"{"version":1,"future":{"enabled":true},"floatingButton":{"visible":true}}"#,
+                &visibility,
+            )
+            .unwrap();
+
+        let saved = state.read_value();
+        assert_eq!(
+            saved.pointer("/future/enabled"),
+            Some(&serde_json::json!(true))
+        );
+        assert_eq!(
+            saved.pointer("/floatingButton/visible"),
+            Some(&serde_json::json!(false))
+        );
+        let _ = std::fs::remove_dir_all(path.parent().unwrap());
+    }
+
+    #[test]
+    fn accessibility_patch_does_not_overwrite_visibility() {
+        let path = temporary_settings_path("permission-patch");
+        let state = SettingsFileState::new(path.clone());
+        state
+            .patch_bool(&["floatingButton", "visible"], false)
+            .unwrap();
+
+        set_accessibility_prompt_requested(&state, true).unwrap();
+
+        let saved = state.read_value();
+        assert_eq!(
+            saved.pointer("/floatingButton/visible"),
+            Some(&serde_json::json!(false))
+        );
+        assert_eq!(
+            saved.pointer("/permissions/accessibilityPromptRequested"),
+            Some(&serde_json::json!(true))
+        );
+        let _ = std::fs::remove_dir_all(path.parent().unwrap());
+    }
+
+    #[test]
+    fn settings_write_creates_missing_app_data_directory() {
+        let path = temporary_settings_path("missing-directory");
+        let state = SettingsFileState::new(path.clone());
+
+        state
+            .patch_bool(&["floatingButton", "visible"], true)
+            .unwrap();
+
+        assert!(path.is_file());
+        let _ = std::fs::remove_dir_all(path.parent().unwrap());
     }
 }

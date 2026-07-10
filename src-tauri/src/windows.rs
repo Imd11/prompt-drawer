@@ -33,6 +33,117 @@ static OUTSIDE_CLICK_MONITOR_ACTIVE: AtomicBool = AtomicBool::new(false);
 #[cfg(target_os = "macos")]
 static OUTSIDE_CLICK_MONITOR_INSTALLED: AtomicBool = AtomicBool::new(false);
 
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+enum PopoverWindowAction {
+    ReuseExisting,
+    BuildMissing,
+}
+
+fn popover_window_action(
+    existing_mode: Option<&str>,
+    _requested_mode: &str,
+) -> PopoverWindowAction {
+    if existing_mode.is_some() {
+        PopoverWindowAction::ReuseExisting
+    } else {
+        PopoverWindowAction::BuildMissing
+    }
+}
+
+struct PendingPopoverModeRequest {
+    id: u64,
+    mode: String,
+    sender: Option<tokio::sync::oneshot::Sender<()>>,
+}
+
+#[derive(Default)]
+struct PopoverModeRequestInner {
+    next_id: u64,
+    pending: Option<PendingPopoverModeRequest>,
+}
+
+#[derive(Default)]
+pub(crate) struct PopoverModeRequestState {
+    inner: std::sync::Mutex<PopoverModeRequestInner>,
+}
+
+impl PopoverModeRequestState {
+    fn begin(&self, mode: &str) -> (u64, tokio::sync::oneshot::Receiver<()>) {
+        let (sender, receiver) = tokio::sync::oneshot::channel();
+        let mut inner = self.inner.lock().expect("popover request lock poisoned");
+        inner.next_id = inner.next_id.wrapping_add(1);
+        let id = inner.next_id;
+        inner.pending = Some(PendingPopoverModeRequest {
+            id,
+            mode: mode.to_string(),
+            sender: Some(sender),
+        });
+        (id, receiver)
+    }
+
+    fn acknowledge(&self, id: u64, mode: &str) -> bool {
+        let sender = {
+            let mut inner = self.inner.lock().expect("popover request lock poisoned");
+            let Some(pending) = inner.pending.as_mut() else {
+                return false;
+            };
+            if pending.id != id || pending.mode != mode {
+                return false;
+            }
+            pending.sender.take()
+        };
+        sender.is_some_and(|sender| sender.send(()).is_ok())
+    }
+
+    fn complete_if_current(&self, id: u64, mode: &str) -> bool {
+        let mut inner = self.inner.lock().expect("popover request lock poisoned");
+        let is_current = inner
+            .pending
+            .as_ref()
+            .is_some_and(|pending| pending.id == id && pending.mode == mode);
+        if is_current {
+            inner.pending = None;
+        }
+        is_current
+    }
+
+    fn cancel_if_current(&self, id: u64) -> bool {
+        let mut inner = self.inner.lock().expect("popover request lock poisoned");
+        if inner
+            .pending
+            .as_ref()
+            .is_some_and(|pending| pending.id == id)
+        {
+            inner.next_id = inner.next_id.wrapping_add(1);
+            inner.pending = None;
+            return true;
+        }
+        false
+    }
+
+    fn cancel(&self) -> bool {
+        let mut inner = self.inner.lock().expect("popover request lock poisoned");
+        inner.next_id = inner.next_id.wrapping_add(1);
+        inner.pending.take().is_some()
+    }
+
+    fn is_pending_mode(&self, mode: &str) -> bool {
+        self.inner
+            .lock()
+            .expect("popover request lock poisoned")
+            .pending
+            .as_ref()
+            .is_some_and(|pending| pending.mode == mode)
+    }
+}
+
+#[derive(Clone, serde::Serialize)]
+#[serde(rename_all = "camelCase")]
+struct PopoverModeRequestPayload {
+    request_id: u64,
+    mode: String,
+}
+
 #[derive(Clone, Copy)]
 struct MonitorBounds {
     x: f64,
@@ -157,6 +268,10 @@ fn set_popover_mode(mode: Option<&str>) {
 
 fn set_outside_click_monitor_active(active: bool) {
     OUTSIDE_CLICK_MONITOR_ACTIVE.store(active, Ordering::SeqCst);
+}
+
+fn cancel_pending_popover_request(app: &tauri::AppHandle) -> bool {
+    app.state::<PopoverModeRequestState>().cancel()
 }
 
 fn should_reuse_popover(existing_mode: Option<&str>, requested_mode: &str) -> bool {
@@ -392,11 +507,20 @@ pub fn move_prompt_button_to(x: f64, y: f64, app: tauri::AppHandle) -> Result<()
     Ok(())
 }
 
-fn show_popover_mode(x: f64, y: f64, mode: &str, app: &tauri::AppHandle) -> Result<(), String> {
+async fn show_popover_mode(
+    x: f64,
+    y: f64,
+    mode: &str,
+    app: &tauri::AppHandle,
+) -> Result<(), String> {
     let popover_size = popover_window_size_for_mode(mode);
     let (window_x, window_y) = popover_window_position_from_visual_position(x, y, mode);
     if let Some(window) = app.get_webview_window(POPOVER_WINDOW_LABEL) {
         let existing_mode = current_popover_mode();
+        debug_assert_eq!(
+            popover_window_action(Some(existing_mode.as_deref().unwrap_or("")), mode),
+            PopoverWindowAction::ReuseExisting
+        );
         if should_reuse_popover(existing_mode.as_deref(), mode) {
             window
                 .set_position(logical_position(window_x, window_y))
@@ -417,8 +541,54 @@ fn show_popover_mode(x: f64, y: f64, mode: &str, app: &tauri::AppHandle) -> Resu
             emit_popover_opened(app, mode);
             return Ok(());
         }
-        window.close().map_err(|e| e.to_string())?;
-        set_popover_mode(None);
+
+        window.hide().map_err(|e| e.to_string())?;
+        set_outside_click_monitor_active(false);
+        set_popover_mode(Some(mode));
+        window
+            .set_position(logical_position(window_x, window_y))
+            .map_err(|e| e.to_string())?;
+        window
+            .set_size(tauri::Size::Logical(tauri::LogicalSize {
+                width: popover_size.width,
+                height: popover_size.height,
+            }))
+            .map_err(|e| e.to_string())?;
+
+        let request_state = app.state::<PopoverModeRequestState>();
+        let (request_id, receiver) = request_state.begin(mode);
+        let payload = PopoverModeRequestPayload {
+            request_id,
+            mode: mode.to_string(),
+        };
+        if let Err(error) = app.emit_to(
+            POPOVER_WINDOW_LABEL,
+            "prompt-popover-mode-requested",
+            payload,
+        ) {
+            request_state.cancel_if_current(request_id);
+            return Err(error.to_string());
+        }
+
+        match tokio::time::timeout(std::time::Duration::from_secs(1), receiver).await {
+            Ok(Ok(())) if request_state.complete_if_current(request_id, mode) => {}
+            Ok(Ok(())) => return Err("Prompt popover mode request was superseded.".to_string()),
+            Ok(Err(_)) => return Err("Prompt popover mode request was superseded.".to_string()),
+            Err(_) => {
+                if request_state.cancel_if_current(request_id) {
+                    set_outside_click_monitor_active(false);
+                }
+                return Err("Prompt popover mode request timed out.".to_string());
+            }
+        }
+
+        if should_use_transparent_popover_window(Some(mode)) {
+            crate::macos_panels::configure_transparent_webview_window(&window)?;
+            enable_prompt_popover_outside_click_monitor(app);
+        }
+        show_non_activating_overlay_window(&window)?;
+        emit_popover_opened(app, mode);
+        return Ok(());
     }
 
     let url = format!("index.html?mode={}", mode);
@@ -499,6 +669,12 @@ fn build_prompt_button_window(
 
 #[tauri::command]
 pub fn show_prompt_button(x: f64, y: f64, app: tauri::AppHandle) -> Result<(), String> {
+    if app
+        .try_state::<crate::PromptButtonVisibilityState>()
+        .is_some_and(|state| !state.desired_visible())
+    {
+        return Ok(());
+    }
     if let Some(window) = app.get_webview_window(BUTTON_WINDOW_LABEL) {
         let monitor = window
             .current_monitor()
@@ -525,6 +701,12 @@ pub fn show_prompt_button(x: f64, y: f64, app: tauri::AppHandle) -> Result<(), S
                 .map_err(|e| e.to_string())?;
         }
         if !visible {
+            if app
+                .try_state::<crate::PromptButtonVisibilityState>()
+                .is_some_and(|state| !state.desired_visible())
+            {
+                return Ok(());
+            }
             if BUTTON_WINDOW_TRANSPARENT {
                 crate::macos_panels::configure_transparent_webview_window(&window)?;
             }
@@ -532,22 +714,15 @@ pub fn show_prompt_button(x: f64, y: f64, app: tauri::AppHandle) -> Result<(), S
         }
         Ok(())
     } else {
+        if app
+            .try_state::<crate::PromptButtonVisibilityState>()
+            .is_some_and(|state| !state.desired_visible())
+        {
+            return Ok(());
+        }
         build_prompt_button_window(&app, x, y)?;
         Ok(())
     }
-}
-
-pub fn rebuild_prompt_button_window(app: &tauri::AppHandle) -> Result<(), String> {
-    let position = prompt_button_position_cmd(app.clone())?
-        .map(|point| (point.x, point.y))
-        .unwrap_or((960.0, 700.0));
-
-    if let Some(window) = app.get_webview_window(BUTTON_WINDOW_LABEL) {
-        let _ = window.close();
-    }
-
-    build_prompt_button_window(app, position.0, position.1)?;
-    Ok(())
 }
 
 #[tauri::command]
@@ -559,12 +734,13 @@ pub fn hide_prompt_button(app: tauri::AppHandle) -> Result<(), String> {
 }
 
 #[tauri::command]
-pub fn show_prompt_popover(x: f64, y: f64, app: tauri::AppHandle) -> Result<(), String> {
-    show_popover_mode(x, y, "popover", &app)
+pub async fn show_prompt_popover(x: f64, y: f64, app: tauri::AppHandle) -> Result<(), String> {
+    show_popover_mode(x, y, "popover", &app).await
 }
 
 #[tauri::command]
 pub fn hide_prompt_popover(app: tauri::AppHandle) -> Result<(), String> {
+    cancel_pending_popover_request(&app);
     if let Some(window) = app.get_webview_window(POPOVER_WINDOW_LABEL) {
         let was_visible = window.is_visible().unwrap_or(false);
         window.hide().map_err(|e| e.to_string())?;
@@ -577,9 +753,9 @@ pub fn hide_prompt_popover(app: tauri::AppHandle) -> Result<(), String> {
 }
 
 #[tauri::command]
-pub fn show_prompt_popover_from_button(
+pub async fn show_prompt_popover_from_button(
     session_id: u64,
-    session_state: tauri::State<crate::PromptPickSessionState>,
+    session_state: tauri::State<'_, crate::PromptPickSessionState>,
     app: tauri::AppHandle,
 ) -> Result<(), String> {
     session_state.begin_if_new(session_id);
@@ -589,15 +765,25 @@ pub fn show_prompt_popover_from_button(
         BUTTON_VISUAL_HEIGHT,
         "popover",
     );
-    show_popover_mode(position.0, position.1, "popover", &app)
+    show_popover_mode(position.0, position.1, "popover", &app).await
 }
 
 #[tauri::command]
-pub fn toggle_prompt_popover_from_button(
+pub async fn toggle_prompt_popover_from_button(
     session_id: u64,
-    session_state: tauri::State<crate::PromptPickSessionState>,
+    session_state: tauri::State<'_, crate::PromptPickSessionState>,
     app: tauri::AppHandle,
 ) -> Result<PromptPopoverToggleOutcome, String> {
+    let request_state = app.state::<PopoverModeRequestState>();
+    if request_state.is_pending_mode("popover") {
+        request_state.cancel();
+        if let Some(window) = app.get_webview_window(POPOVER_WINDOW_LABEL) {
+            window.hide().map_err(|e| e.to_string())?;
+        }
+        set_outside_click_monitor_active(false);
+        emit_popover_dismissed(&app);
+        return Ok(PromptPopoverToggleOutcome { opened: false });
+    }
     if let Some(window) = app.get_webview_window(POPOVER_WINDOW_LABEL) {
         let visible = window.is_visible().unwrap_or(false);
         if should_close_prompt_popover_on_toggle(current_popover_mode().as_deref(), visible) {
@@ -616,19 +802,35 @@ pub fn toggle_prompt_popover_from_button(
         BUTTON_VISUAL_HEIGHT,
         "popover",
     );
-    show_popover_mode(position.0, position.1, "popover", &app)?;
+    show_popover_mode(position.0, position.1, "popover", &app).await?;
     Ok(PromptPopoverToggleOutcome { opened: true })
 }
 
 #[tauri::command]
-pub fn show_prompt_button_controls_from_button(app: tauri::AppHandle) -> Result<(), String> {
+pub async fn show_prompt_button_controls_from_button(app: tauri::AppHandle) -> Result<(), String> {
     let position = button_relative_popover_position(
         &app,
         BUTTON_VISUAL_WIDTH,
         BUTTON_VISUAL_HEIGHT,
         "button-controls",
     );
-    show_popover_mode(position.0, position.1, "button-controls", &app)
+    show_popover_mode(position.0, position.1, "button-controls", &app).await
+}
+
+#[tauri::command]
+pub fn acknowledge_prompt_popover_mode(
+    request_id: u64,
+    mode: String,
+    app: tauri::AppHandle,
+) -> Result<(), String> {
+    if app
+        .state::<PopoverModeRequestState>()
+        .acknowledge(request_id, &mode)
+    {
+        Ok(())
+    } else {
+        Err("Prompt popover mode request is no longer current.".to_string())
+    }
 }
 
 fn button_relative_popover_position(
@@ -1197,10 +1399,10 @@ mod tests {
     fn prompt_popover_toggle_invalidates_session_and_emits_dismissal_when_closing() {
         let source = include_str!("windows.rs");
         let start = source
-            .find("pub fn toggle_prompt_popover_from_button")
+            .find("pub async fn toggle_prompt_popover_from_button")
             .expect("toggle command should exist");
         let end = source[start..]
-            .find("pub fn show_prompt_button_controls_from_button")
+            .find("pub async fn show_prompt_button_controls_from_button")
             .expect("button controls command should follow toggle command");
         let command_source = &source[start..start + end];
 
@@ -1216,10 +1418,10 @@ mod tests {
     fn prompt_popover_open_preserves_existing_session_capture() {
         let source = include_str!("windows.rs");
         let start = source
-            .find("pub fn toggle_prompt_popover_from_button")
+            .find("pub async fn toggle_prompt_popover_from_button")
             .expect("toggle command should exist");
         let end = source[start..]
-            .find("pub fn show_prompt_button_controls_from_button")
+            .find("pub async fn show_prompt_button_controls_from_button")
             .expect("next command should follow toggle");
         let command_source = &source[start..start + end];
 
@@ -1234,7 +1436,7 @@ mod tests {
             .find("pub fn hide_prompt_popover")
             .expect("hide_prompt_popover command should exist");
         let end = source[start..]
-            .find("#[tauri::command]\npub fn show_prompt_popover_from_button")
+            .find("#[tauri::command]\npub async fn show_prompt_popover_from_button")
             .expect("show_prompt_popover_from_button should follow hide_prompt_popover");
         let command_source = &source[start..start + end];
 
@@ -1330,10 +1532,10 @@ mod tests {
     fn popover_toggle_still_uses_visible_state_to_close_open_prompt_list() {
         let source = include_str!("windows.rs");
         let start = source
-            .find("pub fn toggle_prompt_popover_from_button")
+            .find("pub async fn toggle_prompt_popover_from_button")
             .expect("toggle command should exist");
         let end = source[start..]
-            .find("pub fn show_prompt_button_controls_from_button")
+            .find("pub async fn show_prompt_button_controls_from_button")
             .expect("button controls command should follow toggle command");
         let block = &source[start..start + end];
 
@@ -1368,12 +1570,47 @@ mod tests {
     }
 
     #[test]
-    fn prompt_button_rebuild_closes_existing_window_and_rebuilds_at_same_position() {
-        let source = include_str!("windows.rs");
+    fn popover_mode_switch_reuses_the_existing_window() {
+        assert_eq!(
+            popover_window_action(Some("popover"), "button-controls"),
+            PopoverWindowAction::ReuseExisting
+        );
+    }
 
-        assert!(source.contains("pub fn rebuild_prompt_button_window"));
-        assert!(source.contains("prompt_button_position_cmd(app.clone())"));
-        assert!(source.contains("window.close()"));
-        assert!(source.contains("build_prompt_button_window(app"));
+    #[test]
+    fn overlay_runtime_has_no_prompt_button_rebuild_helper() {
+        let source = include_str!("windows.rs");
+        let rebuild_helper = ["rebuild_prompt", "_button_window"].concat();
+        let close_call = ["window", ".close()"].concat();
+
+        assert!(!source.contains(&rebuild_helper));
+        assert!(!source.contains(&close_call));
+    }
+
+    #[test]
+    fn newer_popover_request_supersedes_the_previous_waiter() {
+        let state = PopoverModeRequestState::default();
+        let (_, mut first_receiver) = state.begin("popover");
+        let (second_id, _second_receiver) = state.begin("button-controls");
+
+        assert_eq!(
+            first_receiver.try_recv(),
+            Err(tokio::sync::oneshot::error::TryRecvError::Closed)
+        );
+        assert!(!state.acknowledge(second_id - 1, "popover"));
+        assert!(state.acknowledge(second_id, "button-controls"));
+    }
+
+    #[test]
+    fn hiding_popover_cancels_pending_mode_acknowledgement() {
+        let state = PopoverModeRequestState::default();
+        let (request_id, mut receiver) = state.begin("popover");
+
+        assert!(state.cancel());
+        assert_eq!(
+            receiver.try_recv(),
+            Err(tokio::sync::oneshot::error::TryRecvError::Closed)
+        );
+        assert!(!state.acknowledge(request_id, "popover"));
     }
 }

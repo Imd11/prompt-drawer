@@ -123,7 +123,7 @@ Expected: the new worktree is clean after the plan commit, its parent is the pin
 
 All final scope comparisons use `calico-single-window-base-20260710`, not the moving `origin/main` reference.
 
-`dist/` is ignored today but still contains legacy tracked files. In the dedicated worktree, assert those tracked files are clean before every build/probe. Builds may modify them for verification, but this task does not update or delete legacy tracked `dist` files. After consuming the built output, run `git restore --worktree -- dist` only in this clean dedicated worktree and verify `git diff --quiet -- dist`; never run that cleanup in the user's dirty primary worktree.
+`dist/` and `node_modules/` are ignored today but still contain legacy tracked files. In the dedicated worktree, assert those tracked files are clean before every build/install/probe. Builds and `npm ci` may modify them for verification, but this task does not update or delete those legacy tracked generated files. After consuming the output, run `git restore --worktree -- dist node_modules/.package-lock.json` only in this clean dedicated worktree and verify both paths are clean; never run that cleanup in the user's dirty primary worktree.
 
 ---
 
@@ -154,6 +154,7 @@ Run:
 
 ```bash
 npm ci
+git restore --worktree -- node_modules/.package-lock.json
 npm test -- \
   src/overlay/calicoMotionRuntime.test.ts \
   src/overlay/calicoIdleDirector.test.ts \

@@ -13,13 +13,14 @@ import { createPromptLibrarySyncStorage } from "./storage/promptLibrarySyncStora
 import { createTauriPromptStorage } from "./storage/tauriPromptStorage";
 import { createTauriSettingsStorage } from "./storage/tauriSettingsStorage";
 import {
+  acknowledgePromptPopoverMode,
   getPromptLibraryFileMetadata,
-  hidePromptButton,
   hidePromptPopover,
   pastePromptAndSubmitToLastTarget,
   pastePromptSequenceAndSubmitToLastTarget,
   readPromptLibraryFile,
   setMenuLanguage,
+  setPromptButtonVisibility,
   writePromptLibraryFile,
 } from "./platform/platformApi";
 import type { AutosendOutcome, AutosendSequenceOutcome, NativeSubmitKey } from "./platform/platformApi";
@@ -96,6 +97,11 @@ type PendingPromptImport = {
   path: string;
   content: string;
   linkAndSync: boolean;
+};
+
+type PendingPopoverModeRequest = {
+  requestId: number;
+  mode: "popover" | "button-controls";
 };
 
 function emitCalicoMotion(state: CalicoMotionState, reason: string, durationMs?: number) {
@@ -256,6 +262,8 @@ export function App({
   const [settingsReturnTarget, setSettingsReturnTarget] = useState<"manager" | null>(null);
   const [promptLibraryDraftActive, setPromptLibraryDraftActive] = useState(false);
   const [pendingPromptImport, setPendingPromptImport] = useState<PendingPromptImport | null>(null);
+  const [pendingPopoverModeRequest, setPendingPopoverModeRequest] =
+    useState<PendingPopoverModeRequest | null>(null);
   const activeSettingsRef = useRef<Settings>(settings);
   const appDataStorageRef = useRef(createTauriPromptStorage());
   const settingsStoreRef = useRef(createSettingsStore(createTauriSettingsStorage()));
@@ -328,6 +336,19 @@ export function App({
       document.body.classList.remove(className);
     };
   }, [mode, windowLabel]);
+
+  useLayoutEffect(() => {
+    if (!pendingPopoverModeRequest || mode !== pendingPopoverModeRequest.mode) return;
+    const frame = window.requestAnimationFrame(() => {
+      acknowledgePromptPopoverMode(
+        pendingPopoverModeRequest.requestId,
+        pendingPopoverModeRequest.mode
+      ).catch((error) => {
+        console.warn("Failed to acknowledge prompt popover mode:", error);
+      });
+    });
+    return () => window.cancelAnimationFrame(frame);
+  }, [mode, pendingPopoverModeRequest]);
 
   useEffect(() => {
     let active = true;
@@ -422,17 +443,57 @@ export function App({
         console.warn("Failed to listen for settings window requests:", error);
       });
 
+    listen<boolean>("prompt-button-visibility-changed", (event) => {
+      if (!active) return;
+      const nextSettings = {
+        ...activeSettingsRef.current,
+        floatingButton: {
+          ...activeSettingsRef.current.floatingButton,
+          visible: event.payload,
+        },
+      };
+      applyActiveSettings(nextSettings);
+    })
+      .then((unlisten) => {
+        if (active) {
+          disposers.push(unlisten);
+          return;
+        }
+        unlisten();
+      })
+      .catch((error) => {
+        console.warn("Failed to listen for prompt button visibility:", error);
+      });
+
     return () => {
       active = false;
       disposers.forEach((dispose) => dispose());
     };
-  }, []);
+  }, [applyActiveSettings]);
 
   useEffect(() => {
     if (windowLabel !== "prompt-popover") return;
 
     let active = true;
     const disposers: Array<() => void> = [];
+
+    listen<PendingPopoverModeRequest>("prompt-popover-mode-requested", (event) => {
+      if (!active) return;
+      const requestedMode = event.payload.mode;
+      if (requestedMode !== "popover" && requestedMode !== "button-controls") return;
+      setPendingPopoverModeRequest(event.payload);
+      setMode(requestedMode);
+    })
+      .then((unlisten) => {
+        if (active) {
+          disposers.push(unlisten);
+          return;
+        }
+        unlisten();
+      })
+      .catch((error) => {
+        console.warn("Failed to listen for prompt popover mode requests:", error);
+      });
 
     listen<string>("prompt-popover-opened", async (event) => {
       if (!active || event.payload !== "popover") return;
@@ -794,10 +855,17 @@ export function App({
           <button
             className="button-controls-close"
             onClick={async () => {
-              await settingsStoreRef.current.setFloatingButtonVisible(false);
-              applyActiveSettings(await settingsStoreRef.current.get());
-              await hidePromptButton();
-              await hidePromptPopover();
+              const outcome = await setPromptButtonVisibility(false);
+              applyActiveSettings({
+                ...activeSettingsRef.current,
+                floatingButton: {
+                  ...activeSettingsRef.current.floatingButton,
+                  visible: outcome.visible,
+                },
+              });
+              if (!outcome.persisted) {
+                console.warn("Failed to persist prompt button visibility:", outcome.error);
+              }
             }}
           >
             {t.buttonControls.closePet}

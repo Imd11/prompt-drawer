@@ -37,6 +37,23 @@ vi.mock("@tauri-apps/plugin-fs", () => ({
   BaseDirectory: { AppData: "AppData" },
 }));
 
+vi.mock("../storage/tauriSettingsStorage", () => ({
+  createTauriSettingsStorage: () => ({
+    read: async () => {
+      const { readTextFile, BaseDirectory } = await import("@tauri-apps/plugin-fs");
+      try {
+        return await readTextFile("settings.json", { baseDir: BaseDirectory.AppData });
+      } catch {
+        return null;
+      }
+    },
+    write: async (value: string) => {
+      const { writeTextFile, BaseDirectory } = await import("@tauri-apps/plugin-fs");
+      await writeTextFile("settings.json", value, { baseDir: BaseDirectory.AppData });
+    },
+  }),
+}));
+
 // Mock dialog plugin
 vi.mock("@tauri-apps/plugin-dialog", () => ({
   save: vi.fn(),
@@ -2204,7 +2221,13 @@ describe("app", () => {
 
   it("button controls hide persists state and hides the floating button", async () => {
     const { invoke } = await import("@tauri-apps/api/core");
-    vi.mocked(invoke).mockResolvedValue(undefined);
+    vi.mocked(invoke).mockImplementation(async (command: string) => {
+      if (command === "set_prompt_button_visibility") {
+        return { visible: false, applied: true, persisted: true, error: null };
+      }
+      return undefined;
+    });
+    vi.mocked(invoke).mockClear();
     currentWindowLabel = "prompt-popover";
     window.history.pushState({}, "", "/?mode=button-controls");
     const files = new Map<string, string>();
@@ -2226,12 +2249,13 @@ describe("app", () => {
     fireEvent.click(screen.getByRole("button", { name: "关闭小猫" }));
 
     await waitFor(() => {
-      expect(vi.mocked(invoke)).toHaveBeenCalledWith("hide_prompt_button");
+      expect(vi.mocked(invoke)).toHaveBeenCalledWith("set_prompt_button_visibility", {
+        visible: false,
+      });
     });
-    expect(vi.mocked(invoke)).toHaveBeenCalledWith("hide_prompt_popover");
     const allCalls = (vi.mocked(invoke) as ReturnType<typeof vi.fn>).mock.calls.map((c) => c[0]);
-    expect(allCalls).toContain("hide_prompt_button");
-    expect(allCalls).toContain("hide_prompt_popover");
+    expect(allCalls).not.toContain("hide_prompt_button");
+    expect(allCalls).not.toContain("hide_prompt_popover");
     expect(allCalls).not.toContain("open_main_window");
     expect(allCalls).not.toContain("open_accessibility_settings");
     expect(allCalls).not.toContain("quit_prompt_picker");
@@ -2239,6 +2263,12 @@ describe("app", () => {
 
   it("does not manually emit prompt-popover-dismissed when hiding Calico from button controls", async () => {
     const { invoke } = await import("@tauri-apps/api/core");
+    vi.mocked(invoke).mockImplementation(async (command: string) => {
+      if (command === "set_prompt_button_visibility") {
+        return { visible: false, applied: true, persisted: true, error: null };
+      }
+      return undefined;
+    });
     currentWindowLabel = "prompt-popover";
     window.history.pushState({}, "", "/?mode=button-controls");
     const { readTextFile } = await import("@tauri-apps/plugin-fs");
@@ -2262,9 +2292,73 @@ describe("app", () => {
     fireEvent.click(await screen.findByRole("button", { name: "关闭小猫" }));
 
     await waitFor(() => {
-      expect(vi.mocked(invoke)).toHaveBeenCalledWith("hide_prompt_popover");
+      expect(vi.mocked(invoke)).toHaveBeenCalledWith("set_prompt_button_visibility", {
+        visible: false,
+      });
     });
     expect(emitMock).not.toHaveBeenCalledWith("prompt-popover-dismissed");
+  });
+
+  it("applies native prompt button visibility events without writing settings", async () => {
+    currentWindowLabel = "main";
+    window.history.pushState({}, "", "/?mode=manager");
+    const { readTextFile, writeTextFile } = await import("@tauri-apps/plugin-fs");
+    vi.mocked(readTextFile).mockImplementation(async (path: string) => {
+      if (path.includes("prompts")) {
+        return JSON.stringify({ version: 1, prompts: mockPrompts });
+      }
+      if (path.includes("settings")) {
+        return JSON.stringify({
+          version: 1,
+          blacklistedApps: [],
+          overlayPlacement: { buttonOffset: null, buttonPosition: null },
+          floatingButton: { visible: true },
+          promptInsertion: { mode: "paste_and_submit" },
+        });
+      }
+      throw new Error("missing file");
+    });
+    await act(async () => {
+      render(<App />);
+    });
+    await screen.findByRole("heading", { name: "管理提示词" });
+    vi.mocked(writeTextFile).mockClear();
+
+    await act(async () => {
+      await eventHandlers.get("prompt-button-visibility-changed")?.({ payload: false });
+    });
+
+    await waitFor(() => {
+      expect(inputTargetPollingMock).toHaveBeenLastCalledWith(
+        expect.any(Array),
+        expect.any(Object),
+        expect.any(Object),
+        false
+      );
+    });
+    expect(writeTextFile).not.toHaveBeenCalled();
+  });
+
+  it("acknowledges a reused popover mode after React commits it", async () => {
+    const { invoke } = await import("@tauri-apps/api/core");
+    vi.mocked(invoke).mockClear();
+    currentWindowLabel = "prompt-popover";
+    window.history.pushState({}, "", "/?mode=popover");
+    await renderPromptPopover();
+
+    await act(async () => {
+      await eventHandlers.get("prompt-popover-mode-requested")?.({
+        payload: { requestId: 19, mode: "button-controls" },
+      });
+    });
+
+    expect(await screen.findByRole("button", { name: "关闭小猫" })).toBeTruthy();
+    await waitFor(() => {
+      expect(vi.mocked(invoke)).toHaveBeenCalledWith("acknowledge_prompt_popover_mode", {
+        requestId: 19,
+        mode: "button-controls",
+      });
+    });
   });
 
   it("button controls mode only renders the close pet action", async () => {
