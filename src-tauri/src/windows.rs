@@ -639,13 +639,16 @@ fn build_prompt_button_window(
     x: f64,
     y: f64,
 ) -> Result<tauri::WebviewWindow, String> {
+    let renderer_state = app.state::<crate::PromptButtonRendererState>();
+    let renderer_instance_id = renderer_state.allocate_instance();
     let monitor = app.primary_monitor().map_err(|e| e.to_string())?;
     let (x, y) = clamp_button_position_for_monitor(x, y, monitor.as_ref());
     let (window_x, window_y) = prompt_button_visual_to_window_position(x, y);
+    let overlay_url = format!("overlay.html?rendererInstanceId={renderer_instance_id}");
     let window = WebviewWindowBuilder::new(
         app,
         BUTTON_WINDOW_LABEL,
-        WebviewUrl::App("overlay.html".into()),
+        WebviewUrl::App(overlay_url.into()),
     )
     .title("Prompt Button")
     .inner_size(BUTTON_WINDOW_WIDTH, BUTTON_WINDOW_HEIGHT)
@@ -663,8 +666,17 @@ fn build_prompt_button_window(
     if BUTTON_WINDOW_TRANSPARENT {
         crate::macos_panels::configure_transparent_webview_window(&window)?;
     }
-    show_non_activating_overlay_window(&window)?;
     Ok(window)
+}
+
+pub(crate) fn show_ready_prompt_button_window(app: &tauri::AppHandle) -> Result<(), String> {
+    let Some(window) = app.get_webview_window(BUTTON_WINDOW_LABEL) else {
+        return Err("Prompt button window is missing.".to_string());
+    };
+    if BUTTON_WINDOW_TRANSPARENT {
+        crate::macos_panels::configure_transparent_webview_window(&window)?;
+    }
+    show_non_activating_overlay_window(&window)
 }
 
 #[tauri::command]
@@ -707,10 +719,17 @@ pub fn show_prompt_button(x: f64, y: f64, app: tauri::AppHandle) -> Result<(), S
             {
                 return Ok(());
             }
-            if BUTTON_WINDOW_TRANSPARENT {
-                crate::macos_panels::configure_transparent_webview_window(&window)?;
+            let renderer_state = app.state::<crate::PromptButtonRendererState>();
+            if renderer_state.is_ready() {
+                show_ready_prompt_button_window(&app)?;
+            } else if renderer_state.request_resume_once() {
+                app.emit_to(
+                    BUTTON_WINDOW_LABEL,
+                    "prompt-button-renderer-resume-requested",
+                    (),
+                )
+                .map_err(|e| e.to_string())?;
             }
-            show_non_activating_overlay_window(&window)?;
         }
         Ok(())
     } else {
@@ -1499,7 +1518,9 @@ mod tests {
 
         assert!(block.contains(".visible(false)"));
         assert!(block.contains(".focusable(false)"));
-        assert!(block.contains("show_non_activating_overlay_window(&window)?"));
+        assert!(block.contains("renderer_state.allocate_instance()"));
+        assert!(block.contains("overlay.html?rendererInstanceId="));
+        assert!(!block.contains("show_non_activating_overlay_window(&window)?"));
     }
 
     #[test]

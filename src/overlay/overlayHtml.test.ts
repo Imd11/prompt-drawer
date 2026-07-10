@@ -30,14 +30,16 @@ describe("overlay button html", () => {
     expect(html).not.toContain("hide_prompt_button");
   });
 
-  it("renders the floating entry as an animated Calico character", () => {
+  it("renders Calico through exactly one visible canvas", () => {
     const html = readOverlayHtml();
 
     expect(html).toContain("calico-entry");
-    expect(html).toContain('id="calicoSprite"');
-    expect(html).toContain("calico-sprite");
-    expect(html).toContain("calico-idle-follow.svg");
-    expect(html).toContain("calico-react-drag.apng");
+    expect(html).toContain('id="calicoCanvas"');
+    expect(html).toContain('class="calico-sprite"');
+    expect(html).toContain('width="252" height="252"');
+    expect(html).not.toContain('id="calicoSprite"');
+    expect(html).not.toContain("calico-action-sprite");
+    expect(html).not.toContain("<img");
     expect(html).toContain('data-motion-state="idle-follow"');
     expect(html).not.toContain("calico-projectile");
     expect(html).not.toContain("promptProjectile");
@@ -49,10 +51,11 @@ describe("overlay button html", () => {
     expect(html).not.toContain("<span>Prompts</span>");
   });
 
-  it("loads the Calico motion runtime and manifest", () => {
+  it("loads the renderer, runtime, and both manifests with one asset version", () => {
     const html = readOverlayHtml();
 
     expect(html).toContain("const CALICO_ASSET_VERSION");
+    expect(html).toContain("versionedCalicoAsset('/calico/frame-renderer.js')");
     expect(html).toContain("versionedCalicoAsset('/calico/motion-runtime.js')");
     expect(html).toContain("/calico/motion-runtime.js");
     expect(html).toContain("createCalicoMotionRuntime");
@@ -61,6 +64,8 @@ describe("overlay button html", () => {
     expect(html).toContain("createCalicoIdleDirector");
     expect(html).toContain("initializeCalicoMotion");
     expect(html).toContain("fetch(versionedCalicoAsset('/calico/manifest.json'), { cache: 'no-store' })");
+    expect(html).toContain("fetch(versionedCalicoAsset('/calico/sheets/manifest.json'), { cache: 'no-store' })");
+    expect(html).toContain("createCalicoFrameRenderer");
     expect(html).toContain("calico-motion");
     expect(html).not.toContain("from '/calico/motion-runtime.js'");
     expect(html).not.toContain("from '/calico/idle-director.js'");
@@ -77,11 +82,11 @@ describe("overlay button html", () => {
     expect(html).toContain("calicoIdleDirector = createCalicoIdleDirector");
     expect(html).toContain("applyMotion: applyCalicoMotion");
     expect(html).toContain("resetMotion: resetCalicoMotion");
-    expect(html).toContain("getCurrentState: () => btn.dataset.motionState || manifest.defaultState");
+    expect(html).toContain("getCurrentState: () => btn.dataset.motionState || calicoManifest.defaultState");
     expect(html).toContain("isUserActive: () => Boolean(start || dragging || contextMenuOpened)");
     expect(html).toContain("calicoIdleDirector.start();");
-    expect(html.indexOf("calicoMotion = createCalicoMotionRuntime")).toBeLessThan(
-      html.indexOf("calicoIdleDirector = createCalicoIdleDirector")
+    expect(html.indexOf("const baselineReady = await calicoRenderer.showBaseline()")).toBeLessThan(
+      html.indexOf("calicoMotion = createCalicoMotionRuntime")
     );
   });
 
@@ -154,26 +159,30 @@ describe("overlay button html", () => {
     expect(html).toContain("applyCalicoMotion(event.payload)");
   });
 
-  it("starts a lightweight Calico sprite health watchdog", () => {
+  it("uses native renderer readiness instead of health polling", () => {
     const html = readOverlayHtml();
 
-    expect(html).toContain("function startCalicoSpriteHealthWatchdog()");
-    expect(html).toContain("window.setInterval");
-    expect(html).toContain("calicoMotion.recoverVisibilityIfNeeded();");
-    expect(html).toContain("sprite.hidden");
-    expect(html).toContain("sprite.naturalWidth === 0");
-    expect(html).toContain("resetCalicoMotion();");
-    expect(html).toContain("startCalicoSpriteHealthWatchdog();");
+    expect(html).toContain("set_prompt_button_renderer_ready");
+    expect(html).toContain("rendererInstanceId");
+    expect(html).toContain("prompt-button-renderer-resume-requested");
+    expect(html).not.toContain("startCalicoSpriteHealthWatchdog");
+    expect(html).not.toContain("startOverlayHealthHeartbeat");
+    expect(html).not.toContain("prompt-button-health");
+    expect(html).not.toContain("sprite.naturalWidth");
   });
 
-  it("emits prompt button health heartbeats for native recovery", () => {
+  it("suspends reversibly and recovers the same canvas lifecycle", () => {
     const html = readOverlayHtml();
 
-    expect(html).toContain("prompt-button-health");
-    expect(html).toContain("OVERLAY_HEARTBEAT_MS");
-    expect(html).toContain("isSafeToRebuildPromptButtonNow");
-    expect(html).toContain("safeToRebuild");
-    expect(html).toContain("startOverlayHealthHeartbeat();");
+    expect(html).toContain("window.addEventListener('pagehide'");
+    expect(html).toContain("window.addEventListener('pageshow'");
+    expect(html).toContain("calicoCanvas.addEventListener('contextlost'");
+    expect(html).toContain("calicoCanvas.addEventListener('contextrestored'");
+    expect(html).toContain("window.addEventListener('visibilitychange'");
+    expect(html).toContain("calicoMotion?.suspend({ retainFrame: true })");
+    expect(html).toContain("calicoMotion?.dispose()");
+    expect(html).toContain("prepareBackingStoreResize");
+    expect(html).toContain("commitPreparedResize");
   });
 
   it("keeps click-to-open neutral and separate from hover attention", () => {

@@ -1,10 +1,14 @@
-const REPLAY_SLOT_COUNT = 2;
-
-export function createCalicoMotionRuntime({ image, host, manifest, now = () => Date.now() }) {
+export function createCalicoMotionRuntime({
+  renderer,
+  host,
+  manifest,
+  sheetManifest,
+  now = () => Date.now(),
+}) {
   let currentPriority = 0;
   let minUntil = 0;
   let autoReturnTimer = 0;
-  let replayCounter = 0;
+  let disposed = false;
 
   function stateFor(requestedState) {
     if (requestedState && manifest.states[requestedState]) return requestedState;
@@ -15,63 +19,32 @@ export function createCalicoMotionRuntime({ image, host, manifest, now = () => D
     return manifest.states[state] || manifest.states[manifest.defaultState];
   }
 
-  function replaySourceFor(entry) {
-    replayCounter = (replayCounter + 1) % REPLAY_SLOT_COUNT;
-    return `${entry.file}?replay=${replayCounter}`;
+  function render(state, entry) {
+    renderer.setPresentation(entry);
+    const operation = state === manifest.defaultState
+      ? renderer.showBaseline(entry)
+      : renderer.play(state, sheetManifest.states[state], { restart: entry.replay === true });
+    Promise.resolve(operation).catch((error) => {
+      console.error(`Failed to render Calico motion: ${state}`, error);
+    });
   }
-
-  function sourceFor(entry) {
-    if (!entry?.file) return "";
-    return entry.replay ? replaySourceFor(entry) : entry.file;
-  }
-
-  function applyRenderMetadata(entry) {
-    image.style.setProperty("--calico-scale", String(entry.scale ?? 1));
-    image.style.setProperty("--calico-offset-x", `${entry.offsetX ?? 0}px`);
-    image.style.setProperty("--calico-offset-y", `${entry.offsetY ?? 0}px`);
-  }
-
-  function isBrokenImage() {
-    return image.complete && image.naturalWidth === 0;
-  }
-
-  function defaultEntry() {
-    return entryFor(manifest.defaultState);
-  }
-
-  function resetToDefaultAfterError() {
-    const defaultState = manifest.defaultState;
-    const entry = defaultEntry();
-    if (!entry?.file) return;
-    window.clearTimeout(autoReturnTimer);
-    currentPriority = 0;
-    minUntil = 0;
-    host.dataset.motionState = defaultState;
-    image.hidden = false;
-    image.setAttribute("src", entry.file);
-    applyRenderMetadata(entry);
-  }
-
-  image.addEventListener?.("error", () => {
-    if (host.dataset.motionState === manifest.defaultState) return;
-    resetToDefaultAfterError();
-  });
 
   function apply(payload = {}) {
+    if (disposed) return false;
     const state = stateFor(payload.state);
     const entry = entryFor(state);
-    if (!entry?.file) return false;
+    if (!entry) return false;
+    if (state !== manifest.defaultState && !sheetManifest.states[state]) return false;
 
     const priority = Number.isFinite(payload.priority) ? payload.priority : entry.priority;
     if (!payload.force && now() < minUntil && priority < currentPriority) return false;
 
     window.clearTimeout(autoReturnTimer);
+    autoReturnTimer = 0;
     currentPriority = priority;
     minUntil = now() + (entry.minMs || 0);
     host.dataset.motionState = state;
-    image.hidden = false;
-    image.setAttribute("src", sourceFor(entry));
-    applyRenderMetadata(entry);
+    render(state, entry);
 
     const durationMs = payload.durationMs ?? entry.durationMs;
     if (durationMs > 0) {
@@ -84,13 +57,23 @@ export function createCalicoMotionRuntime({ image, host, manifest, now = () => D
     return apply({ state: manifest.defaultState, priority: 0, force: true });
   }
 
-  function recoverVisibilityIfNeeded() {
-    if (image.hidden || !image.getAttribute("src") || isBrokenImage()) {
-      resetToDefaultAfterError();
-      return false;
-    }
-    return true;
+  function suspend(options = { retainFrame: true }) {
+    window.clearTimeout(autoReturnTimer);
+    autoReturnTimer = 0;
+    renderer.suspend(options);
   }
 
-  return { apply, reset, recoverVisibilityIfNeeded };
+  function resume() {
+    return renderer.resume();
+  }
+
+  function dispose() {
+    if (disposed) return;
+    disposed = true;
+    window.clearTimeout(autoReturnTimer);
+    autoReturnTimer = 0;
+    renderer.dispose();
+  }
+
+  return { apply, reset, suspend, resume, dispose };
 }

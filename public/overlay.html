@@ -163,21 +163,16 @@ body {
   aria-label="Open Prompt Picker"
   data-motion-state="idle-follow"
 >
-  <img id="calicoSprite" class="calico-sprite" src="/calico/calico-idle-follow.svg" alt="" draggable="false" />
+  <canvas id="calicoCanvas" class="calico-sprite" width="252" height="252" aria-hidden="true"></canvas>
 </button>
 <script type="module">
 const btn = document.getElementById('btn');
-const sprite = document.getElementById('calicoSprite');
+const calicoCanvas = document.getElementById('calicoCanvas');
 const statusBubble = document.getElementById('statusBubble');
 const tauri = window.__TAURI__;
 const DRAG_START_DISTANCE_PX = 10;
-const OVERLAY_HEARTBEAT_MS = 10_000;
-const CALICO_ASSET_VERSION = '1.0.8-calico-single-sprite-v1';
-const fallbackSprites = {
-  'idle-follow': '/calico/calico-idle-follow.svg',
-  'react-drag': '/calico/calico-react-drag.apng'
-};
-const overlayStartedAt = Date.now();
+const CALICO_ASSET_VERSION = '1.0.8-calico-bounded-canvas-v1';
+const rendererInstanceId = Number(new URLSearchParams(window.location.search).get('rendererInstanceId'));
 let start = null;
 let dragging = false;
 let lastMove = null;
@@ -190,11 +185,19 @@ let dragPopoverHidden = false;
 let motionResetTimer = 0;
 let statusTimer = 0;
 let lastAccessibilitySettingsOpenAt = 0;
-let lastUserInteractionAt = Date.now();
+let calicoRenderer = null;
 let calicoMotion = null;
 let calicoIdleDirector = null;
 let createCalicoIdleDirector = null;
 let createCalicoMotionRuntime = null;
+let createCalicoFrameRenderer = null;
+let calicoManifest = null;
+let calicoSheetManifest = null;
+let rendererTransitionId = 0;
+let lifecycleGeneration = 0;
+let lifecyclePromise = null;
+let resizePromise = null;
+let currentDpr = 2;
 const permissionMessages = {
   'zh-CN': {
     nativePrompt: '请在系统弹窗中授权',
@@ -214,37 +217,13 @@ function clearMotionTimers() {
   window.clearTimeout(motionResetTimer);
 }
 
-function markOverlayInteraction() {
-  lastUserInteractionAt = Date.now();
-}
-
-function isSafeToRebuildPromptButtonNow() {
-  const motionState = btn.dataset.motionState || 'idle-follow';
-  const quietForMs = Date.now() - lastUserInteractionAt;
-  return quietForMs > 15_000
-    && !start
-    && !dragging
-    && !contextMenuOpened
-    && !statusBubble?.classList.contains('is-visible')
-    && (motionState === 'idle-follow' || motionState === 'idle');
-}
-
-function applyFallbackMotion(payload = {}) {
-  const state = payload.state === 'react-drag' ? 'react-drag' : 'idle-follow';
-  btn.dataset.motionState = state;
-  sprite?.setAttribute('src', fallbackSprites[state]);
-}
-
 function applyCalicoMotion(payload = {}) {
-  if (calicoMotion) return calicoMotion.apply(payload);
-  applyFallbackMotion(payload);
-  return true;
+  return calicoMotion?.apply(payload) ?? false;
 }
 
 function resetCalicoMotion() {
   clearMotionTimers();
-  if (calicoMotion?.reset()) return;
-  applyFallbackMotion({ state: 'idle-follow' });
+  calicoMotion?.reset();
 }
 
 function versionedCalicoAsset(path) {
@@ -252,28 +231,15 @@ function versionedCalicoAsset(path) {
 }
 
 async function loadCalicoModules() {
-  if (createCalicoIdleDirector && createCalicoMotionRuntime) return;
-  const [idleDirectorModule, motionRuntimeModule] = await Promise.all([
+  if (createCalicoIdleDirector && createCalicoMotionRuntime && createCalicoFrameRenderer) return;
+  const [frameRendererModule, idleDirectorModule, motionRuntimeModule] = await Promise.all([
+    import(versionedCalicoAsset('/calico/frame-renderer.js')),
     import(versionedCalicoAsset('/calico/idle-director.js')),
     import(versionedCalicoAsset('/calico/motion-runtime.js'))
   ]);
+  createCalicoFrameRenderer = frameRendererModule.createCalicoFrameRenderer;
   createCalicoIdleDirector = idleDirectorModule.createCalicoIdleDirector;
   createCalicoMotionRuntime = motionRuntimeModule.createCalicoMotionRuntime;
-}
-
-function startCalicoSpriteHealthWatchdog() {
-  window.setInterval(() => {
-    if (!sprite) return;
-    if (calicoMotion?.recoverVisibilityIfNeeded) {
-      calicoMotion.recoverVisibilityIfNeeded();
-      return;
-    }
-    const source = sprite.getAttribute('src') || '';
-    const failedImage = sprite.complete && sprite.naturalWidth === 0;
-    if (sprite.hidden || !source || failedImage) {
-      resetCalicoMotion();
-    }
-  }, 60_000);
 }
 
 function pauseIdleForExternalMotion(payload = {}) {
@@ -287,28 +253,170 @@ function pauseIdleForPointerInteraction(durationMs = 5_000) {
   calicoIdleDirector?.pause(durationMs);
 }
 
-async function initializeCalicoMotion() {
-  try {
-    await loadCalicoModules();
-    const response = await fetch(versionedCalicoAsset('/calico/manifest.json'), { cache: 'no-store' });
-    const manifest = await response.json();
-    calicoMotion = createCalicoMotionRuntime({ image: sprite, host: btn, manifest });
-    const motionDurations = Object.fromEntries(
-      Object.entries(manifest.states).map(([state, entry]) => [state, entry.durationMs])
-    );
-    calicoIdleDirector = createCalicoIdleDirector({
-      applyMotion: applyCalicoMotion,
-      resetMotion: resetCalicoMotion,
-      getCurrentState: () => btn.dataset.motionState || manifest.defaultState,
-      isUserActive: () => Boolean(start || dragging || contextMenuOpened),
-      motionDurations,
-    });
-    resetCalicoMotion();
-    calicoIdleDirector.start();
-  } catch (error) {
-    console.error('Failed to initialize Calico motion runtime', error);
-    resetCalicoMotion();
+function wait(ms) {
+  return new Promise((resolve) => window.setTimeout(resolve, ms));
+}
+
+async function reportRendererReady(ready) {
+  if (!Number.isSafeInteger(rendererInstanceId) || rendererInstanceId <= 0) {
+    throw new Error('Missing Calico renderer instance id');
   }
+  rendererTransitionId += 1;
+  return invokeOrThrow('set_prompt_button_renderer_ready', {
+    rendererInstanceId,
+    transitionId: rendererTransitionId,
+    ready,
+  });
+}
+
+async function ensureCalicoResources() {
+  await loadCalicoModules();
+  if (!calicoManifest || !calicoSheetManifest) {
+    const [manifestResponse, sheetResponse] = await Promise.all([
+      fetch(versionedCalicoAsset('/calico/manifest.json'), { cache: 'no-store' }),
+      fetch(versionedCalicoAsset('/calico/sheets/manifest.json'), { cache: 'no-store' }),
+    ]);
+    if (!manifestResponse.ok || !sheetResponse.ok) {
+      throw new Error(`Calico manifest load failed: ${manifestResponse.status}/${sheetResponse.status}`);
+    }
+    [calicoManifest, calicoSheetManifest] = await Promise.all([
+      manifestResponse.json(),
+      sheetResponse.json(),
+    ]);
+  }
+}
+
+function buildIdleDirector() {
+  if (calicoIdleDirector) return;
+  const motionDurations = Object.fromEntries(
+    Object.entries(calicoManifest.states).map(([state, entry]) => [state, entry.durationMs])
+  );
+  calicoIdleDirector = createCalicoIdleDirector({
+    applyMotion: applyCalicoMotion,
+    resetMotion: resetCalicoMotion,
+    getCurrentState: () => btn.dataset.motionState || calicoManifest.defaultState,
+    isUserActive: () => Boolean(start || dragging || contextMenuOpened),
+    motionDurations,
+  });
+  calicoIdleDirector.start();
+}
+
+async function initializeCalicoMotionOnce() {
+  const generation = lifecycleGeneration;
+  if (lifecyclePromise?.generation === generation) return lifecyclePromise.promise;
+  const promise = (async () => {
+    await ensureCalicoResources();
+    if (generation !== lifecycleGeneration) return false;
+    if (!calicoRenderer) {
+      currentDpr = window.devicePixelRatio || 1;
+      calicoCanvas.width = Math.max(1, Math.round(126 * currentDpr));
+      calicoCanvas.height = Math.max(1, Math.round(126 * currentDpr));
+      calicoRenderer = createCalicoFrameRenderer({
+        canvas: calicoCanvas,
+        assetVersion: CALICO_ASSET_VERSION,
+        onError: (error) => console.error('Calico renderer error', error),
+        onFatalRender: reportFatalRendererError,
+      });
+    }
+    calicoRenderer.setPresentation(calicoManifest.states[calicoManifest.defaultState]);
+    const baselineReady = await calicoRenderer.showBaseline();
+    if (!baselineReady || generation !== lifecycleGeneration) return false;
+    if (!calicoMotion) {
+      calicoMotion = createCalicoMotionRuntime({
+        renderer: calicoRenderer,
+        host: btn,
+        manifest: calicoManifest,
+        sheetManifest: calicoSheetManifest,
+      });
+      btn.dataset.motionState = calicoManifest.defaultState;
+      buildIdleDirector();
+    }
+    const outcome = await reportRendererReady(true);
+    return Boolean(outcome?.accepted && generation === lifecycleGeneration);
+  })();
+  lifecyclePromise = { generation, promise };
+  try {
+    return await promise;
+  } finally {
+    if (lifecyclePromise?.promise === promise) lifecyclePromise = null;
+  }
+}
+
+async function initializeCalicoMotion() {
+  let lastError = null;
+  for (const delay of [0, 100, 400]) {
+    if (delay) await wait(delay);
+    try {
+      if (await initializeCalicoMotionOnce()) return true;
+      lastError = new Error('Calico baseline draw was not accepted');
+    } catch (error) {
+      lastError = error;
+    }
+  }
+  console.error('Failed to initialize Calico motion runtime', lastError);
+  await reportRendererReady(false).catch(() => {});
+  return false;
+}
+
+async function resumeAndReportReady() {
+  const generation = lifecycleGeneration;
+  if (!calicoMotion || !calicoRenderer) return initializeCalicoMotion();
+  if (lifecyclePromise?.generation === generation) return lifecyclePromise.promise;
+  const promise = (async () => {
+    const state = calicoRenderer.diagnostics().state;
+    if (state === 'lost') calicoMotion.suspend({ retainFrame: true });
+    const resumed = state === 'ready' || await Promise.resolve(calicoMotion.resume());
+    if (!resumed || generation !== lifecycleGeneration) return false;
+    const outcome = await reportRendererReady(true);
+    if (!outcome?.accepted || generation !== lifecycleGeneration) return false;
+    calicoIdleDirector?.start();
+    return true;
+  })();
+  lifecyclePromise = { generation, promise };
+  try {
+    return await promise;
+  } finally {
+    if (lifecyclePromise?.promise === promise) lifecyclePromise = null;
+  }
+}
+
+function reportFatalRendererError(error) {
+  console.error('Fatal Calico renderer error', error);
+  lifecycleGeneration += 1;
+  lifecyclePromise = null;
+  calicoIdleDirector?.stop();
+  calicoMotion?.suspend({ retainFrame: true });
+  reportRendererReady(false).catch(() => {});
+}
+
+async function resizeCalicoBackingStore(nextDpr) {
+  if (!calicoRenderer || !calicoMotion || nextDpr === currentDpr) return;
+  if (resizePromise) return resizePromise;
+  const generation = lifecycleGeneration;
+  resizePromise = (async () => {
+    calicoMotion.suspend({ retainFrame: true });
+    const token = calicoRenderer.prepareBackingStoreResize(nextDpr);
+    if (!token) {
+      calicoMotion.resume();
+      return;
+    }
+    const hidden = await reportRendererReady(false);
+    if (!hidden?.accepted || generation !== lifecycleGeneration) {
+      calicoMotion.resume();
+      return;
+    }
+    if (!calicoRenderer.commitPreparedResize(token)) {
+      reportFatalRendererError(new Error('Calico backing-store resize failed'));
+      return;
+    }
+    currentDpr = nextDpr;
+    if (!calicoMotion.resume()) {
+      reportFatalRendererError(new Error('Calico renderer failed after resize'));
+      return;
+    }
+    await reportRendererReady(true);
+  })().finally(() => { resizePromise = null; });
+  return resizePromise;
 }
 
 function distance(a, b) {
@@ -344,20 +452,6 @@ async function emit(event, payload) {
   }
 }
 
-function emitOverlayHeartbeat() {
-  emit('prompt-button-health', {
-    startedAt: overlayStartedAt,
-    updatedAt: Date.now(),
-    motionState: btn.dataset.motionState || 'idle-follow',
-    safeToRebuild: isSafeToRebuildPromptButtonNow(),
-  }).catch(() => {});
-}
-
-function startOverlayHealthHeartbeat() {
-  emitOverlayHeartbeat();
-  window.setInterval(emitOverlayHeartbeat, OVERLAY_HEARTBEAT_MS);
-}
-
 async function hidePromptPopoverForDrag() {
   if (dragPopoverHidden) return;
   dragPopoverHidden = true;
@@ -371,7 +465,6 @@ function hideStatusBubble() {
 
 function showStatusBubble(payload) {
   if (!statusBubble || !payload) return;
-  markOverlayInteraction();
   const kind = payload.kind || 'failed';
   const message = payload.message || '未能自动发送';
   window.clearTimeout(statusTimer);
@@ -451,7 +544,6 @@ function listenForPromptPopoverDismissed() {
 
 async function openButtonControls(event) {
   event.preventDefault();
-  markOverlayInteraction();
   contextMenuOpened = true;
   start = null;
   dragging = false;
@@ -476,7 +568,6 @@ function handleCalicoPointerEnter() {
 }
 
 btn.addEventListener('pointerdown', (event) => {
-  markOverlayInteraction();
   if (event.button === 2 || (event.button === 0 && event.ctrlKey)) {
     openButtonControls(event);
     return;
@@ -523,7 +614,6 @@ btn.addEventListener('pointermove', (event) => {
   const current = { screenX: event.screenX, screenY: event.screenY };
   if (!dragging && distance(start, current) < DRAG_START_DISTANCE_PX) return;
   if (!dragStartedEmitted) {
-    markOverlayInteraction();
     dragStartedEmitted = true;
     calicoIdleDirector?.pause(4000);
     hidePromptPopoverForDrag().catch(() => {});
@@ -543,7 +633,6 @@ btn.addEventListener('pointermove', (event) => {
 });
 
 btn.addEventListener('pointerup', async (event) => {
-  markOverlayInteraction();
   if (contextMenuOpened) {
     contextMenuOpened = false;
     start = null;
@@ -604,12 +693,55 @@ btn.addEventListener('contextmenu', async (event) => {
   await openButtonControls(event);
 });
 
-initializeCalicoMotion();
-startCalicoSpriteHealthWatchdog();
+window.addEventListener('pagehide', () => {
+  lifecycleGeneration += 1;
+  lifecyclePromise = null;
+  reportRendererReady(false).catch(() => {});
+  calicoIdleDirector?.stop();
+  calicoMotion?.suspend({ retainFrame: true });
+});
+
+window.addEventListener('pageshow', () => {
+  resumeAndReportReady()
+    .then(() => resizeCalicoBackingStore(window.devicePixelRatio || 1))
+    .catch(reportFatalRendererError);
+});
+
+calicoCanvas.addEventListener('contextlost', (event) => {
+  event.preventDefault?.();
+});
+
+calicoCanvas.addEventListener('contextrestored', () => {
+  resumeAndReportReady().catch(reportFatalRendererError);
+});
+
+window.addEventListener('visibilitychange', () => {
+  if (!document.hidden) {
+    resumeAndReportReady().catch(reportFatalRendererError);
+  }
+});
+
+window.addEventListener('unload', () => {
+  calicoIdleDirector?.stop();
+  calicoMotion?.dispose();
+});
+
+if (tauri?.event?.listen) {
+  tauri.event.listen('prompt-button-renderer-resume-requested', () => {
+    resumeAndReportReady().catch(reportFatalRendererError);
+  }).catch((error) => console.error('Failed to listen for renderer resume', error));
+  tauri.event.listen('tauri://scale-change', (event) => {
+    const nextDpr = Number(event.payload?.scaleFactor) || window.devicePixelRatio || 1;
+    resizeCalicoBackingStore(nextDpr).catch(reportFatalRendererError);
+  }).catch((error) => console.error('Failed to listen for scale changes', error));
+}
+
+initializeCalicoMotion()
+  .then(() => resizeCalicoBackingStore(window.devicePixelRatio || 1))
+  .catch(reportFatalRendererError);
 listenForAutosendStatus();
 listenForCalicoMotion();
 listenForPromptPopoverDismissed();
-startOverlayHealthHeartbeat();
 </script>
 </body>
 </html>

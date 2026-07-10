@@ -58,8 +58,8 @@ describe("Calico sprite sheet manifest", () => {
     }
   });
 
-  it("preserves an authorized source copy without breaking the legacy runtime", () => {
+  it("preserves an authorized source copy after removing the legacy runtime asset", () => {
     expect(existsSync("assets/calico-source/calico-idle.apng")).toBe(true);
-    expect(existsSync("public/calico/calico-idle.apng")).toBe(true);
+    expect(existsSync("public/calico/calico-idle.apng")).toBe(false);
   });
 });

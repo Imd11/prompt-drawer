@@ -940,6 +940,235 @@ pub(crate) struct PromptButtonVisibilityState {
     generation: std::sync::atomic::AtomicU64,
 }
 
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub(crate) enum PromptButtonRendererAction {
+    Ignore,
+    HideCurrent,
+    ShowCurrent,
+}
+
+impl PromptButtonRendererAction {
+    fn as_str(self) -> &'static str {
+        match self {
+            Self::Ignore => "ignore",
+            Self::HideCurrent => "hideCurrent",
+            Self::ShowCurrent => "showCurrent",
+        }
+    }
+}
+
+#[derive(Clone, Copy, Debug)]
+struct PromptButtonRendererSnapshot {
+    instance_id: u64,
+    transition_id: u64,
+    ready: bool,
+    visibility_generation: u64,
+    action: PromptButtonRendererAction,
+}
+
+#[derive(Default)]
+struct PromptButtonRendererInner {
+    next_instance_id: u64,
+    current_instance_id: u64,
+    last_transition_id: u64,
+    ready: bool,
+    resume_requested: bool,
+}
+
+#[derive(Default)]
+pub(crate) struct PromptButtonRendererState {
+    inner: std::sync::Mutex<PromptButtonRendererInner>,
+}
+
+impl PromptButtonRendererState {
+    pub(crate) fn allocate_instance(&self) -> u64 {
+        let mut inner = self.inner.lock().expect("renderer state lock poisoned");
+        inner.next_instance_id = inner.next_instance_id.wrapping_add(1).max(1);
+        inner.current_instance_id = inner.next_instance_id;
+        inner.last_transition_id = 0;
+        inner.ready = false;
+        inner.resume_requested = false;
+        inner.current_instance_id
+    }
+
+    pub(crate) fn is_ready(&self) -> bool {
+        self.inner
+            .lock()
+            .expect("renderer state lock poisoned")
+            .ready
+    }
+
+    pub(crate) fn request_resume_once(&self) -> bool {
+        let mut inner = self.inner.lock().expect("renderer state lock poisoned");
+        if inner.ready || inner.resume_requested || inner.current_instance_id == 0 {
+            return false;
+        }
+        inner.resume_requested = true;
+        true
+    }
+
+    fn current(&self) -> (u64, u64, bool) {
+        let inner = self.inner.lock().expect("renderer state lock poisoned");
+        (
+            inner.current_instance_id,
+            inner.last_transition_id,
+            inner.ready,
+        )
+    }
+
+    fn instance_is_current_unready(&self, instance_id: u64) -> bool {
+        let inner = self.inner.lock().expect("renderer state lock poisoned");
+        inner.current_instance_id == instance_id && !inner.ready
+    }
+
+    fn accept(
+        &self,
+        instance_id: u64,
+        transition_id: u64,
+        ready: bool,
+        visibility: &PromptButtonVisibilityState,
+    ) -> Option<PromptButtonRendererSnapshot> {
+        let mut inner = self.inner.lock().expect("renderer state lock poisoned");
+        if instance_id == 0
+            || instance_id != inner.current_instance_id
+            || transition_id <= inner.last_transition_id
+        {
+            return None;
+        }
+        inner.last_transition_id = transition_id;
+        inner.ready = ready;
+        inner.resume_requested = false;
+        let visibility_generation = visibility.generation();
+        let action = if !ready {
+            PromptButtonRendererAction::HideCurrent
+        } else if visibility.desired_visible() {
+            PromptButtonRendererAction::ShowCurrent
+        } else {
+            PromptButtonRendererAction::Ignore
+        };
+        Some(PromptButtonRendererSnapshot {
+            instance_id,
+            transition_id,
+            ready,
+            visibility_generation,
+            action,
+        })
+    }
+
+    fn action_is_current(
+        &self,
+        snapshot: PromptButtonRendererSnapshot,
+        visibility: &PromptButtonVisibilityState,
+    ) -> bool {
+        let inner = self.inner.lock().expect("renderer state lock poisoned");
+        let transition_is_current = inner.current_instance_id == snapshot.instance_id
+            && inner.last_transition_id == snapshot.transition_id
+            && inner.ready == snapshot.ready;
+        if !transition_is_current {
+            return false;
+        }
+        match snapshot.action {
+            PromptButtonRendererAction::Ignore => false,
+            PromptButtonRendererAction::HideCurrent => !inner.ready,
+            PromptButtonRendererAction::ShowCurrent => {
+                inner.ready && visibility.may_show(snapshot.visibility_generation)
+            }
+        }
+    }
+}
+
+#[derive(Clone, Debug, serde::Serialize)]
+#[serde(rename_all = "camelCase")]
+struct PromptButtonRendererReadyOutcome {
+    accepted: bool,
+    current_instance_id: u64,
+    transition_id: u64,
+    ready: bool,
+    action: String,
+    applied: bool,
+}
+
+#[tauri::command]
+fn set_prompt_button_renderer_ready(
+    renderer_instance_id: u64,
+    transition_id: u64,
+    ready: bool,
+    app: tauri::AppHandle,
+    renderer_state: tauri::State<PromptButtonRendererState>,
+    visibility_state: tauri::State<PromptButtonVisibilityState>,
+) -> PromptButtonRendererReadyOutcome {
+    let Some(snapshot) = renderer_state.accept(
+        renderer_instance_id,
+        transition_id,
+        ready,
+        visibility_state.inner(),
+    ) else {
+        let (current_instance_id, current_transition_id, current_ready) = renderer_state.current();
+        return PromptButtonRendererReadyOutcome {
+            accepted: false,
+            current_instance_id,
+            transition_id: current_transition_id,
+            ready: current_ready,
+            action: "ignore".to_string(),
+            applied: false,
+        };
+    };
+
+    let applied = renderer_state.action_is_current(snapshot, visibility_state.inner())
+        && match snapshot.action {
+            PromptButtonRendererAction::Ignore => false,
+            PromptButtonRendererAction::HideCurrent => hide_prompt_button(app.clone()).is_ok(),
+            PromptButtonRendererAction::ShowCurrent => {
+                crate::windows::show_ready_prompt_button_window(&app).is_ok()
+            }
+        };
+
+    PromptButtonRendererReadyOutcome {
+        accepted: true,
+        current_instance_id: snapshot.instance_id,
+        transition_id: snapshot.transition_id,
+        ready: snapshot.ready,
+        action: snapshot.action.as_str().to_string(),
+        applied,
+    }
+}
+
+fn is_prompt_button_webview(label: &str) -> bool {
+    label == crate::windows::BUTTON_WINDOW_LABEL
+}
+
+fn handle_prompt_button_webcontent_termination(app: &tauri::AppHandle, label: &str) -> bool {
+    if !is_prompt_button_webview(label) {
+        return false;
+    }
+    let renderer_state = app.state::<PromptButtonRendererState>();
+    let instance_id = renderer_state.allocate_instance();
+    let queued_app = app.clone();
+    let _ = app.run_on_main_thread(move || {
+        let renderer_state = queued_app.state::<PromptButtonRendererState>();
+        if !renderer_state.instance_is_current_unready(instance_id) {
+            return;
+        }
+        let Some(window) = queued_app.get_webview_window(crate::windows::BUTTON_WINDOW_LABEL)
+        else {
+            return;
+        };
+        let _ = window.hide();
+        if let Ok(mut url) = window.url() {
+            url.set_path("/overlay.html");
+            url.set_query(Some(&format!("rendererInstanceId={instance_id}")));
+            let _ = window.navigate(url);
+        }
+    });
+    true
+}
+
+#[cfg(debug_assertions)]
+#[tauri::command]
+fn simulate_prompt_button_webcontent_termination(app: tauri::AppHandle) -> bool {
+    handle_prompt_button_webcontent_termination(&app, crate::windows::BUTTON_WINDOW_LABEL)
+}
+
 impl PromptButtonVisibilityState {
     fn new(visible: bool) -> Self {
         Self {
@@ -1714,13 +1943,29 @@ fn setup_menu_bar_app(app_handle: &tauri::AppHandle) -> Result<(), String> {
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
-    tauri::Builder::default()
+    let builder = tauri::Builder::default()
         .manage(LastInputTargetState::default())
         .manage(PromptPickSessionState::default())
         .plugin(tauri_plugin_clipboard_manager::init())
         .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_fs::init())
         .plugin(tauri_plugin_shell::init())
+        .on_page_load(|webview, payload| {
+            if is_prompt_button_webview(webview.label())
+                && payload.event() == tauri::webview::PageLoadEvent::Started
+            {
+                if let Some(window) = webview.app_handle().get_webview_window(webview.label()) {
+                    let _ = window.hide();
+                }
+            }
+        });
+
+    #[cfg(target_os = "macos")]
+    let builder = builder.on_web_content_process_terminate(|webview| {
+        handle_prompt_button_webcontent_termination(webview.app_handle(), webview.label());
+    });
+
+    builder
         .invoke_handler(tauri::generate_handler![
             accessibility_status_cmd,
             request_accessibility_permission_cmd,
@@ -1753,8 +1998,11 @@ pub fn run() {
             read_settings_text,
             write_settings_text,
             set_prompt_button_visibility,
+            set_prompt_button_renderer_ready,
             #[cfg(debug_assertions)]
-            calico_probe::record_calico_surface_probe
+            calico_probe::record_calico_surface_probe,
+            #[cfg(debug_assertions)]
+            simulate_prompt_button_webcontent_termination
         ])
         .setup(|app| {
             #[cfg(debug_assertions)]
@@ -1772,6 +2020,7 @@ pub fn run() {
             let visibility_state = PromptButtonVisibilityState::from_settings(&initial_settings);
             app.manage(settings_state);
             app.manage(visibility_state);
+            app.manage(PromptButtonRendererState::default());
             app.manage(crate::windows::PopoverModeRequestState::default());
 
             setup_menu_bar_app(app.handle())?;
@@ -1800,6 +2049,10 @@ pub fn run() {
                 let expected_visible = visibility.desired_visible();
                 let requested_generation = visibility.generation();
                 let button = monitor_app.get_webview_window(crate::windows::BUTTON_WINDOW_LABEL);
+                if button.is_some() && !monitor_app.state::<PromptButtonRendererState>().is_ready()
+                {
+                    continue;
+                }
                 let action = prompt_button_ensure_action(
                     expected_visible,
                     button.is_some(),
@@ -1827,6 +2080,74 @@ pub fn run() {
         })
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
+}
+
+#[cfg(test)]
+mod prompt_button_renderer_tests {
+    use super::*;
+
+    #[test]
+    fn allocates_nonzero_instances_and_resets_readiness() {
+        let state = PromptButtonRendererState::default();
+        let first = state.allocate_instance();
+        let visibility = PromptButtonVisibilityState::new(true);
+        assert!(state.accept(first, 1, true, &visibility).is_some());
+
+        let second = state.allocate_instance();
+
+        assert_ne!(first, second);
+        assert_ne!(second, 0);
+        assert!(!state.is_ready());
+        assert_eq!(state.current(), (second, 0, false));
+    }
+
+    #[test]
+    fn rejects_stale_instances_and_out_of_order_transitions() {
+        let state = PromptButtonRendererState::default();
+        let visibility = PromptButtonVisibilityState::new(true);
+        let old = state.allocate_instance();
+        let current = state.allocate_instance();
+
+        assert!(state.accept(old, 1, true, &visibility).is_none());
+        assert!(state.accept(current, 2, true, &visibility).is_some());
+        assert!(state.accept(current, 1, false, &visibility).is_none());
+        assert_eq!(state.current(), (current, 2, true));
+    }
+
+    #[test]
+    fn newer_transition_invalidates_an_older_lock_free_action() {
+        let state = PromptButtonRendererState::default();
+        let visibility = PromptButtonVisibilityState::new(true);
+        let instance = state.allocate_instance();
+        let old_hide = state.accept(instance, 1, false, &visibility).unwrap();
+        let new_show = state.accept(instance, 2, true, &visibility).unwrap();
+
+        assert!(!state.action_is_current(old_hide, &visibility));
+        assert!(state.action_is_current(new_show, &visibility));
+    }
+
+    #[test]
+    fn close_racing_with_ready_true_prevents_show() {
+        let state = PromptButtonRendererState::default();
+        let visibility = PromptButtonVisibilityState::new(true);
+        let instance = state.allocate_instance();
+        let show = state.accept(instance, 1, true, &visibility).unwrap();
+
+        visibility.set(false);
+
+        assert!(!state.action_is_current(show, &visibility));
+    }
+
+    #[test]
+    fn only_prompt_button_termination_is_owned_by_this_recovery() {
+        assert!(is_prompt_button_webview(
+            crate::windows::BUTTON_WINDOW_LABEL
+        ));
+        assert!(!is_prompt_button_webview(
+            crate::windows::POPOVER_WINDOW_LABEL
+        ));
+        assert!(!is_prompt_button_webview("main"));
+    }
 }
 
 #[cfg(test)]

@@ -46,7 +46,6 @@
       "offsetY": -5
     },
     "idle": {
-      "file": "/calico/calico-idle.apng",
       "priority": 0,
       "durationMs": 5200,
       "minMs": 1200,
@@ -56,7 +55,6 @@
       "offsetY": -3
     },
     "thinking": {
-      "file": "/calico/calico-thinking.apng",
       "priority": 20,
       "durationMs": 1800,
       "minMs": 1000,
@@ -66,7 +64,6 @@
       "offsetY": 13
     },
     "working-typing": {
-      "file": "/calico/calico-working-typing.apng",
       "priority": 30,
       "durationMs": 2200,
       "minMs": 1000,
@@ -76,7 +73,6 @@
       "offsetY": -5
     },
     "working-conducting": {
-      "file": "/calico/calico-working-conducting.apng",
       "priority": 35,
       "durationMs": 3200,
       "minMs": 1000,
@@ -86,7 +82,6 @@
       "offsetY": -5
     },
     "working-juggling": {
-      "file": "/calico/calico-working-juggling.apng",
       "priority": 25,
       "durationMs": 1800,
       "minMs": 900,
@@ -96,7 +91,6 @@
       "offsetY": -5
     },
     "working-building": {
-      "file": "/calico/calico-working-building.apng",
       "priority": 30,
       "durationMs": 2600,
       "minMs": 1000,
@@ -106,7 +100,6 @@
       "offsetY": -5
     },
     "working-carrying": {
-      "file": "/calico/calico-working-carrying.apng",
       "priority": 25,
       "durationMs": 1800,
       "minMs": 800,
@@ -116,7 +109,6 @@
       "offsetY": 10
     },
     "working-sweeping": {
-      "file": "/calico/calico-working-sweeping.apng",
       "priority": 30,
       "durationMs": 2200,
       "minMs": 1000,
@@ -126,7 +118,6 @@
       "offsetY": 6
     },
     "notification": {
-      "file": "/calico/calico-notification.apng",
       "priority": 50,
       "durationMs": 5200,
       "minMs": 1000,
@@ -136,7 +127,6 @@
       "offsetY": 0
     },
     "error": {
-      "file": "/calico/calico-error.apng",
       "priority": 60,
       "durationMs": 5000,
       "minMs": 1200,
@@ -146,7 +136,6 @@
       "offsetY": 7
     },
     "happy": {
-      "file": "/calico/calico-happy.apng",
       "priority": 50,
       "durationMs": 3000,
       "minMs": 800,
@@ -156,7 +145,6 @@
       "offsetY": 6
     },
     "react-drag": {
-      "file": "/calico/calico-react-drag.apng",
       "priority": 100,
       "durationMs": 0,
       "minMs": 0,
@@ -166,7 +154,6 @@
       "offsetY": 6
     },
     "yawning": {
-      "file": "/calico/calico-yawning.apng",
       "priority": 10,
       "durationMs": 8000,
       "minMs": 800,
@@ -176,7 +163,6 @@
       "offsetY": 8
     },
     "dozing": {
-      "file": "/calico/calico-dozing.apng",
       "priority": 10,
       "durationMs": 3000,
       "minMs": 800,
@@ -186,7 +172,6 @@
       "offsetY": 4
     },
     "collapsing": {
-      "file": "/calico/calico-collapsing.apng",
       "priority": 10,
       "durationMs": 5200,
       "minMs": 800,
@@ -196,7 +181,6 @@
       "offsetY": -5
     },
     "sleeping": {
-      "file": "/calico/calico-sleeping.apng",
       "priority": 5,
       "durationMs": 0,
       "minMs": 0,
@@ -206,7 +190,6 @@
       "offsetY": -5
     },
     "waking": {
-      "file": "/calico/calico-waking.apng",
       "priority": 10,
       "durationMs": 5800,
       "minMs": 800,
@@ -216,7 +199,6 @@
       "offsetY": -5
     },
     "react-poke": {
-      "file": "/calico/calico-react-poke.apng",
       "priority": 80,
       "durationMs": 2500,
       "minMs": 800,
@@ -226,7 +208,6 @@
       "offsetY": 0
     },
     "react-left": {
-      "file": "/calico/calico-react-left.apng",
       "priority": 80,
       "durationMs": 2500,
       "minMs": 800,
@@ -236,7 +217,6 @@
       "offsetY": 0
     },
     "mini-enter": {
-      "file": "/calico/calico-mini-enter.apng",
       "priority": 70,
       "durationMs": 1500,
       "minMs": 800,
@@ -246,7 +226,6 @@
       "offsetY": 65
     },
     "mini-idle": {
-      "file": "/calico/calico-mini-idle.apng",
       "priority": 5,
       "durationMs": 0,
       "minMs": 0,
@@ -256,7 +235,6 @@
       "offsetY": 65
     },
     "mini-peek": {
-      "file": "/calico/calico-mini-peek.apng",
       "priority": 70,
       "durationMs": 1500,
       "minMs": 800,
@@ -266,7 +244,6 @@
       "offsetY": 65
     },
     "mini-alert": {
-      "file": "/calico/calico-mini-alert.apng",
       "priority": 70,
       "durationMs": 4000,
       "minMs": 800,
@@ -276,7 +253,6 @@
       "offsetY": 65
     },
     "mini-happy": {
-      "file": "/calico/calico-mini-happy.apng",
       "priority": 70,
       "durationMs": 4000,
       "minMs": 800,
@@ -286,7 +262,6 @@
       "offsetY": 65
     },
     "mini-crabwalk": {
-      "file": "/calico/calico-mini-crabwalk.apng",
       "priority": 70,
       "durationMs": 1500,
       "minMs": 800,
@@ -296,7 +271,6 @@
       "offsetY": 65
     },
     "mini-sleep": {
-      "file": "/calico/calico-mini-sleep.apng",
       "priority": 5,
       "durationMs": 0,
       "minMs": 0,

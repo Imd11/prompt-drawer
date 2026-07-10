@@ -1,8 +1,8 @@
-import { existsSync, readFileSync } from "fs";
+import { existsSync, readFileSync, readdirSync } from "fs";
 import { describe, expect, it } from "vitest";
 
 type CalicoState = {
-  file: string;
+  file?: string;
   priority: number;
   durationMs: number;
   minMs: number;
@@ -10,6 +10,10 @@ type CalicoState = {
   scale: number;
   offsetX: number;
   offsetY: number;
+};
+
+type SheetManifest = {
+  states: Record<string, { file: string; frameCount: number }>;
 };
 
 type CalicoManifest = {
@@ -66,6 +70,10 @@ function readManifest(): CalicoManifest {
   return JSON.parse(readFileSync("public/calico/manifest.json", "utf8"));
 }
 
+function readSheetManifest(): SheetManifest {
+  return JSON.parse(readFileSync("public/calico/sheets/manifest.json", "utf8"));
+}
+
 async function loadIdleDirector() {
   // @ts-expect-error public overlay module is intentionally outside the src build graph.
   return (await import("../../public/calico/idle-director.js")) as IdleDirectorModule;
@@ -87,10 +95,17 @@ describe("Calico manifest", () => {
 
   it("ships every declared Calico state with rendering metadata", () => {
     const manifest = readManifest();
+    const sheetManifest = readSheetManifest();
 
     for (const [stateName, state] of Object.entries(manifest.states)) {
-      expect(state.file, stateName).toMatch(/^\/calico\/calico-.+\.(apng|svg)$/);
-      expect(existsSync(`public${state.file}`), stateName).toBe(true);
+      if (stateName === manifest.defaultState) {
+        expect(state.file, stateName).toBe("/calico/calico-idle-follow.svg");
+        expect(existsSync(`public${state.file}`), stateName).toBe(true);
+      } else {
+        expect(state.file, stateName).toBeUndefined();
+        expect(sheetManifest.states[stateName], stateName).toBeDefined();
+        expect(existsSync(`public${sheetManifest.states[stateName].file}`), stateName).toBe(true);
+      }
       expect(typeof state.priority, stateName).toBe("number");
       expect(typeof state.durationMs, stateName).toBe("number");
       expect(typeof state.minMs, stateName).toBe("number");
@@ -103,24 +118,31 @@ describe("Calico manifest", () => {
 
   it("does not reintroduce paper-plane assets", () => {
     const manifest = readManifest();
-    const files = Object.values(manifest.states).map((state) => state.file);
+    const files = Object.values(manifest.states).flatMap((state) => state.file ?? []);
 
     expect(files).not.toContain("/calico/paper-plane.svg");
     expect(existsSync("public/calico/paper-plane.svg")).toBe(false);
   });
 
-  it("ships every idle director state and hover response asset", async () => {
+  it("ships generated sheets for every idle director and hover response state", async () => {
     const manifest = readManifest();
+    const sheetManifest = readSheetManifest();
     const { IDLE_MOTION_POOL } = await loadIdleDirector();
 
     for (const { state } of IDLE_MOTION_POOL) {
       expect(manifest.states[state], state).toBeDefined();
-      expect(existsSync(`public${manifest.states[state].file}`), state).toBe(true);
+      expect(sheetManifest.states[state], state).toBeDefined();
+      expect(existsSync(`public${sheetManifest.states[state].file}`), state).toBe(true);
     }
     expect(manifest.states.waking).toBeDefined();
     expect(manifest.states["mini-happy"]).toBeDefined();
-    expect(existsSync(`public${manifest.states.waking.file}`)).toBe(true);
-    expect(existsSync(`public${manifest.states["mini-happy"].file}`)).toBe(true);
+    expect(existsSync(`public${sheetManifest.states.waking.file}`)).toBe(true);
+    expect(existsSync(`public${sheetManifest.states["mini-happy"].file}`)).toBe(true);
+  });
+
+  it("does not ship APNG runtime assets", () => {
+    const publicApng = readdirSync("public/calico").filter((file) => file.endsWith(".apng"));
+    expect(publicApng).toEqual([]);
   });
 
   it("keeps deep idle states on non-replay assets", async () => {
