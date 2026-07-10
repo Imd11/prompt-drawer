@@ -268,20 +268,40 @@ export function createCalicoFrameRenderer(options) {
     entry.surface.release();
   }
 
-  function evictBeforeIncoming(incomingFile) {
-    while (decoded.size >= maxDecodedSheets && !decoded.has(incomingFile)) {
-      var candidateFile = "";
-      var candidateStamp = Infinity;
-      decoded.forEach(function (entry, file) {
-        if (active && active.file === file) return;
-        if (entry.stamp < candidateStamp) {
-          candidateFile = file;
-          candidateStamp = entry.stamp;
-        }
-      });
-      if (!candidateFile) break;
-      releaseEntry(candidateFile);
+  function releaseBaselineSurface() {
+    if (!baselineSurface) return;
+    baselineSurface.release();
+    baselineSurface = null;
+  }
+
+  function liveSurfaceCount() {
+    return decoded.size + (baselineSurface ? 1 : 0);
+  }
+
+  function evictOldestInactiveEntry() {
+    var candidateFile = "";
+    var candidateStamp = Infinity;
+    decoded.forEach(function (entry, file) {
+      if (active && !active.baseline && active.file === file) return;
+      if (entry.stamp < candidateStamp) {
+        candidateFile = file;
+        candidateStamp = entry.stamp;
+      }
+    });
+    if (!candidateFile) return false;
+    releaseEntry(candidateFile);
+    return true;
+  }
+
+  function reserveIncomingSurface() {
+    while (liveSurfaceCount() >= maxDecodedSheets) {
+      if (!evictOldestInactiveEntry()) return false;
     }
+    return true;
+  }
+
+  function trimSurfaceBudget() {
+    while (liveSurfaceCount() > maxDecodedSheets && evictOldestInactiveEntry()) {}
   }
 
   function activateRequest(request, entry) {
@@ -300,6 +320,7 @@ export function createCalicoFrameRenderer(options) {
       return;
     }
     active = candidate;
+    releaseBaselineSurface();
     entry.stamp = ++lruCounter;
     state = "ready";
     clearFrameTimer();
@@ -318,7 +339,11 @@ export function createCalicoFrameRenderer(options) {
       return;
     }
 
-    evictBeforeIncoming(request.sheet.file);
+    if (!reserveIncomingSurface()) {
+      request.resolve(false);
+      pump();
+      return;
+    }
     var controller = typeof AbortController === "function" ? new AbortController() : null;
     pendingDecode = { request: request, controller: controller };
     loadSurface(request.sheet.file, { signal: controller ? controller.signal : undefined })
@@ -381,8 +406,10 @@ export function createCalicoFrameRenderer(options) {
     var requestGeneration = generation;
     clearFrameTimer();
     if (!baselineSurface) {
+      if (!reserveIncomingSurface()) return false;
+      var loadedBaseline = null;
       try {
-        baselineSurface = await loadBaseline(
+        loadedBaseline = await loadBaseline(
           "/calico/calico-idle-follow.svg?v=" + encodeURIComponent(assetVersion),
           {}
         );
@@ -391,6 +418,11 @@ export function createCalicoFrameRenderer(options) {
         visualReady = false;
         return false;
       }
+      if (requestGeneration !== generation) {
+        loadedBaseline.release();
+        return false;
+      }
+      baselineSurface = loadedBaseline;
     }
     if (requestGeneration !== generation) return false;
     var source = baselineSurface.source;
@@ -417,6 +449,7 @@ export function createCalicoFrameRenderer(options) {
     };
     if (!renderCandidate(candidate, 0)) return false;
     active = candidate;
+    trimSurfaceBudget();
     state = "ready";
     return true;
   }
@@ -505,8 +538,7 @@ export function createCalicoFrameRenderer(options) {
     queuedRequest = null;
     decoded.forEach(function (entry) { entry.surface.release(); });
     decoded.clear();
-    if (baselineSurface) baselineSurface.release();
-    baselineSurface = null;
+    releaseBaselineSurface();
     active = null;
     visualReady = false;
     state = "disposed";
@@ -518,7 +550,7 @@ export function createCalicoFrameRenderer(options) {
       backend: backend,
       state: state,
       decodedSheetCount: decoded.size,
-      liveSurfaceCount: decoded.size + (baselineSurface ? 1 : 0),
+      liveSurfaceCount: liveSurfaceCount(),
       pendingDecodeCount: pendingDecode ? 1 : 0,
       queuedRequestCount: queuedRequest ? 1 : 0,
       activeTimerCount: frameTimer ? 1 : 0,

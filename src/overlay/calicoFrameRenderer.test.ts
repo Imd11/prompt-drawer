@@ -148,6 +148,55 @@ describe("Calico frame geometry and playback", () => {
 });
 
 describe("bounded Calico frame renderer", () => {
+  it("shares the two-surface budget between baseline and motion sheets", async () => {
+    let liveSurfaces = 0;
+    let maximumLiveSurfaces = 0;
+    const releases = new Map<string, ReturnType<typeof vi.fn<() => void>>>();
+    const allocateSurface = (file: string, baseline = false) => {
+      liveSurfaces += 1;
+      maximumLiveSurfaces = Math.max(maximumLiveSurfaces, liveSurfaces);
+      let released = false;
+      const release = vi.fn(() => {
+        if (released) return;
+        released = true;
+        liveSurfaces -= 1;
+      });
+      releases.set(file, release);
+      return {
+        source: baseline ? { naturalWidth: 266, naturalHeight: 200 } : {},
+        backend: "fake",
+        release,
+      };
+    };
+    const renderer = createCalicoFrameRenderer({
+      canvas: fakeCanvas(),
+      createCanvas: () => fakeCanvas(),
+      loadBaseline: vi.fn(async () => allocateSurface("baseline", true)),
+      loadSurface: vi.fn(async (file: string) => allocateSurface(file)),
+      drawFrame: vi.fn(),
+      setTimer: vi.fn(() => 1),
+      clearTimer: vi.fn(),
+      now: () => 0,
+      maxDecodedSheets: 2,
+    });
+
+    expect(await renderer.showBaseline()).toBe(true);
+    expect(await renderer.play("a", sheet("/a.png"), { restart: true })).toBe(true);
+    expect(releases.get("baseline")).toHaveBeenCalledTimes(1);
+    expect(await renderer.play("b", sheet("/b.png"), { restart: true })).toBe(true);
+    expect(renderer.diagnostics().liveSurfaceCount).toBeLessThanOrEqual(2);
+
+    expect(await renderer.showBaseline()).toBe(true);
+    expect(renderer.diagnostics().liveSurfaceCount).toBeLessThanOrEqual(2);
+    expect(await renderer.play("c", sheet("/c.png"), { restart: true })).toBe(true);
+    expect(renderer.diagnostics().liveSurfaceCount).toBeLessThanOrEqual(2);
+    expect(maximumLiveSurfaces).toBeLessThanOrEqual(2);
+
+    renderer.dispose();
+    expect(liveSurfaces).toBe(0);
+    releases.forEach((release) => expect(release).toHaveBeenCalledTimes(1));
+  });
+
   it("keeps one decode in flight and only the latest of 2,000 queued requests", async () => {
     const interruptionSequence = [
       "idle",
