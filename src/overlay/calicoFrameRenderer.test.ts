@@ -149,6 +149,15 @@ describe("Calico frame geometry and playback", () => {
 
 describe("bounded Calico frame renderer", () => {
   it("keeps one decode in flight and only the latest of 2,000 queued requests", async () => {
+    const interruptionSequence = [
+      "idle",
+      "react-left",
+      "react-drag",
+      "idle-follow",
+      "working-typing",
+      "error",
+      "idle-follow",
+    ];
     const requests: Array<{
       file: string;
       resolve: (surface: { source: object; backend: string; release: () => void }) => void;
@@ -169,10 +178,12 @@ describe("bounded Calico frame renderer", () => {
     });
 
     for (let index = 0; index < 2_000; index += 1) {
-      void renderer.play(`state-${index}`, sheet(`/sheet-${index % 3}.png`), { restart: true });
+      const state = interruptionSequence[index % interruptionSequence.length];
+      void renderer.play(state, sheet(`/sheet-${index % 3}.png`), { restart: true });
       expect(renderer.diagnostics().pendingDecodeCount).toBeLessThanOrEqual(1);
       expect(renderer.diagnostics().queuedRequestCount).toBeLessThanOrEqual(1);
       expect(renderer.diagnostics().decodedSheetCount).toBeLessThanOrEqual(2);
+      expect(renderer.diagnostics().liveSurfaceCount).toBeLessThanOrEqual(2);
     }
     expect(requests).toHaveLength(1);
     requests[0].resolve({
@@ -200,6 +211,13 @@ describe("bounded Calico frame renderer", () => {
     });
     renderer.dispose();
     expect(requests[1].release).toHaveBeenCalledTimes(1);
+    expect(renderer.diagnostics()).toMatchObject({
+      decodedSheetCount: 0,
+      liveSurfaceCount: 0,
+      pendingDecodeCount: 0,
+      queuedRequestCount: 0,
+      activeTimerCount: 0,
+    });
   });
 
   it("owns presentation transforms on the existing canvas", () => {

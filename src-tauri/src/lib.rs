@@ -1218,8 +1218,9 @@ fn prompt_button_ensure_action(
     expected_visible: bool,
     window_present: bool,
     window_visible: bool,
+    renderer_ready: bool,
 ) -> PromptButtonEnsureAction {
-    if !expected_visible || (window_present && window_visible) {
+    if !expected_visible || (window_present && (!renderer_ready || window_visible)) {
         PromptButtonEnsureAction::None
     } else if window_present {
         PromptButtonEnsureAction::ShowExisting
@@ -2049,10 +2050,7 @@ pub fn run() {
                 let expected_visible = visibility.desired_visible();
                 let requested_generation = visibility.generation();
                 let button = monitor_app.get_webview_window(crate::windows::BUTTON_WINDOW_LABEL);
-                if button.is_some() && !monitor_app.state::<PromptButtonRendererState>().is_ready()
-                {
-                    continue;
-                }
+                let renderer_ready = monitor_app.state::<PromptButtonRendererState>().is_ready();
                 let action = prompt_button_ensure_action(
                     expected_visible,
                     button.is_some(),
@@ -2060,6 +2058,7 @@ pub fn run() {
                         .as_ref()
                         .and_then(|window| window.is_visible().ok())
                         .unwrap_or(false),
+                    renderer_ready,
                 );
                 if action == PromptButtonEnsureAction::None {
                     continue;
@@ -4015,7 +4014,7 @@ mod menu_bar_app_tests {
     #[test]
     fn prompt_button_monitor_builds_when_enabled_button_is_missing() {
         assert_eq!(
-            prompt_button_ensure_action(true, false, false),
+            prompt_button_ensure_action(true, false, false, false),
             PromptButtonEnsureAction::BuildMissing
         );
     }
@@ -4023,7 +4022,7 @@ mod menu_bar_app_tests {
     #[test]
     fn prompt_button_monitor_shows_enabled_hidden_button() {
         assert_eq!(
-            prompt_button_ensure_action(true, true, false),
+            prompt_button_ensure_action(true, true, false, true),
             PromptButtonEnsureAction::ShowExisting
         );
     }
@@ -4031,7 +4030,15 @@ mod menu_bar_app_tests {
     #[test]
     fn prompt_button_monitor_leaves_enabled_visible_button_alone() {
         assert_eq!(
-            prompt_button_ensure_action(true, true, true),
+            prompt_button_ensure_action(true, true, true, true),
+            PromptButtonEnsureAction::None
+        );
+    }
+
+    #[test]
+    fn prompt_button_monitor_keeps_unready_window_hidden() {
+        assert_eq!(
+            prompt_button_ensure_action(true, true, false, false),
             PromptButtonEnsureAction::None
         );
     }
@@ -4039,11 +4046,11 @@ mod menu_bar_app_tests {
     #[test]
     fn prompt_button_monitor_never_revives_user_disabled_button() {
         assert_eq!(
-            prompt_button_ensure_action(false, false, false),
+            prompt_button_ensure_action(false, false, false, false),
             PromptButtonEnsureAction::None
         );
         assert_eq!(
-            prompt_button_ensure_action(false, true, false),
+            prompt_button_ensure_action(false, true, false, true),
             PromptButtonEnsureAction::None
         );
     }

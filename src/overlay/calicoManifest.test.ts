@@ -1,5 +1,5 @@
 import { existsSync, readFileSync, readdirSync } from "fs";
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 
 type CalicoState = {
   file?: string;
@@ -27,6 +27,13 @@ type CalicoManifest = {
 
 type IdleDirectorModule = {
   IDLE_MOTION_POOL: Array<{ state: string; weights: Record<string, number> }>;
+};
+
+type MotionRuntimeModule = {
+  createCalicoMotionRuntime(options: Record<string, unknown>): {
+    apply(payload: Record<string, unknown>): boolean;
+    dispose(): void;
+  };
 };
 
 const phase1States = [
@@ -77,6 +84,11 @@ function readSheetManifest(): SheetManifest {
 async function loadIdleDirector() {
   // @ts-expect-error public overlay module is intentionally outside the src build graph.
   return (await import("../../public/calico/idle-director.js")) as IdleDirectorModule;
+}
+
+async function loadMotionRuntime() {
+  // @ts-expect-error public overlay module is intentionally outside the src build graph.
+  return (await import("../../public/calico/motion-runtime.js")) as MotionRuntimeModule;
 }
 
 describe("Calico manifest", () => {
@@ -143,6 +155,36 @@ describe("Calico manifest", () => {
   it("does not ship APNG runtime assets", () => {
     const publicApng = readdirSync("public/calico").filter((file) => file.endsWith(".apng"));
     expect(publicApng).toEqual([]);
+  });
+
+  it("routes every authorized non-default state to its generated sheet", async () => {
+    const manifest = readManifest();
+    const sheetManifest = readSheetManifest();
+    const { createCalicoMotionRuntime } = await loadMotionRuntime();
+    const renderer = {
+      play: vi.fn().mockResolvedValue(true),
+      showBaseline: vi.fn().mockResolvedValue(true),
+      setPresentation: vi.fn(),
+      suspend: vi.fn(),
+      resume: vi.fn(),
+      dispose: vi.fn(),
+    };
+    const runtime = createCalicoMotionRuntime({
+      renderer,
+      host: document.createElement("button"),
+      manifest,
+      sheetManifest,
+    });
+
+    for (const state of Object.keys(manifest.states)) {
+      expect(runtime.apply({ state, force: true }), state).toBe(true);
+    }
+
+    expect(new Set(renderer.play.mock.calls.map((call) => call[0]))).toEqual(
+      new Set(Object.keys(manifest.states).filter((state) => state !== manifest.defaultState))
+    );
+    expect(renderer.showBaseline).toHaveBeenCalledTimes(1);
+    runtime.dispose();
   });
 
   it("keeps deep idle states on non-replay assets", async () => {
