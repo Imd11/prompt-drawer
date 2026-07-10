@@ -1,5 +1,6 @@
 import { spawn, spawnSync } from "node:child_process";
 import {
+  appendFileSync,
   copyFileSync,
   existsSync,
   mkdirSync,
@@ -19,6 +20,7 @@ const targetDir = process.env.CARGO_TARGET_DIR
 const artifactsDir = join(targetDir, "calico-probe-artifacts");
 const resultPath = join(artifactsDir, "surface-probe.json");
 const logPath = join(artifactsDir, "surface-probe.log");
+const npmCommand = process.platform === "win32" ? "npm.cmd" : "npm";
 
 const probePngs = {
   // A: opaque red at (0,0), transparent at (1,1), plus blue and half-alpha green.
@@ -37,8 +39,17 @@ function run(command, args, options = {}) {
     maxBuffer: 50 * 1024 * 1024,
     ...options,
   });
+  if (existsSync(artifactsDir)) {
+    appendFileSync(
+      logPath,
+      `$ ${command} ${args.join(" ")}\n${result.stdout || ""}${result.stderr || ""}`
+    );
+  }
   if (result.status !== 0) {
-    throw new Error(`${command} ${args.join(" ")} failed:\n${result.stdout}\n${result.stderr}`);
+    const spawnError = result.error ? `\nspawn error: ${result.error.message}` : "";
+    throw new Error(
+      `${command} ${args.join(" ")} failed with status ${result.status}:${spawnError}`
+    );
   }
   return result.stdout;
 }
@@ -80,7 +91,7 @@ async function launchProbe(executable) {
     });
   });
   const stderr = Buffer.concat(chunks).toString("utf8");
-  writeFileSync(logPath, `${stderr}\nexit=${JSON.stringify(exit)}\n`);
+  appendFileSync(logPath, `${stderr}\nexit=${JSON.stringify(exit)}\n`);
   return { ...exit, stderr };
 }
 
@@ -99,6 +110,7 @@ function validate(report) {
 assertCleanBeforeProbe();
 rmSync(artifactsDir, { recursive: true, force: true });
 mkdirSync(artifactsDir, { recursive: true });
+writeFileSync(logPath, "");
 
 try {
   copyFileSync(fixture, join(publicCalico, "runtime-surface-probe.html"));
@@ -106,7 +118,7 @@ try {
     writeFileSync(join(publicCalico, `runtime-probe-${name}.png`), Buffer.from(base64, "base64"));
   }
 
-  run("npm", ["run", "tauri", "--", "build", "--debug", "--no-bundle"]);
+  run(npmCommand, ["run", "tauri", "--", "build", "--debug", "--no-bundle"]);
   const executable = join(targetDir, "debug", process.platform === "win32"
     ? "prompt-picker.exe"
     : "prompt-picker");
