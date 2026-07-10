@@ -205,7 +205,7 @@ export function useInputTargetPolling(
           return;
         } else if (
           app &&
-          app.name === "Prompt Picker" &&
+          app.name === "Piqory" &&
           lastTargetAtRef.current > 0 &&
           lastButtonPositionRef.current
         ) {

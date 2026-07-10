@@ -168,7 +168,7 @@ describe("prompt library sync storage", () => {
       onSyncError,
     });
 
-    await expect(storage.write("next")).rejects.toThrow("changed outside Prompt Picker");
+    await expect(storage.write("next")).rejects.toThrow("changed outside Piqory");
     expect(appDataStorage.state()).toBe("old");
     expect(writeExternal).not.toHaveBeenCalled();
     expect(onSyncError).toHaveBeenCalledWith(expect.objectContaining({ kind: "conflict" }));

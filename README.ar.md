@@ -1,8 +1,8 @@
-# Prompt Picker
+# Piqory
 
 **اقرأ هذا باللغة:** [English](README.md) | [简体中文](README.zh-CN.md) | [हिन्दी](README.hi.md) | [Español](README.es.md) | **العربية**
 
-Prompt Picker هو مشغل prompts محلي لسطح المكتب، مخصص للأشخاص الذين يستخدمون prompts منظمة بشكل متكرر داخل وكلاء البرمجة وأدوات المحادثة. يحتفظ التطبيق بزر Calico عائم قرب منطقة الإدخال الحالية، ويفتح لوحة prompts مدمجة، ثم يدرج prompt الذي تختاره في التطبيق المستهدف.
+Piqory هو مشغل prompts محلي لسطح المكتب، مخصص للأشخاص الذين يستخدمون prompts منظمة بشكل متكرر داخل وكلاء البرمجة وأدوات المحادثة. يحتفظ التطبيق بزر Piqory عائم قرب منطقة الإدخال الحالية، ويفتح لوحة prompts مدمجة، ثم يدرج prompt الذي تختاره في التطبيق المستهدف.
 
 التطبيق مبني باستخدام Tauri و React و Rust. يتم تخزين بيانات prompts محلياً على جهاز المستخدم.
 
@@ -22,14 +22,14 @@ Prompt Picker هو مشغل prompts محلي لسطح المكتب، مخصص ل
 
 أحدث إصدار متاح على GitHub:
 
-https://github.com/Imd11/prompt-picker/releases/latest
+https://github.com/Imd11/piqory/releases/latest
 
 الحزم المتاحة حالياً:
 
 - ملف DMG لأجهزة macOS Apple Silicon
 - مثبت Windows x64
 
-على macOS، يحتاج Prompt Picker إلى إذن Accessibility حتى يستطيع لصق النص وإرساله داخل تطبيقات أخرى.
+على macOS، يحتاج Piqory إلى إذن Accessibility حتى يستطيع لصق النص وإرساله داخل تطبيقات أخرى.
 
 ## مكتبات prompts تجريبية
 
@@ -42,17 +42,17 @@ https://github.com/Imd11/prompt-picker/releases/latest
 
 لاستخدام إحداهما:
 
-1. افتح Prompt Picker.
+1. افتح Piqory.
 2. انتقل إلى مدير prompts.
 3. اضغط Import.
 4. اختر أحد ملفات JSON من `examples/prompts/`.
 5. اختر استيراده كنسخة داخلية للتطبيق أو ربط ملف JSON المحدد ومزامنته.
 
-الاستيراد كنسخة يستبدل مكتبة prompts الداخلية الحالية، لذلك صدّر prompts الحالية أولاً إذا كنت تريد الاحتفاظ بنسخة احتياطية. إذا اخترت الربط والمزامنة، يحفظ Prompt Picker مسار الملف المحدد ويكتب أي تعديلات لاحقة تجريها داخل التطبيق إلى ملف JSON نفسه. لا يفحص التطبيق سطح المكتب ولا يختار ملف prompts تلقائياً.
+الاستيراد كنسخة يستبدل مكتبة prompts الداخلية الحالية، لذلك صدّر prompts الحالية أولاً إذا كنت تريد الاحتفاظ بنسخة احتياطية. إذا اخترت الربط والمزامنة، يحفظ Piqory مسار الملف المحدد ويكتب أي تعديلات لاحقة تجريها داخل التطبيق إلى ملف JSON نفسه. لا يفحص التطبيق سطح المكتب ولا يختار ملف prompts تلقائياً.
 
 ## البيانات المحلية
 
-يخزن Prompt Picker بيانات المستخدم محلياً.
+يخزن Piqory بيانات المستخدم محلياً.
 
 على macOS، يتم تخزين prompts هنا:
 
@@ -68,7 +68,7 @@ https://github.com/Imd11/prompt-picker/releases/latest
 
 تصدير prompts ينشئ نسخة احتياطية منفصلة بصيغة JSON. هذا لا يغير موقع التخزين الافتراضي للتطبيق.
 
-عند استيراد ملف JSON، يستخدم Prompt Picker ملف `prompts.json` الداخلي بشكل افتراضي. الربط والمزامنة خيار صريح لكل ملف مستورد، ويمكن إزالته من مدير prompts دون حذف ملف JSON الخارجي.
+عند استيراد ملف JSON، يستخدم Piqory ملف `prompts.json` الداخلي بشكل افتراضي. الربط والمزامنة خيار صريح لكل ملف مستورد، ويمكن إزالته من مدير prompts دون حذف ملف JSON الخارجي.
 
 ## التطوير
 
@@ -108,20 +108,20 @@ npm run tauri -- build
 
 ```bash
 npm run tauri -- build --bundles dmg
-xcrun notarytool submit "src-tauri/target/release/bundle/dmg/Prompt Picker_<version>_aarch64.dmg" \
+xcrun notarytool submit "src-tauri/target/release/bundle/dmg/Piqory_<version>_aarch64.dmg" \
   --key /path/to/AuthKey_<KEY_ID>.p8 \
   --key-id <KEY_ID> \
   --issuer <ISSUER_ID> \
   --wait
-xcrun stapler staple "src-tauri/target/release/bundle/dmg/Prompt Picker_<version>_aarch64.dmg"
-xcrun stapler validate "src-tauri/target/release/bundle/dmg/Prompt Picker_<version>_aarch64.dmg"
+xcrun stapler staple "src-tauri/target/release/bundle/dmg/Piqory_<version>_aarch64.dmg"
+xcrun stapler validate "src-tauri/target/release/bundle/dmg/Piqory_<version>_aarch64.dmg"
 ```
 
 تحقق من قبول Gatekeeper:
 
 ```bash
 spctl --assess --type open --context context:primary-signature --verbose=4 \
-  "src-tauri/target/release/bundle/dmg/Prompt Picker_<version>_aarch64.dmg"
+  "src-tauri/target/release/bundle/dmg/Piqory_<version>_aarch64.dmg"
 ```
 
 ## بناء إصدار Windows

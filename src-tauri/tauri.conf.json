@@ -1,6 +1,6 @@
 {
   "$schema": "https://schema.tauri.app/config/2",
-  "productName": "Prompt Picker",
+  "productName": "Piqory",
   "identifier": "local.promptpicker.dev",
   "version": "1.0.9",
   "build": {
@@ -13,7 +13,7 @@
     "withGlobalTauri": true,
     "windows": [
       {
-        "title": "Prompt Picker",
+        "title": "Piqory",
         "width": 760,
         "height": 560,
         "minWidth": 640,
