@@ -6,7 +6,7 @@
 
 Everyone deserves a personal prompt library.
 
-Prompt Drawer is a local prompt library for Codex, Cursor, and CLI workflows. Select a saved prompt and Prompt Drawer can fill it into the active input and send it in one action. No repeated copying, pasting, or pressing Return. Switch to **Insert only** when you want to review before sending.
+Prompt Drawer is a local prompt library for Codex, Cursor, and CLI. Select a saved prompt and Prompt Drawer can fill it into the active input and send it in one action. No repeated copying, pasting, or pressing Return. Switch to **Insert only** when you want to review before sending.
 
 ## Use it
 
