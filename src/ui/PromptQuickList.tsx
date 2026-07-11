@@ -229,7 +229,9 @@ export function PromptQuickList({
               onClick={() => selectPrompt(prompt)}
             >
               <span className="prompt-quick-title-row">
-                <span className="prompt-quick-title">{prompt.title}</span>
+                <span className="prompt-quick-title" title={prompt.title}>
+                  {prompt.title}
+                </span>
                 {prompt.type === "group" ? (
                   <span className="prompt-quick-meta">
                     {groupMeta(getPromptContainerBodies(prompt).length)}

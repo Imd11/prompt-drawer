@@ -157,6 +157,34 @@ describe("PromptQuickList", () => {
     expect(screen.queryByText("3. 完成验证。")).toBeNull();
   });
 
+  it("keeps long English group titles and metadata in the compact three-row card", () => {
+    const en = getMessages("en-US");
+    const title = "End-to-End Debugging & Fix Workflow";
+    const longEnglishGroup: PromptContainer = {
+      ...prompts[1],
+      title,
+      prompts: Array.from({ length: 8 }, (_, index) => ({
+        id: `long-group-entry-${index + 1}`,
+        body: `Step ${index + 1} prompt body.`,
+        order: index,
+      })),
+    };
+
+    renderQuickList({
+      prompts: [longEnglishGroup],
+      messages: en.quickList,
+      groupMeta: en.manager.groupMeta,
+    });
+
+    const groupOption = screen.getByRole("option", { name: new RegExp(title) });
+    expect(groupOption).toBeTruthy();
+    expect(screen.getByTitle(title)).toBeTruthy();
+    expect(screen.getByText("Group · 8 prompts")).toBeTruthy();
+    expect(screen.getByText("1. Step 1 prompt body.")).toBeTruthy();
+    expect(screen.getByText("2. Step 2 prompt body.")).toBeTruthy();
+    expect(screen.queryByText("3. Step 3 prompt body.")).toBeNull();
+  });
+
   it("renders hover preview as a floating tooltip outside the listbox", () => {
     vi.useFakeTimers();
     renderQuickList();

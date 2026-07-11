@@ -791,6 +791,7 @@ button {
 .prompt-quick-item {
   width: 100%;
   min-height: 58px;
+  flex: 0 0 auto;
   padding: 8px 11px;
   color: var(--pp-text);
   background: rgba(255, 255, 255, 0.92);
@@ -811,7 +812,9 @@ button {
 }
 
 .prompt-quick-item-group {
-  min-height: 80px;
+  height: 84px;
+  min-height: 84px;
+  overflow: hidden;
   padding-top: 10px;
   padding-bottom: 10px;
   border-color: #cfdcf0;
@@ -820,16 +823,27 @@ button {
 
 .prompt-quick-title-row {
   display: flex;
-  flex-wrap: wrap;
+  min-width: 0;
+  flex-wrap: nowrap;
   align-items: center;
   gap: 6px;
 }
 
 .prompt-quick-title {
+  min-width: 0;
+  flex: 1 1 auto;
+  overflow: hidden;
   color: var(--pp-text);
   font-size: 13px;
   font-weight: 700;
   line-height: 1.25;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.prompt-quick-title-row .prompt-quick-meta {
+  flex: 0 0 auto;
+  white-space: nowrap;
 }
 
 .prompt-quick-preview-lines {

@@ -20,6 +20,21 @@ describe("quick picker layout styles", () => {
     expect(css).toContain("overflow-y: auto");
   });
 
+  it("keeps group cards to three visual rows without flex compression", () => {
+    const itemRule = rule(".prompt-quick-item");
+    const groupRule = rule(".prompt-quick-item-group");
+    const titleRowRule = rule(".prompt-quick-title-row");
+    const titleRule = rule(".prompt-quick-title");
+
+    expect(itemRule).toContain("flex: 0 0 auto");
+    expect(groupRule).toContain("height: 84px");
+    expect(groupRule).toContain("overflow: hidden");
+    expect(titleRowRule).toContain("flex-wrap: nowrap");
+    expect(titleRule).toContain("text-overflow: ellipsis");
+    expect(titleRule).toContain("white-space: nowrap");
+    expect(css).toContain(".prompt-quick-title-row .prompt-quick-meta");
+  });
+
   it("keeps the rounded popover panel flush with the native popover window", () => {
     const rootRule = rule(".popover-root");
     const windowRule = rule(".popover-window");
