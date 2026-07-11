@@ -6,19 +6,19 @@
 
 每个人都值得拥有一个属于自己的提示词库。
 
-Prompt Drawer 是一个为 Codex 打造的本地提示词库。直接从自己的提示词库中选择一条提示词，Prompt Drawer 就能自动填入当前 Codex 输入框并发送，无需反复复制、粘贴和按回车。需要先检查内容时，也可以切换为“只填入”。
+Prompt Drawer 是一个面向 Codex、Cursor 和 CLI 工作流的本地提示词库。直接从自己的提示词库中选择一条提示词，Prompt Drawer 就能自动填入当前输入框并发送，无需反复复制、粘贴和按回车。需要先检查内容时，也可以切换为“只填入”。
 
 ## 使用方式
 
 1. 在提示词库中创建提示词、群组和分类。
-2. 将焦点放在需要工作的 Codex 输入框中。
+2. 将焦点放在需要工作的输入框中。
 3. 打开 Prompt Drawer，选择一条提示词。
 
 ## 下载
 
 在 [GitHub Releases](https://github.com/Imd11/prompt-drawer/releases/latest) 下载最新的 macOS Apple Silicon DMG 或 Windows x64 安装包。
 
-macOS 需要授予辅助功能权限，才能向 Codex 填入并发送提示词。
+macOS 需要授予辅助功能权限，才能向已支持的应用填入并发送提示词。
 
 ## 你的提示词库
 

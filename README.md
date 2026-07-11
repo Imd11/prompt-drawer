@@ -6,19 +6,19 @@
 
 Everyone deserves a personal prompt library.
 
-Prompt Drawer is a local prompt library built for Codex. Select a saved prompt and Prompt Drawer can fill it into the active Codex input and send it in one action. No repeated copying, pasting, or pressing Return. Switch to **Insert only** when you want to review before sending.
+Prompt Drawer is a local prompt library for Codex, Cursor, and CLI workflows. Select a saved prompt and Prompt Drawer can fill it into the active input and send it in one action. No repeated copying, pasting, or pressing Return. Switch to **Insert only** when you want to review before sending.
 
 ## Use it
 
 1. Create prompts, groups, and categories in your library.
-2. Focus the Codex input where you want to work.
+2. Focus the input where you want to work.
 3. Open Prompt Drawer and choose a prompt.
 
 ## Download
 
 Get the latest macOS Apple Silicon DMG or Windows x64 installer from [GitHub Releases](https://github.com/Imd11/prompt-drawer/releases/latest).
 
-macOS needs Accessibility permission to insert and send prompts in Codex.
+macOS needs Accessibility permission to insert and send prompts in supported apps.
 
 ## Your prompt library
 

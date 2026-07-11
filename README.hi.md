@@ -2,7 +2,7 @@
 
 **इसे इस भाषा में पढ़ें:** [English](README.md) | [简体中文](README.zh-CN.md) | **हिन्दी** | [Español](README.es.md) | [العربية](README.ar.md)
 
-Prompt Drawer Codex के लिए बनाया गया local desktop prompt library है। यह सक्रिय Codex input के पास एक floating button रखता है, एक compact prompt picker खोलता है, और चुने हुए prompt को आपके काम की जगह पर insert करता है।
+Prompt Drawer Codex, Cursor और CLI workflows के लिए बनाया गया local desktop prompt library है। यह सक्रिय input के पास एक floating button रखता है, एक compact prompt picker खोलता है, और चुने हुए prompt को आपके काम की जगह पर insert करता है।
 
 यह app Tauri, React, और Rust से बना है। Prompt data user की अपनी machine पर local रूप से store होता है।
 
