@@ -36,9 +36,10 @@ describe("quick picker layout styles", () => {
   });
 
   it("gives prompt cards immediate hover and pressed feedback", () => {
-    const hoverRule = rule(".prompt-quick-item:hover");
+    const hoverRule = rule(".prompt-quick-item.is-hovered");
     const activeRule = rule(".prompt-quick-item:active");
 
+    expect(css).not.toContain(".prompt-quick-item:hover {");
     expect(hoverRule).toContain("background: #f1f5f9");
     expect(hoverRule).toContain("border-color: #94a3b8");
     expect(activeRule).toContain("background: #e8eef5");

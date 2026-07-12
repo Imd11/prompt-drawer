@@ -55,7 +55,9 @@ export function PromptQuickList({
   hoverResetKey = 0,
   onGroupPreview,
 }: PromptQuickListProps) {
+  const [hoveredPromptId, setHoveredPromptId] = useState<string | null>(null);
   const [hoverPreview, setHoverPreview] = useState<HoverPreviewState | null>(null);
+  const listRef = useRef<HTMLDivElement | null>(null);
   const hoverPreviewTimerRef = useRef<number | null>(null);
   const hoverPreviewAnchorRef = useRef<HoverPreviewAnchor | null>(null);
   const hoveredPrompt = prompts.find((prompt) => prompt.id === hoverPreview?.promptId) ?? null;
@@ -67,7 +69,14 @@ export function PromptQuickList({
   }, []);
 
   useEffect(() => {
-    hideHoverPreview();
+    hidePromptHover();
+    const focusedElement = document.activeElement;
+    if (
+      focusedElement instanceof HTMLElement
+      && listRef.current?.contains(focusedElement)
+    ) {
+      focusedElement.blur();
+    }
   }, [hoverResetKey]);
 
   function clearHoverPreviewTimer() {
@@ -162,8 +171,18 @@ export function PromptQuickList({
     setHoverPreview(null);
   }
 
-  function selectPrompt(prompt: PromptContainer) {
+  function showPromptHover(prompt: PromptContainer) {
+    setHoveredPromptId(prompt.id);
+    reportGroupPreview(prompt);
+  }
+
+  function hidePromptHover() {
+    setHoveredPromptId(null);
     hideHoverPreview();
+  }
+
+  function selectPrompt(prompt: PromptContainer) {
+    hidePromptHover();
     onSelect(prompt);
   }
 
@@ -192,10 +211,11 @@ export function PromptQuickList({
         </div>
       ) : null}
       <div
+        ref={listRef}
         className="prompt-quick-list"
         role="listbox"
         aria-label={messages.ariaLabel}
-        onScroll={hideHoverPreview}
+        onScroll={hidePromptHover}
       >
         {prompts.length === 0 ? (
           <div className="prompt-quick-empty">
@@ -216,14 +236,17 @@ export function PromptQuickList({
               key={prompt.id}
               className={`prompt-quick-item ${
                 prompt.type === "group" ? "prompt-quick-item-group" : ""
-              }`}
+              } ${prompt.id === hoveredPromptId ? "is-hovered" : ""}`}
               type="button"
               role="option"
               aria-selected="false"
               disabled={submittingPromptId === prompt.id}
-              onMouseEnter={() => reportGroupPreview(prompt)}
-              onMouseMove={(event) => scheduleHoverPreview(prompt, event.currentTarget)}
-              onMouseLeave={hideHoverPreview}
+              onMouseEnter={() => showPromptHover(prompt)}
+              onMouseMove={(event) => {
+                setHoveredPromptId(prompt.id);
+                scheduleHoverPreview(prompt, event.currentTarget);
+              }}
+              onMouseLeave={hidePromptHover}
               onFocus={() => reportGroupPreview(prompt)}
               onBlur={hideHoverPreview}
               onClick={() => selectPrompt(prompt)}

@@ -98,6 +98,49 @@ describe("PromptQuickList", () => {
     expect(screen.queryByText("Single · 1 prompt")).toBeNull();
   });
 
+  it("starts without a highlighted prompt and follows the live mouse position", () => {
+    renderQuickList();
+
+    const first = screen.getByRole("option", { name: /讨论方案/i });
+    const second = screen.getByRole("option", { name: /修复流程/i });
+    expect(first.classList.contains("is-hovered")).toBe(false);
+    expect(second.classList.contains("is-hovered")).toBe(false);
+
+    fireEvent.mouseEnter(first);
+    expect(first.classList.contains("is-hovered")).toBe(true);
+    expect(second.classList.contains("is-hovered")).toBe(false);
+
+    fireEvent.mouseMove(second);
+    expect(first.classList.contains("is-hovered")).toBe(false);
+    expect(second.classList.contains("is-hovered")).toBe(true);
+
+    fireEvent.mouseLeave(second);
+    expect(second.classList.contains("is-hovered")).toBe(false);
+  });
+
+  it("clears prompt highlight and stale focus when a reused popover resets", () => {
+    const { rerender } = renderQuickList({ hoverResetKey: 0 });
+    const option = screen.getByRole("option", { name: /讨论方案/i });
+    fireEvent.mouseEnter(option);
+    option.focus();
+    expect(option.classList.contains("is-hovered")).toBe(true);
+    expect(document.activeElement).toBe(option);
+
+    const zh = getMessages("zh-CN");
+    rerender(
+      <PromptQuickList
+        prompts={prompts}
+        messages={zh.quickList}
+        groupMeta={zh.manager.groupMeta}
+        onSelect={() => {}}
+        hoverResetKey={1}
+      />
+    );
+
+    expect(option.classList.contains("is-hovered")).toBe(false);
+    expect(document.activeElement).not.toBe(option);
+  });
+
   it("renders category tabs and switches active category", () => {
     const onSelectCategory = vi.fn();
     renderQuickList({
