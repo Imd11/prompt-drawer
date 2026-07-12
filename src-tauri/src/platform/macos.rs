@@ -1073,7 +1073,7 @@ fn prepare_focus_for_policy_with_ops<N, C, V>(
     click_point: Option<(f64, f64)>,
     native_focus: N,
     click_target: C,
-    verify_focus: V,
+    _verify_focus: V,
 ) -> Result<Option<u32>, String>
 where
     N: FnOnce(u32) -> Result<Option<u32>, String>,

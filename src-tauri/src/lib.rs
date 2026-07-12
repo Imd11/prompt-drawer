@@ -414,28 +414,6 @@ fn authoritative_submit_key(
         .unwrap_or(platform::macos::NativeSubmitKey::None)
 }
 
-#[allow(dead_code)]
-fn repair_target_focus(target: &PromptPickSessionTarget) -> Result<(), String> {
-    let Some(pid) = target.pid else {
-        return Err("Captured target pid is unavailable for AX focus repair.".to_string());
-    };
-    platform::macos::repair_focus_to_editable_element(pid)
-}
-
-#[allow(dead_code)]
-fn recover_target_for_autosend(target: &PromptPickSessionTarget) -> Result<(), String> {
-    platform::macos::recover_target_app_for_autosend(
-        &target.app.bundle_id,
-        target.click_point.map(|point| (point.x, point.y)),
-    )?;
-
-    if target.click_point.is_none() {
-        repair_target_focus(target)?;
-    }
-
-    Ok(())
-}
-
 fn prompt_pick_target_or_recent(
     session_state: &PromptPickSessionState,
     recent_state: Option<&LastInputTargetState>,
