@@ -11,9 +11,10 @@ mod process_group;
 use autosend_transaction::{run_transaction, TransactionFailure};
 use ax_client::{
     ax_attribute_is_settable, ax_bool_attribute, ax_element_frame, ax_element_pid,
-    ax_range_attribute, ax_string_attribute, copy_ax_attribute, element_at_position,
-    elements_equal, set_ax_bool_attribute, set_messaging_timeout, system_wide_element_at_position,
-    traversal_children, OwnedCfValue as OwnedCf,
+    ax_element_position, ax_element_size, ax_range_attribute, ax_string_attribute,
+    copy_ax_attribute, element_at_position, elements_equal, set_ax_bool_attribute,
+    set_messaging_timeout, system_wide_element_at_position, traversal_children,
+    OwnedCfValue as OwnedCf,
 };
 use composer_resolver::{resolve_composer, ComposerCandidate};
 use focus_controller::ComposerFingerprint;
@@ -733,7 +734,15 @@ fn hit_test_editable_candidate(
         return None;
     }
     bounded_ax_query(element.as_ptr(), deadline)?;
-    let frame = ax_element_frame(element.as_ptr())?;
+    let (x, y) = ax_element_position(element.as_ptr())?;
+    bounded_ax_query(element.as_ptr(), deadline)?;
+    let (width, height) = ax_element_size(element.as_ptr())?;
+    let frame = CandidateInput {
+        x,
+        y,
+        width,
+        height,
+    };
     bounded_ax_query(element.as_ptr(), deadline)?;
     let enabled = ax_bool_attribute(element.as_ptr(), "AXEnabled").unwrap_or(true);
     bounded_ax_query(element.as_ptr(), deadline)?;

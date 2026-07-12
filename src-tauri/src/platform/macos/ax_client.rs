@@ -289,14 +289,22 @@ fn ax_size_attribute(element: AXUIElementRef, attribute: &str) -> Option<AxSize>
         .then_some(size)
 }
 
+pub(super) fn ax_element_position(element: AXUIElementRef) -> Option<(f64, f64)> {
+    ax_point_attribute(element, "AXPosition").map(|point| (point.x, point.y))
+}
+
+pub(super) fn ax_element_size(element: AXUIElementRef) -> Option<(f64, f64)> {
+    ax_size_attribute(element, "AXSize").map(|size| (size.width, size.height))
+}
+
 pub(super) fn ax_element_frame(element: AXUIElementRef) -> Option<CandidateInput> {
-    let position = ax_point_attribute(element, "AXPosition")?;
-    let size = ax_size_attribute(element, "AXSize")?;
+    let (x, y) = ax_element_position(element)?;
+    let (width, height) = ax_element_size(element)?;
     Some(CandidateInput {
-        x: position.x,
-        y: position.y,
-        width: size.width,
-        height: size.height,
+        x,
+        y,
+        width,
+        height,
     })
 }
 
