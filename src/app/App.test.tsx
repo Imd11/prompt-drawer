@@ -1030,7 +1030,7 @@ describe("app", () => {
     });
     expect(emitMock).toHaveBeenCalledWith("prompt-autosend-status", {
       kind: "sent",
-      message: "已发送",
+      message: "已填入输入框",
     });
   });
 
