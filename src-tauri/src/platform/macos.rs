@@ -2,6 +2,7 @@
 
 mod ax_client;
 mod ax_diagnostics;
+mod process_group;
 
 use ax_client::{
     ax_attribute_is_settable, ax_bool_attribute, ax_children, ax_element_frame, ax_element_pid,
