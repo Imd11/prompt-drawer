@@ -1,5 +1,8 @@
 #![cfg(target_os = "macos")]
 
+mod ax_client;
+mod ax_diagnostics;
+
 use serde::Serialize;
 use std::collections::VecDeque;
 use std::ffi::{c_void, CStr, CString};
@@ -280,12 +283,26 @@ fn app_info_for_asn(asn: &str) -> Option<FrontmostAppInfo> {
         .output()
         .ok()?;
 
-    let info_stdout = String::from_utf8_lossy(&info.stdout);
-    let info_trimmed = info_stdout.trim();
+    app_info_from_lsappinfo_output(String::from_utf8_lossy(&info.stdout).as_ref())
+}
+
+fn app_info_for_pid(pid: u32) -> Option<FrontmostAppInfo> {
+    let info = Command::new("lsappinfo")
+        .args(["info", "-pid", &pid.to_string()])
+        .output()
+        .ok()?;
+    info.status
+        .success()
+        .then(|| app_info_from_lsappinfo_output(String::from_utf8_lossy(&info.stdout).as_ref()))
+        .flatten()
+}
+
+fn app_info_from_lsappinfo_output(info: &str) -> Option<FrontmostAppInfo> {
+    let info_trimmed = info.trim();
 
     let name = parse_app_name(info_trimmed).unwrap_or_else(|| "Unknown".to_string());
-    let bundle_id = parse_bundle_id(info_trimmed).unwrap_or_else(|| format!("unknown.{}", &asn));
     let pid = parse_pid(info_trimmed)?;
+    let bundle_id = parse_bundle_id(info_trimmed).unwrap_or_else(|| format!("unknown.pid.{pid}"));
 
     Some(FrontmostAppInfo {
         app: FrontmostApp { name, bundle_id },
@@ -2469,6 +2486,18 @@ mod tests {
     }
 
     #[test]
+    fn parses_app_info_from_lsappinfo_pid_output() {
+        let info = r#""Claude" ASN:0x0-0xadbbdb1:
+    bundleID="com.anthropic.claudefordesktop"
+    pid = 67565 type="Foreground""#;
+
+        let parsed = app_info_from_lsappinfo_output(info).unwrap();
+        assert_eq!(parsed.pid, 67565);
+        assert_eq!(parsed.app.name, "Claude");
+        assert_eq!(parsed.app.bundle_id, "com.anthropic.claudefordesktop");
+    }
+
+    #[test]
     fn parses_focused_input_output() {
         let app = FrontmostApp {
             name: "Codex".to_string(),
@@ -2717,5 +2746,18 @@ mod tests {
             script.find("click at {640, 720}").unwrap()
                 < script.find("keystroke \"v\" using command down").unwrap()
         );
+    }
+
+    #[test]
+    fn native_input_diagnostics_registers_reusable_ax_modules() {
+        let source = include_str!("macos.rs");
+        let production = source
+            .split("#[cfg(test)]")
+            .next()
+            .expect("production source should precede tests");
+
+        assert!(production.contains("mod ax_client;"));
+        assert!(production.contains("mod ax_diagnostics;"));
+        assert!(!production.contains("pub mod ax_diagnostics;"));
     }
 }
