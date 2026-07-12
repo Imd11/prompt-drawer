@@ -3,12 +3,14 @@
 mod ax_client;
 mod ax_diagnostics;
 mod composer_resolver;
+mod focus_controller;
 mod input_profiles;
 mod process_group;
 
 use ax_client::{
-    ax_attribute_is_settable, ax_bool_attribute, ax_children, ax_element_frame, ax_element_pid,
-    ax_string_attribute, copy_ax_attribute, set_ax_bool_attribute, OwnedCfValue as OwnedCf,
+    ax_attribute_is_settable, ax_bool_attribute, ax_element_frame, ax_element_pid,
+    ax_string_attribute, copy_ax_attribute, elements_equal, set_ax_bool_attribute,
+    traversal_children, OwnedCfValue as OwnedCf,
 };
 use serde::Serialize;
 use std::collections::VecDeque;
@@ -540,7 +542,7 @@ fn collect_editable_candidates(window: AXUIElementRef) -> Vec<NativeEditableCand
     const MAX_SCAN_TIME: Duration = Duration::from_millis(220);
 
     let started = Instant::now();
-    let mut queue: VecDeque<(OwnedCf, usize)> = ax_children(window)
+    let mut queue: VecDeque<(OwnedCf, usize)> = traversal_children(window)
         .into_iter()
         .map(|child| (child, 1))
         .collect();
@@ -555,7 +557,7 @@ fn collect_editable_candidates(window: AXUIElementRef) -> Vec<NativeEditableCand
 
         if depth < MAX_DEPTH {
             queue.extend(
-                ax_children(element.as_ptr())
+                traversal_children(element.as_ptr())
                     .into_iter()
                     .map(|child| (child, depth + 1)),
             );
@@ -590,15 +592,16 @@ fn focus_editable_input_once(app: AXUIElementRef) -> Result<Option<u32>, String>
         && set_ax_bool_attribute(candidate.element.as_ptr(), "AXFocused", true)
     {
         std::thread::sleep(Duration::from_millis(50));
-        if let Some(pid) = focused_editable_pid(app) {
-            return Ok(Some(pid));
+        let first = copy_ax_attribute(app, "AXFocusedUIElement")
+            .is_some_and(|focused| elements_equal(focused.as_ptr(), candidate.element.as_ptr()));
+        std::thread::sleep(Duration::from_millis(35));
+        let stable = copy_ax_attribute(app, "AXFocusedUIElement")
+            .is_some_and(|focused| elements_equal(focused.as_ptr(), candidate.element.as_ptr()));
+        if first && stable {
+            return Ok(ax_element_pid(candidate.element.as_ptr()));
         }
     }
-
-    let (x, y) = input_click_point_for_frame(&candidate.model.frame);
-    click_target_point(x, y).map_err(|error| format_autosend_error("click-ax-input", &error))?;
-    std::thread::sleep(Duration::from_millis(80));
-    Ok(focused_editable_pid(app))
+    Ok(None)
 }
 
 fn focus_editable_input_for_pid(pid: u32) -> Result<Option<u32>, String> {
