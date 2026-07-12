@@ -3,9 +3,13 @@
 mod ax_client;
 mod ax_diagnostics;
 
+use ax_client::{
+    ax_attribute_is_settable, ax_bool_attribute, ax_children, ax_element_frame, ax_element_pid,
+    ax_string_attribute, copy_ax_attribute, set_ax_bool_attribute, OwnedCfValue as OwnedCf,
+};
 use serde::Serialize;
 use std::collections::VecDeque;
-use std::ffi::{c_void, CStr, CString};
+use std::ffi::c_void;
 use std::process::Command;
 use std::time::{Duration, Instant};
 
@@ -461,188 +465,9 @@ fn select_editable_candidate(
     Some(best_index)
 }
 
-struct OwnedCf(CFTypeRef);
-
-impl OwnedCf {
-    fn created(value: CFTypeRef) -> Option<Self> {
-        (!value.is_null()).then_some(Self(value))
-    }
-
-    unsafe fn retained(value: CFTypeRef) -> Option<Self> {
-        if value.is_null() {
-            return None;
-        }
-        Some(Self(CFRetain(value)))
-    }
-
-    fn as_ptr(&self) -> CFTypeRef {
-        self.0
-    }
-}
-
-impl Drop for OwnedCf {
-    fn drop(&mut self) {
-        if !self.0.is_null() {
-            unsafe { CFRelease(self.0) };
-        }
-    }
-}
-
-#[repr(C)]
-#[derive(Default)]
-struct AxPoint {
-    x: f64,
-    y: f64,
-}
-
-#[repr(C)]
-#[derive(Default)]
-struct AxSize {
-    width: f64,
-    height: f64,
-}
-
 struct NativeEditableCandidate {
     model: EditableCandidate,
     element: OwnedCf,
-}
-
-fn cf_string(value: &str) -> Option<OwnedCf> {
-    let value = CString::new(value).ok()?;
-    OwnedCf::created(unsafe {
-        CFStringCreateWithCString(std::ptr::null(), value.as_ptr(), K_CF_STRING_ENCODING_UTF8)
-    })
-}
-
-fn copy_ax_attribute(element: AXUIElementRef, attribute: &str) -> Option<OwnedCf> {
-    let attribute = cf_string(attribute)?;
-    let mut value = std::ptr::null();
-    let error = unsafe { AXUIElementCopyAttributeValue(element, attribute.as_ptr(), &mut value) };
-    (error == AX_ERROR_SUCCESS)
-        .then(|| OwnedCf::created(value))
-        .flatten()
-}
-
-fn cf_string_value(value: CFTypeRef) -> Option<String> {
-    if value.is_null() || unsafe { CFGetTypeID(value) } != unsafe { CFStringGetTypeID() } {
-        return None;
-    }
-    let mut buffer = [0_i8; 256];
-    if unsafe {
-        CFStringGetCString(
-            value,
-            buffer.as_mut_ptr(),
-            buffer.len() as isize,
-            K_CF_STRING_ENCODING_UTF8,
-        )
-    } == 0
-    {
-        return None;
-    }
-    Some(
-        unsafe { CStr::from_ptr(buffer.as_ptr()) }
-            .to_string_lossy()
-            .into_owned(),
-    )
-}
-
-fn cf_bool_value(value: CFTypeRef) -> Option<bool> {
-    if value.is_null() || unsafe { CFGetTypeID(value) } != unsafe { CFBooleanGetTypeID() } {
-        return None;
-    }
-    Some(unsafe { CFBooleanGetValue(value) } != 0)
-}
-
-fn ax_string_attribute(element: AXUIElementRef, attribute: &str) -> Option<String> {
-    copy_ax_attribute(element, attribute).and_then(|value| cf_string_value(value.as_ptr()))
-}
-
-fn ax_bool_attribute(element: AXUIElementRef, attribute: &str) -> Option<bool> {
-    copy_ax_attribute(element, attribute).and_then(|value| cf_bool_value(value.as_ptr()))
-}
-
-fn ax_attribute_is_settable(element: AXUIElementRef, attribute: &str) -> bool {
-    let Some(attribute) = cf_string(attribute) else {
-        return false;
-    };
-    let mut settable = 0_u8;
-    unsafe {
-        AXUIElementIsAttributeSettable(element, attribute.as_ptr(), &mut settable)
-            == AX_ERROR_SUCCESS
-            && settable != 0
-    }
-}
-
-fn set_ax_bool_attribute(element: AXUIElementRef, attribute: &str, value: bool) -> bool {
-    let Some(attribute) = cf_string(attribute) else {
-        return false;
-    };
-    if !value {
-        return false;
-    }
-    unsafe {
-        AXUIElementSetAttributeValue(element, attribute.as_ptr(), kCFBooleanTrue)
-            == AX_ERROR_SUCCESS
-    }
-}
-
-fn ax_children(element: AXUIElementRef) -> Vec<OwnedCf> {
-    let Some(children) = copy_ax_attribute(element, "AXChildren") else {
-        return Vec::new();
-    };
-    if unsafe { CFGetTypeID(children.as_ptr()) } != unsafe { CFArrayGetTypeID() } {
-        return Vec::new();
-    }
-
-    let count = unsafe { CFArrayGetCount(children.as_ptr()) }.clamp(0, 1_000);
-    (0..count)
-        .filter_map(|index| unsafe {
-            OwnedCf::retained(CFArrayGetValueAtIndex(children.as_ptr(), index))
-        })
-        .collect()
-}
-
-fn ax_point_attribute(element: AXUIElementRef, attribute: &str) -> Option<AxPoint> {
-    let value = copy_ax_attribute(element, attribute)?;
-    if unsafe { AXValueGetType(value.as_ptr()) } != K_AX_VALUE_CG_POINT_TYPE {
-        return None;
-    }
-    let mut point = AxPoint::default();
-    (unsafe {
-        AXValueGetValue(
-            value.as_ptr(),
-            K_AX_VALUE_CG_POINT_TYPE,
-            (&mut point as *mut AxPoint).cast(),
-        )
-    } != 0)
-        .then_some(point)
-}
-
-fn ax_size_attribute(element: AXUIElementRef, attribute: &str) -> Option<AxSize> {
-    let value = copy_ax_attribute(element, attribute)?;
-    if unsafe { AXValueGetType(value.as_ptr()) } != K_AX_VALUE_CG_SIZE_TYPE {
-        return None;
-    }
-    let mut size = AxSize::default();
-    (unsafe {
-        AXValueGetValue(
-            value.as_ptr(),
-            K_AX_VALUE_CG_SIZE_TYPE,
-            (&mut size as *mut AxSize).cast(),
-        )
-    } != 0)
-        .then_some(size)
-}
-
-fn ax_element_frame(element: AXUIElementRef) -> Option<CandidateInput> {
-    let position = ax_point_attribute(element, "AXPosition")?;
-    let size = ax_size_attribute(element, "AXSize")?;
-    Some(CandidateInput {
-        x: position.x,
-        y: position.y,
-        width: size.width,
-        height: size.height,
-    })
 }
 
 fn editable_role(role: &str) -> Option<EditableRole> {
@@ -684,12 +509,6 @@ fn native_editable_candidate(element: OwnedCf, depth: usize) -> Option<NativeEdi
         },
         element,
     })
-}
-
-fn ax_element_pid(element: AXUIElementRef) -> Option<u32> {
-    let mut pid = 0_i32;
-    (unsafe { AXUIElementGetPid(element, &mut pid) } == AX_ERROR_SUCCESS && pid > 0)
-        .then_some(pid as u32)
 }
 
 fn focused_editable_pid(app: AXUIElementRef) -> Option<u32> {
@@ -900,11 +719,6 @@ type CGKeyCode = u16;
 type AXUIElementRef = *const c_void;
 type CFTypeRef = *const c_void;
 
-const K_CF_STRING_ENCODING_UTF8: u32 = 0x0800_0100;
-const K_AX_VALUE_CG_POINT_TYPE: i32 = 1;
-const K_AX_VALUE_CG_SIZE_TYPE: i32 = 2;
-const AX_ERROR_SUCCESS: i32 = 0;
-
 #[allow(dead_code)]
 const CG_EVENT_FLAG_MASK_COMMAND: CGEventFlags = 1 << 20;
 #[allow(dead_code)]
@@ -931,49 +745,7 @@ extern "C" {
 #[link(name = "ApplicationServices", kind = "framework")]
 extern "C" {
     fn AXUIElementCreateApplication(pid: i32) -> AXUIElementRef;
-    fn AXUIElementCopyAttributeValue(
-        element: AXUIElementRef,
-        attribute: *const c_void,
-        value: *mut CFTypeRef,
-    ) -> i32;
-    fn AXUIElementSetAttributeValue(
-        element: AXUIElementRef,
-        attribute: *const c_void,
-        value: CFTypeRef,
-    ) -> i32;
-    fn AXUIElementIsAttributeSettable(
-        element: AXUIElementRef,
-        attribute: *const c_void,
-        settable: *mut u8,
-    ) -> i32;
-    fn AXUIElementGetPid(element: AXUIElementRef, pid: *mut i32) -> i32;
     fn AXUIElementSetMessagingTimeout(element: AXUIElementRef, timeout: f32) -> i32;
-    fn AXValueGetType(value: CFTypeRef) -> i32;
-    fn AXValueGetValue(value: CFTypeRef, value_type: i32, output: *mut c_void) -> u8;
-}
-
-#[link(name = "CoreFoundation", kind = "framework")]
-extern "C" {
-    static kCFBooleanTrue: *const c_void;
-    fn CFRetain(cf: *const c_void) -> *const c_void;
-    fn CFGetTypeID(cf: *const c_void) -> usize;
-    fn CFStringGetTypeID() -> usize;
-    fn CFBooleanGetTypeID() -> usize;
-    fn CFArrayGetTypeID() -> usize;
-    fn CFStringCreateWithCString(
-        allocator: *const c_void,
-        c_string: *const i8,
-        encoding: u32,
-    ) -> *const c_void;
-    fn CFStringGetCString(
-        string: *const c_void,
-        buffer: *mut i8,
-        buffer_size: isize,
-        encoding: u32,
-    ) -> u8;
-    fn CFBooleanGetValue(boolean: *const c_void) -> u8;
-    fn CFArrayGetCount(array: *const c_void) -> isize;
-    fn CFArrayGetValueAtIndex(array: *const c_void, index: isize) -> *const c_void;
 }
 
 #[allow(dead_code)]

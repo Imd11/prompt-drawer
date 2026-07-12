@@ -5,12 +5,11 @@ use std::thread;
 use std::time::{Duration, Instant};
 
 use super::ax_client::{
-    attribute_is_settable, bool_attribute, children, copy_attribute, frame, owner_pid,
-    string_attribute, AxTraversalBudget, AxTraversalLimits,
+    attribute_is_settable, bool_attribute, cf_string_value, children, copy_attribute, frame,
+    owner_pid, set_ax_bool_attribute, string_attribute, AxTraversalBudget, AxTraversalLimits,
 };
 use super::{
-    app_info_for_pid, cf_string_value, frontmost_app_info, set_ax_bool_attribute,
-    AXUIElementCreateApplication, CandidateInput, OwnedCf,
+    app_info_for_pid, frontmost_app_info, AXUIElementCreateApplication, CandidateInput, OwnedCf,
 };
 
 #[derive(Clone, Debug, PartialEq, Eq)]
