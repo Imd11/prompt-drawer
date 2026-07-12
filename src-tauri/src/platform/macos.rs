@@ -2,6 +2,7 @@
 
 mod ax_client;
 mod ax_diagnostics;
+mod composer_resolver;
 mod input_profiles;
 mod process_group;
 
