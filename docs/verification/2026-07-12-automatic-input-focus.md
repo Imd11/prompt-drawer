@@ -21,10 +21,10 @@ No prompt text, conversation text, clipboard content, or raw Accessibility value
 
 ## Automated Gates
 
-- GitHub Actions run: `29189426445`
+- GitHub Actions run: `29192931708`
 - macOS `cargo fmt --check`: passed
 - macOS `cargo check`: passed
-- macOS `cargo test --lib`: 257 passed, 0 failed, 2 ignored
+- macOS `cargo test --lib`: 262 passed, 0 failed, 2 ignored
 - macOS `npm test`: 27 files passed, 317 tests passed
 - macOS `npm run build`: passed
 - Windows `cargo check`: passed
