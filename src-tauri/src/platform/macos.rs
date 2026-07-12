@@ -1396,25 +1396,6 @@ fn post_mouse_event(mouse_type: u32, x: f64, y: f64) -> Result<(), String> {
     Ok(())
 }
 
-fn post_mouse_click(x: f64, y: f64) -> Result<(), String> {
-    let down = unsafe { CGEventCreateMouseEvent(std::ptr::null_mut(), 1, CGPoint { x, y }, 0) };
-    if down.is_null() {
-        return Err("CGEventCreateMouseEvent returned null for mouse down".to_string());
-    }
-    let up = unsafe { CGEventCreateMouseEvent(std::ptr::null_mut(), 2, CGPoint { x, y }, 0) };
-    if up.is_null() {
-        unsafe { CFRelease(down.cast_const()) };
-        return Err("CGEventCreateMouseEvent returned null for mouse up".to_string());
-    }
-    unsafe {
-        CGEventPost(CG_HID_EVENT_TAP, down);
-        CGEventPost(CG_HID_EVENT_TAP, up);
-        CFRelease(down.cast_const());
-        CFRelease(up.cast_const());
-    }
-    Ok(())
-}
-
 #[allow(dead_code)]
 fn post_paste_shortcut() -> Result<(), String> {
     post_key_event(KEY_CODE_COMMAND, true, CG_EVENT_FLAG_MASK_COMMAND)?;
@@ -1499,7 +1480,7 @@ fn recover_target_after_activation(
     target_launch_identity: ProcessLaunchIdentity,
     captured_window: Option<&TargetWindowIdentity>,
     profile: InputCapabilityProfile,
-) -> Result<Option<FocusedComposer>, String> {
+) -> Result<RecoveredTargetFocus, String> {
     if !wait_for_frontmost_target(
         bundle_id,
         target_pid,
@@ -1511,8 +1492,6 @@ fn recover_target_after_activation(
             bundle_id
         ));
     }
-
-    std::thread::sleep(Duration::from_millis(160));
 
     let _app_info = frontmost_app_info()
         .filter(|info| info.app.bundle_id == bundle_id && info.pid == target_pid)
@@ -1528,25 +1507,34 @@ fn recover_target_after_activation(
             bottom_offset,
         } = accessibility.focus_acquisition
         {
-            let live_window = calibrated_focus_window_frame(
+            let live_window = stable_calibrated_window_frame_with_ops(
                 target_pid,
-                current_target_window_identity(target_pid),
+                || current_target_window_identity(target_pid),
+                std::thread::sleep,
             )?;
             let point =
                 calibrated_window_focus_point(&live_window, horizontal_percent, bottom_offset);
-            focus_calibrated_window_point_with_ops(
+            let pointer_origin = focus_calibrated_window_point_with_ops(
                 point,
                 current_pointer_location,
-                post_mouse_click,
                 |x, y| post_mouse_event(5, x, y),
+                |x, y| post_mouse_event(1, x, y),
+                |x, y| post_mouse_event(2, x, y),
                 std::thread::sleep,
             )?;
-            return Ok(None);
+            return Ok(RecoveredTargetFocus {
+                composer: None,
+                pointer_origin: Some(pointer_origin),
+            });
         }
     }
+    std::thread::sleep(Duration::from_millis(160));
     verify_captured_window_for_policy(input_focus_policy(bundle_id), target_pid, captured_window)?;
     match input_focus_policy(bundle_id) {
-        InputFocusPolicy::PreserveApplicationFirstResponder => Ok(None),
+        InputFocusPolicy::PreserveApplicationFirstResponder => Ok(RecoveredTargetFocus {
+            composer: None,
+            pointer_origin: None,
+        }),
         InputFocusPolicy::ResolveEditableElement => {
             let captured_window = captured_window
                 .ok_or_else(|| "The captured target window is no longer available.".to_string())?;
@@ -1559,9 +1547,17 @@ fn recover_target_after_activation(
             .ok_or_else(|| {
                 "No unambiguous editable composer was found in the captured window.".to_string()
             })
-            .map(Some)
+            .map(|composer| RecoveredTargetFocus {
+                composer: Some(composer),
+                pointer_origin: None,
+            })
         }
     }
+}
+
+struct RecoveredTargetFocus {
+    composer: Option<FocusedComposer>,
+    pointer_origin: Option<(f64, f64)>,
 }
 
 fn calibrated_window_focus_point(
@@ -1592,26 +1588,73 @@ fn calibrated_focus_window_frame(
     Ok(current_window.frame)
 }
 
-fn focus_calibrated_window_point_with_ops<P, C, M, W>(
+fn stable_calibrated_window_frame_with_ops<R, W>(
+    target_pid: u32,
+    mut read_window: R,
+    mut sleep: W,
+) -> Result<CandidateInput, String>
+where
+    R: FnMut() -> Option<TargetWindowIdentity>,
+    W: FnMut(Duration),
+{
+    const MAX_READS: usize = 10;
+    const FRAME_TOLERANCE: f64 = 0.5;
+    let mut previous = None::<CandidateInput>;
+
+    for read_index in 0..MAX_READS {
+        match calibrated_focus_window_frame(target_pid, read_window()) {
+            Ok(frame) => {
+                let is_stable = previous.as_ref().is_some_and(|previous| {
+                    (previous.x - frame.x).abs() <= FRAME_TOLERANCE
+                        && (previous.y - frame.y).abs() <= FRAME_TOLERANCE
+                        && (previous.width - frame.width).abs() <= FRAME_TOLERANCE
+                        && (previous.height - frame.height).abs() <= FRAME_TOLERANCE
+                });
+                if is_stable {
+                    return Ok(frame);
+                }
+                previous = Some(frame);
+            }
+            Err(_) => previous = None,
+        }
+        if read_index + 1 < MAX_READS {
+            sleep(Duration::from_millis(40));
+        }
+    }
+
+    Err("The target window did not become stable for calibrated focus.".to_string())
+}
+
+fn focus_calibrated_window_point_with_ops<P, M, D, U, W>(
     point: (f64, f64),
     current_pointer: P,
-    click: C,
-    move_pointer: M,
+    mut move_pointer: M,
+    mouse_down: D,
+    mouse_up: U,
     mut sleep: W,
-) -> Result<(), String>
+) -> Result<(f64, f64), String>
 where
     P: FnOnce() -> Option<(f64, f64)>,
-    C: FnOnce(f64, f64) -> Result<(), String>,
-    M: FnOnce(f64, f64) -> Result<(), String>,
+    M: FnMut(f64, f64) -> Result<(), String>,
+    D: FnOnce(f64, f64) -> Result<(), String>,
+    U: FnOnce(f64, f64) -> Result<(), String>,
     W: FnMut(Duration),
 {
     let original_pointer = current_pointer()
         .ok_or_else(|| "could not capture the pointer before calibrated focus".to_string())?;
-    click(point.0, point.1)?;
-    sleep(Duration::from_millis(45));
-    move_pointer(original_pointer.0, original_pointer.1)?;
-    sleep(Duration::from_millis(75));
-    Ok(())
+    move_pointer(point.0, point.1)?;
+    sleep(Duration::from_millis(50));
+    if let Err(error) = mouse_down(point.0, point.1) {
+        let _ = move_pointer(original_pointer.0, original_pointer.1);
+        return Err(error);
+    }
+    sleep(Duration::from_millis(25));
+    if let Err(error) = mouse_up(point.0, point.1) {
+        let _ = move_pointer(original_pointer.0, original_pointer.1);
+        return Err(error);
+    }
+    sleep(Duration::from_millis(150));
+    Ok(original_pointer)
 }
 
 fn prepare_focus_for_policy_with_ops<N, C, V>(
@@ -1815,11 +1858,12 @@ where
     A: FnMut(u32) -> Result<(), String>,
 {
     let focused_composer = std::cell::RefCell::new(None::<FocusedComposer>);
+    let calibrated_pointer_origin = std::cell::RefCell::new(None::<(f64, f64)>);
     let before_paste = std::cell::RefCell::new(None::<PasteEvidenceSnapshot>);
     let observed_version = app_version_for_pid(target_pid);
     let profile =
         input_capability_profile_for_page(bundle_id, observed_version.as_deref(), page_url);
-    paste_prompt_and_submit_to_app_clipboard_with_ops(
+    let outcome = paste_prompt_and_submit_to_app_clipboard_with_ops(
         body,
         bundle_id,
         click_point,
@@ -1835,14 +1879,15 @@ where
                 );
             }
             activate_target(target_pid)?;
-            let composer = recover_target_after_activation(
+            let recovered = recover_target_after_activation(
                 bundle_id,
                 target_pid,
                 target_launch_identity,
                 captured_window,
                 profile,
             )?;
-            *focused_composer.borrow_mut() = composer;
+            *focused_composer.borrow_mut() = recovered.composer;
+            *calibrated_pointer_origin.borrow_mut() = recovered.pointer_origin;
             Ok(())
         },
         |bundle_id, captured_window| {
@@ -1911,7 +1956,14 @@ where
         },
         post_focus_preserving_submit_key,
         std::thread::sleep,
-    )
+    );
+
+    if let Some((x, y)) = calibrated_pointer_origin.take() {
+        if let Err(error) = post_mouse_event(5, x, y) {
+            eprintln!("failed to restore pointer after calibrated prompt delivery: {error}");
+        }
+    }
+    outcome
 }
 
 fn paste_prompt_and_submit_to_app_clipboard_with_ops<C, T, I, R, V, P, E, S, W>(
@@ -2741,6 +2793,84 @@ mod tests {
     }
 
     #[test]
+    fn calibrated_focus_waits_for_two_matching_live_window_frames() {
+        let first = CandidateInput {
+            x: 100.0,
+            y: 80.0,
+            width: 900.0,
+            height: 700.0,
+        };
+        let stable = CandidateInput {
+            x: 140.0,
+            y: 100.0,
+            width: 920.0,
+            height: 720.0,
+        };
+        let windows = RefCell::new(VecDeque::from([
+            Some(TargetWindowIdentity {
+                owner_pid: 42,
+                frame: first,
+                role: Some("AXWindow".to_string()),
+                title_hash: None,
+                cg_window_id: None,
+            }),
+            Some(TargetWindowIdentity {
+                owner_pid: 42,
+                frame: stable.clone(),
+                role: Some("AXWindow".to_string()),
+                title_hash: None,
+                cg_window_id: None,
+            }),
+            Some(TargetWindowIdentity {
+                owner_pid: 42,
+                frame: stable.clone(),
+                role: Some("AXWindow".to_string()),
+                title_hash: None,
+                cg_window_id: None,
+            }),
+        ]));
+        let sleeps = RefCell::new(Vec::new());
+
+        let result = stable_calibrated_window_frame_with_ops(
+            42,
+            || windows.borrow_mut().pop_front().flatten(),
+            |duration| sleeps.borrow_mut().push(duration),
+        );
+
+        assert_eq!(result, Ok(stable));
+        assert_eq!(sleeps.into_inner(), [Duration::from_millis(40); 2]);
+    }
+
+    #[test]
+    fn calibrated_focus_window_stability_wait_is_bounded() {
+        let reads = RefCell::new(0_u8);
+
+        let result = stable_calibrated_window_frame_with_ops(
+            42,
+            || {
+                let mut reads = reads.borrow_mut();
+                *reads += 1;
+                Some(TargetWindowIdentity {
+                    owner_pid: 42,
+                    frame: CandidateInput {
+                        x: f64::from(*reads),
+                        y: 100.0,
+                        width: 900.0,
+                        height: 700.0,
+                    },
+                    role: Some("AXWindow".to_string()),
+                    title_hash: None,
+                    cg_window_id: None,
+                })
+            },
+            |_| {},
+        );
+
+        assert!(result.is_err());
+        assert_eq!(*reads.borrow(), 10);
+    }
+
+    #[test]
     fn calibrated_window_focus_point_clamps_invalid_profile_values() {
         let window = CandidateInput {
             x: 10.0,
@@ -2756,17 +2886,21 @@ mod tests {
     }
 
     #[test]
-    fn calibrated_window_focus_clicks_once_and_restores_the_pointer() {
+    fn calibrated_window_focus_uses_realistic_click_timing_without_early_pointer_restore() {
         let events = RefCell::new(Vec::new());
-        focus_calibrated_window_point_with_ops(
+        let original_pointer = focus_calibrated_window_point_with_ops(
             (500.0, 700.0),
             || Some((120.0, 240.0)),
             |x, y| {
-                events.borrow_mut().push(format!("click:{x},{y}"));
+                events.borrow_mut().push(format!("move:{x},{y}"));
                 Ok(())
             },
             |x, y| {
-                events.borrow_mut().push(format!("move:{x},{y}"));
+                events.borrow_mut().push(format!("down:{x},{y}"));
+                Ok(())
+            },
+            |x, y| {
+                events.borrow_mut().push(format!("up:{x},{y}"));
                 Ok(())
             },
             |duration| {
@@ -2777,28 +2911,37 @@ mod tests {
         )
         .unwrap();
 
+        assert_eq!(original_pointer, (120.0, 240.0));
         assert_eq!(
             events.into_inner(),
-            ["click:500,700", "sleep:45", "move:120,240", "sleep:75"]
+            [
+                "move:500,700",
+                "sleep:50",
+                "down:500,700",
+                "sleep:25",
+                "up:500,700",
+                "sleep:150",
+            ]
         );
     }
 
     #[test]
-    fn calibrated_window_focus_stops_when_the_click_fails() {
-        let moved = RefCell::new(false);
+    fn calibrated_window_focus_stops_when_mouse_down_fails() {
+        let released = RefCell::new(false);
         let result = focus_calibrated_window_point_with_ops(
             (500.0, 700.0),
             || Some((120.0, 240.0)),
-            |_, _| Err("click failed".to_string()),
+            |_, _| Ok(()),
+            |_, _| Err("mouse down failed".to_string()),
             |_, _| {
-                *moved.borrow_mut() = true;
+                *released.borrow_mut() = true;
                 Ok(())
             },
             |_| {},
         );
 
-        assert_eq!(result, Err("click failed".to_string()));
-        assert!(!*moved.borrow());
+        assert_eq!(result, Err("mouse down failed".to_string()));
+        assert!(!*released.borrow());
     }
 
     #[test]
@@ -2811,6 +2954,7 @@ mod tests {
                 *clicked.borrow_mut() = true;
                 Ok(())
             },
+            |_, _| Ok(()),
             |_, _| Ok(()),
             |_| {},
         );
