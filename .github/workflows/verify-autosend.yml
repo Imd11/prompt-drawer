@@ -2,6 +2,9 @@ name: Verify Autosend Branch
 
 on:
   workflow_dispatch:
+  push:
+    branches:
+      - fix/macos-popover-main-thread
 
 jobs:
   macos:
