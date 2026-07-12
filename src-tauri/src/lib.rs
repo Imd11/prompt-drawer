@@ -1149,6 +1149,9 @@ impl PromptPickSessionState {
                 return false;
             }
         }
+        if state.identity.is_some() {
+            return true;
+        }
         state.target = Some(target);
         state.identity = Some(identity);
         true
@@ -1863,20 +1866,6 @@ fn target_application_identity_matches(
     }
 }
 
-fn window_identity_matches(
-    captured: &TargetWindowIdentity,
-    current: &TargetWindowIdentity,
-) -> bool {
-    const FRAME_TOLERANCE: f64 = 2.0;
-    captured.owner_pid == current.owner_pid
-        && captured.role == current.role
-        && captured.title_hash == current.title_hash
-        && (captured.frame.x - current.frame.x).abs() <= FRAME_TOLERANCE
-        && (captured.frame.y - current.frame.y).abs() <= FRAME_TOLERANCE
-        && (captured.frame.width - current.frame.width).abs() <= FRAME_TOLERANCE
-        && (captured.frame.height - current.frame.height).abs() <= FRAME_TOLERANCE
-}
-
 fn bundle_requires_exact_window(bundle_id: &str) -> bool {
     matches!(
         bundle_id,
@@ -1885,17 +1874,7 @@ fn bundle_requires_exact_window(bundle_id: &str) -> bool {
 }
 
 fn captured_target_identity_is_current(identity: &CapturedTargetIdentity) -> bool {
-    if !target_application_identity_is_current(&identity.application) {
-        return false;
-    }
-    if !bundle_requires_exact_window(&identity.application.bundle_id) {
-        return true;
-    }
-    let Some(captured_window) = identity.window.as_ref() else {
-        return false;
-    };
-    platform::macos::current_target_window_identity(identity.application.main_pid)
-        .is_some_and(|current| window_identity_matches(captured_window, &current))
+    target_application_identity_is_current(&identity.application)
 }
 
 fn stale_target_outcome() -> AutosendOutcome {
@@ -2965,6 +2944,34 @@ mod last_input_target_tests {
     }
 
     #[test]
+    fn background_capture_cannot_replace_an_already_frozen_window() {
+        let state = PromptPickSessionState::default();
+        state.begin(8);
+        let target = prompt_target("Chrome", "com.google.Chrome", Some(42));
+        let mut frozen = captured_identity("com.google.Chrome", std::process::id());
+        frozen.window = Some(TargetWindowIdentity {
+            owner_pid: 42,
+            frame: CandidateInput {
+                x: 10.0,
+                y: 20.0,
+                width: 1200.0,
+                height: 800.0,
+            },
+            role: Some("AXWindow".to_string()),
+            title_hash: Some("frozen".to_string()),
+            cg_window_id: None,
+        });
+        let mut background = frozen.clone();
+        background.window.as_mut().unwrap().frame.x = 500.0;
+        background.window.as_mut().unwrap().title_hash = Some("background".to_string());
+
+        assert!(state.set_captured_if_current(8, target.clone(), frozen.clone()));
+        assert!(state.set_captured_if_current(8, target, background));
+
+        assert_eq!(state.captured_identity(), Some(frozen));
+    }
+
+    #[test]
     fn target_application_identity_rejects_restarted_process() {
         let identity = TargetApplicationIdentity {
             bundle_id: "com.anthropic.claudefordesktop".to_string(),
@@ -2992,28 +2999,22 @@ mod last_input_target_tests {
     }
 
     #[test]
-    fn target_window_identity_uses_owner_and_tolerant_fingerprint() {
-        let captured = TargetWindowIdentity {
-            owner_pid: 42,
+    fn captured_target_validity_uses_process_identity_not_stale_window_geometry() {
+        let mut identity = captured_identity("com.anthropic.claudefordesktop", std::process::id());
+        identity.window = Some(TargetWindowIdentity {
+            owner_pid: std::process::id(),
             frame: CandidateInput {
-                x: 10.0,
-                y: 20.0,
-                width: 800.0,
-                height: 600.0,
+                x: -5000.0,
+                y: -5000.0,
+                width: 1.0,
+                height: 1.0,
             },
             role: Some("AXWindow".to_string()),
-            title_hash: Some("abc".to_string()),
+            title_hash: Some("stale".to_string()),
             cg_window_id: None,
-        };
-        let mut current = captured.clone();
-        current.frame.x += 1.5;
-        assert!(window_identity_matches(&captured, &current));
+        });
 
-        current.frame.x += 1.0;
-        assert!(!window_identity_matches(&captured, &current));
-        current = captured.clone();
-        current.owner_pid = 43;
-        assert!(!window_identity_matches(&captured, &current));
+        assert!(captured_target_identity_is_current(&identity));
     }
 
     #[test]

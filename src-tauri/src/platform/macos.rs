@@ -1522,20 +1522,18 @@ fn recover_target_after_activation(
                 bundle_id
             )
         })?;
-    verify_captured_window_for_policy(input_focus_policy(bundle_id), target_pid, captured_window)?;
-    if let (InputCapabilityProfile::Accessibility(accessibility), Some(captured_window)) =
-        (profile, captured_window)
-    {
+    if let InputCapabilityProfile::Accessibility(accessibility) = profile {
         if let FocusAcquisitionPolicy::CalibratedWindowPoint {
             horizontal_percent,
             bottom_offset,
         } = accessibility.focus_acquisition
         {
-            let point = calibrated_window_focus_point(
-                &captured_window.frame,
-                horizontal_percent,
-                bottom_offset,
-            );
+            let live_window = calibrated_focus_window_frame(
+                target_pid,
+                current_target_window_identity(target_pid),
+            )?;
+            let point =
+                calibrated_window_focus_point(&live_window, horizontal_percent, bottom_offset);
             focus_calibrated_window_point_with_ops(
                 point,
                 current_pointer_location,
@@ -1546,6 +1544,7 @@ fn recover_target_after_activation(
             return Ok(None);
         }
     }
+    verify_captured_window_for_policy(input_focus_policy(bundle_id), target_pid, captured_window)?;
     match input_focus_policy(bundle_id) {
         InputFocusPolicy::PreserveApplicationFirstResponder => Ok(None),
         InputFocusPolicy::ResolveEditableElement => {
@@ -1576,6 +1575,21 @@ fn calibrated_window_focus_point(
         x.clamp(window.x, window.x + window.width),
         y.clamp(window.y, window.y + window.height),
     )
+}
+
+fn calibrated_focus_window_frame(
+    target_pid: u32,
+    current_window: Option<TargetWindowIdentity>,
+) -> Result<CandidateInput, String> {
+    let current_window = current_window
+        .ok_or_else(|| "The target app does not expose its current window.".to_string())?;
+    if current_window.owner_pid != target_pid
+        || current_window.frame.width <= 1.0
+        || current_window.frame.height <= 1.0
+    {
+        return Err("The current target window is not usable for calibrated focus.".to_string());
+    }
+    Ok(current_window.frame)
 }
 
 fn focus_calibrated_window_point_with_ops<P, C, M, W>(
@@ -2022,6 +2036,19 @@ fn verify_target_focus_for_autosend(
     if !frontmost_target_matches(bundle_id, target_pid, target_launch_identity) {
         return false;
     }
+    if matches!(
+        profile,
+        InputCapabilityProfile::Accessibility(input_profiles::AccessibilityProfile {
+            focus_acquisition: FocusAcquisitionPolicy::CalibratedWindowPoint { .. },
+            ..
+        })
+    ) {
+        return calibrated_focus_window_frame(
+            target_pid,
+            current_target_window_identity(target_pid),
+        )
+        .is_ok();
+    }
     let policy = input_focus_policy(bundle_id);
     if verify_captured_window_for_policy(policy, target_pid, captured_window).is_err() {
         return false;
@@ -2029,15 +2056,6 @@ fn verify_target_focus_for_autosend(
     match policy {
         InputFocusPolicy::PreserveApplicationFirstResponder => true,
         InputFocusPolicy::ResolveEditableElement => {
-            if matches!(
-                profile,
-                InputCapabilityProfile::Accessibility(input_profiles::AccessibilityProfile {
-                    focus_acquisition: FocusAcquisitionPolicy::CalibratedWindowPoint { .. },
-                    ..
-                })
-            ) {
-                return true;
-            }
             let Some(expected_composer) = expected_composer else {
                 return false;
             };
@@ -2698,6 +2716,28 @@ mod tests {
             calibrated_window_focus_point(&window, 50, 65),
             (-700.0, 715.0)
         );
+    }
+
+    #[test]
+    fn calibrated_focus_uses_the_live_window_after_activation() {
+        let live = TargetWindowIdentity {
+            owner_pid: 42,
+            frame: CandidateInput {
+                x: 400.0,
+                y: 120.0,
+                width: 900.0,
+                height: 700.0,
+            },
+            role: Some("AXWindow".to_string()),
+            title_hash: Some("current".to_string()),
+            cg_window_id: None,
+        };
+
+        assert_eq!(
+            calibrated_focus_window_frame(42, Some(live.clone())),
+            Ok(live.frame)
+        );
+        assert!(calibrated_focus_window_frame(42, None).is_err());
     }
 
     #[test]
