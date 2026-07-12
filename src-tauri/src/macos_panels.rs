@@ -356,6 +356,18 @@ mod tests {
     }
 
     #[test]
+    fn target_activation_is_pid_bound_and_dispatched_to_the_main_thread() {
+        let source = include_str!("macos_panels.rs");
+        let start = source.find("pub(crate) fn activate_running_application").unwrap();
+        let end = source[start..].find("pub fn activate_main_window").unwrap();
+        let activation = &source[start..start + end];
+
+        assert!(activation.contains("run_on_main_thread_sync"));
+        assert!(activation.contains("runningApplicationWithProcessIdentifier"));
+        assert!(!activation.contains("bundle"));
+    }
+
+    #[test]
     fn native_window_configuration_is_dispatched_to_the_main_thread() {
         let source = include_str!("macos_panels.rs");
 

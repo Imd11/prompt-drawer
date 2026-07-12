@@ -121,7 +121,13 @@ pub(super) fn cf_string_value(value: CFTypeRef) -> Option<String> {
     if value.is_null() || unsafe { CFGetTypeID(value) } != unsafe { CFStringGetTypeID() } {
         return None;
     }
-    let mut buffer = [0_i8; 512];
+    let length = unsafe { CFStringGetLength(value) };
+    let capacity = unsafe { CFStringGetMaximumSizeForEncoding(length, K_CF_STRING_ENCODING_UTF8) }
+        .checked_add(1)?;
+    if !(1..=4 * 1024 * 1024).contains(&capacity) {
+        return None;
+    }
+    let mut buffer = vec![0_i8; capacity as usize];
     if unsafe {
         CFStringGetCString(
             value,
@@ -354,6 +360,8 @@ unsafe extern "C" {
         buffer_size: isize,
         encoding: u32,
     ) -> u8;
+    fn CFStringGetLength(value: CFTypeRef) -> isize;
+    fn CFStringGetMaximumSizeForEncoding(length: isize, encoding: u32) -> isize;
     fn CFBooleanGetValue(boolean: CFTypeRef) -> u8;
     fn CFArrayGetCount(array: CFTypeRef) -> isize;
     fn CFArrayGetValueAtIndex(array: CFTypeRef, index: isize) -> CFTypeRef;
