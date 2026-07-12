@@ -14,7 +14,7 @@ describe("settings store", () => {
     const store = createTestSettingsStore();
     const settings = await store.get();
     expect(settings.blacklistedApps).toEqual([]);
-    expect(settings.promptInsertion.mode).toBe("paste_and_submit");
+    expect(settings.promptInsertion.mode).toBe("paste_enter");
     expect(settings.language).toBe("zh-CN");
   });
 
@@ -102,8 +102,10 @@ describe("settings store", () => {
     const store = createTestSettingsStore();
     await store.setPromptInsertionMode("paste_only");
     expect((await store.get()).promptInsertion.mode).toBe("paste_only");
-    await store.setPromptInsertionMode("paste_and_submit");
-    expect((await store.get()).promptInsertion.mode).toBe("paste_and_submit");
+    await store.setPromptInsertionMode("paste_enter");
+    expect((await store.get()).promptInsertion.mode).toBe("paste_enter");
+    await store.setPromptInsertionMode("paste_command_enter");
+    expect((await store.get()).promptInsertion.mode).toBe("paste_command_enter");
   });
 
   it("normalizes old settings without prompt insertion mode", async () => {
@@ -111,7 +113,15 @@ describe("settings store", () => {
       '{"version":1,"blacklistedApps":[],"overlayPlacement":{"buttonOffset":null},"floatingButton":{"visible":true}}'
     );
     const settings = await store.get();
-    expect(settings.promptInsertion.mode).toBe("paste_and_submit");
+    expect(settings.promptInsertion.mode).toBe("paste_enter");
+  });
+
+  it("migrates the legacy paste-and-submit setting to Enter", async () => {
+    const store = createTestSettingsStore(
+      '{"version":1,"blacklistedApps":[],"promptInsertion":{"mode":"paste_and_submit"}}'
+    );
+
+    expect((await store.get()).promptInsertion.mode).toBe("paste_enter");
   });
 
   it("saves language", async () => {

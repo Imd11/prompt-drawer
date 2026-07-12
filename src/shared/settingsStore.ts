@@ -8,7 +8,7 @@ export type OverlayButtonPosition = {
   y: number;
 };
 
-export type PromptInsertionMode = "paste_only" | "paste_and_submit";
+export type PromptInsertionMode = "paste_only" | "paste_enter" | "paste_command_enter";
 export type AppLanguage = "zh-CN" | "en-US";
 
 export type PromptLibraryLink = {
@@ -60,7 +60,7 @@ export function createSettingsStore(adapter: SettingsAdapter) {
       blacklistedApps: [],
       overlayPlacement: { buttonOffset: null, buttonPosition: null },
       floatingButton: { visible: true },
-      promptInsertion: { mode: "paste_and_submit" },
+      promptInsertion: { mode: "paste_enter" },
       permissions: { accessibilityPromptRequested: false },
       promptLibraryLink: defaultPromptLibraryLink()
     };
@@ -114,9 +114,12 @@ export function createSettingsStore(adapter: SettingsAdapter) {
         visible: candidate.floatingButton?.visible === false ? false : true
       },
       promptInsertion: {
+        // Both `paste_enter` and the previous `paste_and_submit` value use Enter.
         mode: candidate.promptInsertion?.mode === "paste_only"
           ? "paste_only"
-          : "paste_and_submit"
+          : candidate.promptInsertion?.mode === "paste_command_enter"
+            ? "paste_command_enter"
+            : "paste_enter"
       },
       permissions: {
         accessibilityPromptRequested: candidate.permissions?.accessibilityPromptRequested === true

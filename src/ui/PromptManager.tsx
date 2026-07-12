@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState, type DragEvent } from "react";
-import type { PromptCategory, PromptContainer, PromptSendBehavior } from "../shared/promptTypes";
+import type { PromptCategory, PromptContainer } from "../shared/promptTypes";
 import {
   DEFAULT_GROUP_INTERVAL_MS,
   MAX_GROUP_INTERVAL_MS,
@@ -18,7 +18,6 @@ type Draft = {
   body: string;
   prompts: string[];
   intervalMs: number;
-  sendBehavior: PromptSendBehavior;
 };
 
 interface PromptManagerProps {
@@ -39,13 +38,11 @@ interface PromptManagerProps {
   onCreate: (input: {
     title: string;
     body: string;
-    sendBehavior: PromptSendBehavior;
   }) => void | Promise<void>;
   onCreateGroup: (input: {
     title: string;
     prompts: Array<{ body: string }>;
     intervalMs: number;
-    sendBehavior: PromptSendBehavior;
   }) => void | Promise<void>;
   onUpdate: (
     id: string,
@@ -55,7 +52,6 @@ interface PromptManagerProps {
       type?: EditorMode;
       prompts?: Array<{ body: string; order: number }>;
       intervalMs?: number;
-      sendBehavior?: PromptSendBehavior;
     }
   ) => void | Promise<void>;
   onDelete: (id: string) => void | Promise<void>;
@@ -70,7 +66,6 @@ const emptyDraft = (): Draft => ({
   body: "",
   prompts: ["", ""],
   intervalMs: DEFAULT_GROUP_INTERVAL_MS,
-  sendBehavior: "inherit",
 });
 
 function draftFromPrompt(prompt: PromptContainer): Draft {
@@ -83,7 +78,6 @@ function draftFromPrompt(prompt: PromptContainer): Draft {
       ? orderedPrompts.map((entry) => entry.body)
       : [orderedPrompts[0]?.body ?? "", ""],
     intervalMs: prompt.intervalMs,
-    sendBehavior: prompt.sendBehavior ?? "inherit",
   };
 }
 
@@ -258,14 +252,12 @@ export function PromptManager({
         title: sourceDraft.title.trim(),
         prompts: cleanBodies(sourceDraft.prompts),
         intervalMs: sourceDraft.intervalMs,
-        sendBehavior: sourceDraft.sendBehavior,
       });
       showCreateToast(messages.manager.groupAdded);
     } else {
       await onCreate({
         title: sourceDraft.title.trim(),
         body: sourceDraft.body.trim(),
-        sendBehavior: sourceDraft.sendBehavior,
       });
       showCreateToast(messages.manager.promptAdded);
     }
@@ -294,14 +286,12 @@ export function PromptManager({
         type: "group",
         prompts: cleanBodies(sourceDraft.prompts),
         intervalMs: sourceDraft.intervalMs,
-        sendBehavior: sourceDraft.sendBehavior,
       });
     } else {
       await onUpdate(id, {
         title: sourceDraft.title.trim(),
         type: "single",
         body: sourceDraft.body.trim(),
-        sendBehavior: sourceDraft.sendBehavior,
       });
     }
     setEditingId(null);
@@ -413,11 +403,6 @@ export function PromptManager({
                     </button>
                   </div>
                 </div>
-                <SendBehaviorControl
-                  value={draft.sendBehavior}
-                  messages={messages}
-                  onChange={(sendBehavior) => setDraft({ ...draft, sendBehavior })}
-                />
                 <input
                   ref={titleInputRef}
                   className="field"
@@ -522,13 +507,6 @@ export function PromptManager({
                           {messages.manager.group}
                         </button>
                       </div>
-                      <SendBehaviorControl
-                        value={editDraft.sendBehavior}
-                        messages={messages}
-                        onChange={(sendBehavior) =>
-                          setEditDraft({ ...editDraft, sendBehavior })
-                        }
-                      />
                       <input
                         ref={editTitleInputRef}
                         className="field"
@@ -681,42 +659,6 @@ interface GroupFieldsProps {
   onInsertPrompt: (index: number) => void;
   onRemovePrompt: (index: number) => void;
   onMovePrompt: (from: number, to: number) => void;
-}
-
-function SendBehaviorControl({
-  value,
-  messages,
-  onChange,
-}: {
-  value: PromptSendBehavior;
-  messages: Messages;
-  onChange: (value: PromptSendBehavior) => void;
-}) {
-  const options: Array<{ value: PromptSendBehavior; label: string }> = [
-    { value: "inherit", label: messages.manager.sendBehaviorInherit },
-    { value: "paste_only", label: messages.manager.sendBehaviorPasteOnly },
-    { value: "paste_enter", label: messages.manager.sendBehaviorPasteEnter },
-    { value: "paste_command_enter", label: messages.manager.sendBehaviorPasteCommandEnter },
-  ];
-
-  return (
-    <div className="send-behavior-control">
-      <span>{messages.manager.sendBehavior}</span>
-      <div className="segmented-control segmented-control-compact">
-        {options.map((option) => (
-          <button
-            key={option.value}
-            className={value === option.value ? "is-selected" : ""}
-            type="button"
-            aria-pressed={value === option.value}
-            onClick={() => onChange(option.value)}
-          >
-            {option.label}
-          </button>
-        ))}
-      </div>
-    </div>
-  );
 }
 
 function GroupFields({

@@ -47,15 +47,14 @@ describe("platform API", () => {
     });
   });
 
-  it("passes prompt send behavior to the native autosend command", async () => {
+  it("passes the selected global submit key to the native autosend command", async () => {
     invokeMock.mockResolvedValueOnce({ copied: true, sent: true, error: null, reason: null });
 
-    await pastePromptAndSubmitToLastTarget("body", "enter", "inherit");
+    await pastePromptAndSubmitToLastTarget("body", "enter");
 
     expect(invokeMock).toHaveBeenCalledWith("paste_prompt_and_submit_to_last_target", {
       body: "body",
       submitKey: "enter",
-      sendBehavior: "inherit",
     });
   });
 
@@ -72,15 +71,13 @@ describe("platform API", () => {
     await pastePromptSequenceAndSubmitToLastTarget(
       ["first", "second"],
       750,
-      "command_enter",
-      "paste_command_enter"
+      "command_enter"
     );
 
     expect(invokeMock).toHaveBeenCalledWith("paste_prompt_sequence_and_submit_to_last_target", {
       bodies: ["first", "second"],
       intervalMs: 750,
       submitKey: "command_enter",
-      sendBehavior: "paste_command_enter",
     });
   });
 });

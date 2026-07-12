@@ -1,5 +1,4 @@
 import { invoke } from "@tauri-apps/api/core";
-import type { PromptSendBehavior } from "../shared/promptTypes";
 import type { AppLanguage } from "../shared/settingsStore";
 
 export interface FrontmostApp {
@@ -76,25 +75,22 @@ export async function pastePrompt(body: string): Promise<void> {
 
 export async function pastePromptAndSubmitToLastTarget(
   body: string,
-  submitKey: NativeSubmitKey = "enter",
-  sendBehavior: PromptSendBehavior = "inherit"
+  submitKey: NativeSubmitKey = "enter"
 ): Promise<AutosendOutcome> {
   return invoke<AutosendOutcome>("paste_prompt_and_submit_to_last_target", {
     body,
     submitKey,
-    sendBehavior,
   });
 }
 
 export async function pastePromptSequenceAndSubmitToLastTarget(
   bodies: string[],
   intervalMs: number,
-  submitKey: NativeSubmitKey = "enter",
-  sendBehavior: PromptSendBehavior = "inherit"
+  submitKey: NativeSubmitKey = "enter"
 ): Promise<AutosendSequenceOutcome> {
   return invoke<AutosendSequenceOutcome>(
     "paste_prompt_sequence_and_submit_to_last_target",
-    { bodies, intervalMs, submitKey, sendBehavior }
+    { bodies, intervalMs, submitKey }
   );
 }
 

@@ -75,14 +75,22 @@ export function SettingsPanel({
                 {t.settings.pasteOnly}
               </button>
               <button
+                className={settings.promptInsertion.mode === "paste_enter" ? "is-selected" : ""}
+                type="button"
+                aria-pressed={settings.promptInsertion.mode === "paste_enter"}
+                onClick={() => onPromptInsertionModeChange("paste_enter")}
+              >
+                {t.settings.pasteEnter}
+              </button>
+              <button
                 className={
-                  settings.promptInsertion.mode === "paste_and_submit" ? "is-selected" : ""
+                  settings.promptInsertion.mode === "paste_command_enter" ? "is-selected" : ""
                 }
                 type="button"
-                aria-pressed={settings.promptInsertion.mode === "paste_and_submit"}
-                onClick={() => onPromptInsertionModeChange("paste_and_submit")}
+                aria-pressed={settings.promptInsertion.mode === "paste_command_enter"}
+                onClick={() => onPromptInsertionModeChange("paste_command_enter")}
               >
-                {t.settings.pasteAndSubmit}
+                {t.settings.pasteCommandEnter}
               </button>
             </div>
           </div>

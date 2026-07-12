@@ -11,7 +11,7 @@ describe("settings panel", () => {
     ],
     overlayPlacement: { buttonOffset: null, buttonPosition: null },
     floatingButton: { visible: true },
-    promptInsertion: { mode: "paste_and_submit" },
+    promptInsertion: { mode: "paste_enter" },
     permissions: { accessibilityPromptRequested: false },
     promptLibraryLink: {
       mode: "copy",
@@ -50,9 +50,10 @@ describe("settings panel", () => {
     renderPanel();
 
     expect(screen.getByRole("button", { name: "只填入输入框" })).toBeTruthy();
-    expect(screen.getByRole("button", { name: "填入并发送" }).getAttribute(
+    expect(screen.getByRole("button", { name: "填入 + Enter" }).getAttribute(
       "aria-pressed"
     )).toBe("true");
+    expect(screen.getByRole("button", { name: "填入 + Cmd Enter" })).toBeTruthy();
   });
 
   it("changes prompt insertion mode", () => {
@@ -105,7 +106,7 @@ describe("settings panel", () => {
   it("renders prompt click behavior as a compact settings row", () => {
     renderPanel();
 
-    const selectedButton = screen.getByRole("button", { name: "填入并发送" });
+    const selectedButton = screen.getByRole("button", { name: "填入 + Enter" });
     const row = selectedButton.closest(".settings-row");
 
     expect(row).toBeTruthy();
@@ -156,7 +157,7 @@ describe("settings panel", () => {
     renderPanel({ ...mockSettings, language: "en-US" });
 
     expect(screen.getByRole("heading", { name: "Settings" })).toBeTruthy();
-    expect(screen.getByRole("button", { name: "Insert + Send" }).getAttribute(
+    expect(screen.getByRole("button", { name: "Insert + Enter" }).getAttribute(
       "aria-pressed"
     )).toBe("true");
   });

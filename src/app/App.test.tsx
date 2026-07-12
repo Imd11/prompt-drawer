@@ -104,9 +104,12 @@ function makeContainer(overrides: Partial<PromptContainer>): PromptContainer {
 }
 
 describe("app", () => {
-  beforeEach(() => {
+  beforeEach(async () => {
     currentWindowLabel = "prompt-popover";
     window.history.pushState({}, "", "/");
+    const { readTextFile, writeTextFile } = await import("@tauri-apps/plugin-fs");
+    vi.mocked(readTextFile).mockReset();
+    vi.mocked(writeTextFile).mockReset();
     inputTargetPollingMock.mockClear();
     emitMock.mockReset();
     emitMock.mockResolvedValue(undefined);
@@ -511,7 +514,7 @@ describe("app", () => {
     await waitFor(() => {
       expect(vi.mocked(invoke)).toHaveBeenCalledWith(
         "paste_prompt_and_submit_to_last_target",
-        { body: "Test body", submitKey: "none", sendBehavior: "inherit" }
+        { body: "Test body", submitKey: "none" }
       );
     });
   });
@@ -724,7 +727,7 @@ describe("app", () => {
     });
 
     expect(screen.getByRole("heading", { name: "设置" })).toBeTruthy();
-    expect(screen.getByRole("button", { name: "填入并发送" })).toBeTruthy();
+    expect(screen.getByRole("button", { name: "填入 + Enter" })).toBeTruthy();
     expect(screen.queryByRole("button", { name: "返回管理提示词" })).toBeNull();
   });
 
@@ -923,12 +926,12 @@ describe("app", () => {
     await waitFor(() => {
       expect(vi.mocked(invoke)).toHaveBeenCalledWith(
         "paste_prompt_and_submit_to_last_target",
-        { body: "Test body", submitKey: "enter", sendBehavior: "inherit" }
+        { body: "Test body", submitKey: "enter" }
       );
     });
   });
 
-  it("uses command-enter when a prompt requests command-enter send behavior", async () => {
+  it("uses command-enter when the global setting selects it", async () => {
     const { invoke } = await import("@tauri-apps/api/core");
     vi.mocked(invoke).mockImplementation(async (command: string) => {
       if (command === "paste_prompt_and_submit_to_last_target") {
@@ -937,21 +940,27 @@ describe("app", () => {
       return undefined;
     });
     const { readTextFile } = await import("@tauri-apps/plugin-fs");
-    (readTextFile as ReturnType<typeof vi.fn>).mockResolvedValueOnce(
-      JSON.stringify({
-        version: 3,
-        categories: [devCategory],
-        containers: [
-          makeContainer({
-            id: "command-enter",
-            title: "Command Enter",
-            prompts: [{ id: "entry", body: "Command body", order: 0 }],
-            sendBehavior: "paste_command_enter",
-          }),
-        ],
-        activeCategoryId: devCategory.id,
-      })
-    );
+    (readTextFile as ReturnType<typeof vi.fn>).mockImplementation(async (path: string) => {
+      if (path.includes("prompts")) {
+        return JSON.stringify({
+          version: 3,
+          categories: [devCategory],
+          containers: [
+            makeContainer({
+              id: "command-enter",
+              title: "Command Enter",
+              prompts: [{ id: "entry", body: "Command body", order: 0 }],
+            }),
+          ],
+          activeCategoryId: devCategory.id,
+        });
+      }
+      return JSON.stringify({
+        version: 1,
+        blacklistedApps: [],
+        promptInsertion: { mode: "paste_command_enter" },
+      });
+    });
 
     await act(async () => {
       render(<App />);
@@ -965,13 +974,12 @@ describe("app", () => {
         {
           body: "Command body",
           submitKey: "command_enter",
-          sendBehavior: "paste_command_enter",
         }
       );
     });
   });
 
-  it("lets prompt paste-only behavior override global paste-and-submit", async () => {
+  it("ignores a legacy prompt send behavior and uses the global setting", async () => {
     const { invoke } = await import("@tauri-apps/api/core");
     vi.mocked(invoke).mockImplementation(async (command: string) => {
       if (command === "paste_prompt_and_submit_to_last_target") {
@@ -1005,12 +1013,12 @@ describe("app", () => {
     await waitFor(() => {
       expect(vi.mocked(invoke)).toHaveBeenCalledWith(
         "paste_prompt_and_submit_to_last_target",
-        { body: "Paste body", submitKey: "none", sendBehavior: "paste_only" }
+        { body: "Paste body", submitKey: "enter" }
       );
     });
     expect(emitMock).toHaveBeenCalledWith("prompt-autosend-status", {
       kind: "sent",
-      message: "已填入输入框",
+      message: "已发送",
     });
   });
 
@@ -1112,7 +1120,7 @@ describe("app", () => {
     await waitFor(() => {
       expect(vi.mocked(invoke)).toHaveBeenCalledWith(
         "paste_prompt_and_submit_to_last_target",
-        { body: "Test body", submitKey: "none", sendBehavior: "inherit" }
+        { body: "Test body", submitKey: "none" }
       );
     });
     expect(vi.mocked(invoke)).not.toHaveBeenCalledWith(
@@ -1236,7 +1244,7 @@ describe("app", () => {
     await waitFor(() => {
       expect(vi.mocked(invoke)).toHaveBeenCalledWith(
         "paste_prompt_and_submit_to_last_target",
-        { body: "Test body", submitKey: "enter", sendBehavior: "inherit" }
+        { body: "Test body", submitKey: "enter" }
       );
     });
     expect(callOrder.indexOf("invoke:hide_prompt_popover")).toBeLessThan(
@@ -1299,7 +1307,6 @@ describe("app", () => {
           bodies: ["First prompt", "Second prompt"],
           intervalMs: 700,
           submitKey: "enter",
-          sendBehavior: "inherit",
         }
       );
     });
@@ -1361,7 +1368,6 @@ describe("app", () => {
           bodies: ["First prompt", "Second prompt"],
           intervalMs: 700,
           submitKey: "enter",
-          sendBehavior: "inherit",
         }
       );
     });
@@ -1569,7 +1575,7 @@ describe("app", () => {
       await waitFor(() => {
         expect(vi.mocked(invoke)).toHaveBeenCalledWith(
           "paste_prompt_and_submit_to_last_target",
-          { body: "Test body", submitKey: "enter", sendBehavior: "inherit" }
+          { body: "Test body", submitKey: "enter" }
         );
       });
     } finally {
@@ -1601,7 +1607,7 @@ describe("app", () => {
       expect(vi.mocked(invoke)).toHaveBeenCalledWith("hide_prompt_popover");
       expect(vi.mocked(invoke)).toHaveBeenCalledWith(
         "paste_prompt_and_submit_to_last_target",
-        { body: "Test body", submitKey: "enter", sendBehavior: "inherit" }
+        { body: "Test body", submitKey: "enter" }
       );
     });
 
@@ -1671,7 +1677,7 @@ describe("app", () => {
     await waitFor(() => {
       expect(vi.mocked(invoke)).toHaveBeenCalledWith(
         "paste_prompt_and_submit_to_last_target",
-        { body: "Test body", submitKey: "enter", sendBehavior: "inherit" }
+        { body: "Test body", submitKey: "enter" }
       );
     });
 

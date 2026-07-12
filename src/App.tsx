@@ -40,7 +40,7 @@ const DEFAULT_SETTINGS: Settings = {
   blacklistedApps: [],
   overlayPlacement: { buttonOffset: null, buttonPosition: null },
   floatingButton: { visible: true },
-  promptInsertion: { mode: "paste_and_submit" },
+  promptInsertion: { mode: "paste_enter" },
   permissions: { accessibilityPromptRequested: false },
   promptLibraryLink: {
     mode: "copy",
@@ -120,20 +120,15 @@ function pasteOnlyBody(prompt: PromptContainer, bodies: string[]): string {
   return bodies[0] ?? "";
 }
 
-function effectiveSubmitKey(
-  prompt: PromptContainer,
-  globalMode: PromptInsertionMode
-): NativeSubmitKey {
-  switch (prompt.sendBehavior) {
+function submitKeyForMode(mode: PromptInsertionMode): NativeSubmitKey {
+  switch (mode) {
     case "paste_only":
       return "none";
-    case "paste_enter":
-      return "enter";
     case "paste_command_enter":
       return "command_enter";
-    case "inherit":
+    case "paste_enter":
     default:
-      return globalMode === "paste_only" ? "none" : "enter";
+      return "enter";
   }
 }
 
@@ -556,16 +551,12 @@ export function App({
         await emitAutosendStatus("failed", t.autosend.genericFailed);
         return;
       }
-      const submitKey = effectiveSubmitKey(
-        prompt,
-        activeSettingsRef.current.promptInsertion.mode
-      );
+      const submitKey = submitKeyForMode(activeSettingsRef.current.promptInsertion.mode);
       const status = submitKey === "none"
         ? statusForAutosendOutcome(
           await pastePromptAndSubmitToLastTarget(
             pasteOnlyBody(prompt, bodies),
-            submitKey,
-            prompt.sendBehavior
+            submitKey
           ),
           t,
           t.autosend.insertedIntoInput
@@ -575,13 +566,12 @@ export function App({
           await pastePromptSequenceAndSubmitToLastTarget(
             bodies,
             prompt.intervalMs,
-            submitKey,
-            prompt.sendBehavior
+            submitKey
           ),
           t
         )
         : statusForAutosendOutcome(
-          await pastePromptAndSubmitToLastTarget(bodies[0], submitKey, prompt.sendBehavior),
+          await pastePromptAndSubmitToLastTarget(bodies[0], submitKey),
           t
         );
       if (status.kind === "sent") {

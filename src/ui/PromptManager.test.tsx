@@ -152,31 +152,14 @@ describe("prompt manager", () => {
       .toBe("true");
   });
 
-  it("defaults new prompt send behavior to inherit", () => {
+  it("does not render a container-level send behavior control", () => {
     renderManager();
 
     openCreatePanel();
 
-    expect(screen.getByText("发送行为")).toBeTruthy();
-    expect(screen.getByRole("button", { name: "继承设置" }).getAttribute("aria-pressed"))
-      .toBe("true");
-  });
-
-  it("passes selected command-enter send behavior when creating a prompt", () => {
-    const created: Array<{ title: string; body: string; sendBehavior: string }> = [];
-    renderManager({ onCreate: (input) => { created.push(input); } });
-
-    openCreatePanel();
-    fireEvent.click(screen.getByRole("button", { name: "填入 + Cmd Enter" }));
-    fireEvent.change(screen.getByPlaceholderText("标题"), {
-      target: { value: "Command send" },
-    });
-    fireEvent.change(screen.getByPlaceholderText("提示词内容..."), {
-      target: { value: "Body" },
-    });
-    fireEvent.click(screen.getByRole("button", { name: "添加提示词" }));
-
-    expect(created[0]?.sendBehavior).toBe("paste_command_enter");
+    expect(screen.queryByText("发送行为")).toBeNull();
+    expect(screen.queryByRole("button", { name: "继承设置" })).toBeNull();
+    expect(screen.queryByRole("button", { name: "填入 + Cmd Enter" })).toBeNull();
   });
 
   it("renders prompt list as a unified row list", () => {
@@ -232,8 +215,8 @@ describe("prompt manager", () => {
     expect(screen.queryByDisplayValue("Code Review")).toBeNull();
   });
 
-  it("preserves existing send behavior while editing a prompt", () => {
-    const updated: Array<{ sendBehavior?: string }> = [];
+  it("does not render a legacy send behavior override while editing", () => {
+    const updated: Array<Record<string, unknown>> = [];
     renderManager({
       prompts: [
         makePrompt({
@@ -247,15 +230,15 @@ describe("prompt manager", () => {
 
     fireEvent.click(screen.getByRole("button", { name: "编辑" }));
 
-    expect(screen.getByRole("button", { name: "填入 + Cmd Enter" }).getAttribute("aria-pressed"))
-      .toBe("true");
+    expect(screen.queryByText("发送行为")).toBeNull();
+    expect(screen.queryByRole("button", { name: "继承设置" })).toBeNull();
     fireEvent.click(screen.getByRole("button", { name: "保存" }));
 
-    expect(updated[0]?.sendBehavior).toBe("paste_command_enter");
+    expect(updated[0]?.sendBehavior).toBeUndefined();
   });
 
   it("creates a single prompt container", async () => {
-    let created: { title: string; body: string; sendBehavior: string } | null = null;
+    let created: { title: string; body: string } | null = null;
     renderManager({ onCreate: (input) => { created = input; } });
 
     openCreatePanel();
@@ -270,7 +253,6 @@ describe("prompt manager", () => {
     expect(created).toEqual({
       title: "New Single",
       body: "Single body",
-      sendBehavior: "inherit",
     });
     await waitFor(() => {
       expect(screen.queryByRole("heading", { name: "新建提示词容器" })).toBeNull();
@@ -309,7 +291,7 @@ describe("prompt manager", () => {
   });
 
   it("creates a single prompt on the first click while the body field is focused", () => {
-    let created: { title: string; body: string; sendBehavior: string } | null = null;
+    let created: { title: string; body: string } | null = null;
     renderManager({ onCreate: (input) => { created = input; } });
 
     openCreatePanel();
@@ -328,7 +310,6 @@ describe("prompt manager", () => {
     expect(created).toEqual({
       title: "审阅修复计划",
       body: "你深入分析一下...",
-      sendBehavior: "inherit",
     });
   });
 
@@ -356,7 +337,6 @@ describe("prompt manager", () => {
       title: string;
       prompts: Array<{ body: string }>;
       intervalMs: number;
-      sendBehavior: string;
     } | null = null;
     renderManager({ onCreateGroup: (input) => { createdGroup = input; } });
 
@@ -382,7 +362,6 @@ describe("prompt manager", () => {
         { body: "Second grouped prompt", order: 1 },
       ],
       intervalMs: 700,
-      sendBehavior: "inherit",
     });
   });
 
