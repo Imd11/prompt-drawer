@@ -121,6 +121,25 @@ fn frame_inside(frame: &CandidateInput, window: &CandidateInput) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use serde::Deserialize;
+
+    #[derive(Deserialize)]
+    #[serde(rename_all = "camelCase")]
+    struct ComposerFixture {
+        window: CandidateInput,
+        trusted_pids: Vec<u32>,
+        expected_index: Option<usize>,
+        expected_error: Option<String>,
+        candidates: Vec<FixtureCandidate>,
+    }
+
+    #[derive(Deserialize)]
+    struct FixtureCandidate {
+        pid: u32,
+        role: String,
+        y: f64,
+        excluded: bool,
+    }
 
     fn window() -> CandidateInput {
         CandidateInput {
@@ -225,5 +244,38 @@ mod tests {
             resolve_composer(&[web_area, composer], &[10], &window()),
             Ok(1)
         );
+    }
+
+    #[test]
+    fn composer_fixtures_select_only_trusted_unambiguous_inputs() {
+        let fixtures = [
+            include_str!("../../../tests/fixtures/ax/appkit-composer.json"),
+            include_str!("../../../tests/fixtures/ax/electron-contenteditable.json"),
+            include_str!("../../../tests/fixtures/ax/claude-composer.json"),
+            include_str!("../../../tests/fixtures/ax/wechat-composer.json"),
+            include_str!("../../../tests/fixtures/ax/ambiguous-inputs.json"),
+        ];
+        for raw in fixtures {
+            assert!(!raw.contains("AXValue"));
+            assert!(!raw.contains("clipboard"));
+            let fixture: ComposerFixture = serde_json::from_str(raw).unwrap();
+            let candidates = fixture
+                .candidates
+                .iter()
+                .map(|item| {
+                    let mut candidate = candidate(item.pid, &item.role, item.y);
+                    if item.excluded {
+                        candidate.subrole = Some("AXSearchField".to_string());
+                    }
+                    candidate
+                })
+                .collect::<Vec<_>>();
+            let result = resolve_composer(&candidates, &fixture.trusted_pids, &fixture.window);
+            match fixture.expected_error.as_deref() {
+                Some("ambiguous") => assert_eq!(result, Err(ComposerResolutionError::Ambiguous)),
+                None => assert_eq!(result, Ok(fixture.expected_index.unwrap())),
+                other => panic!("unexpected fixture error: {other:?}"),
+            }
+        }
     }
 }

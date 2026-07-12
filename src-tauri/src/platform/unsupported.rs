@@ -32,12 +32,25 @@ pub enum AutosendFailureReason {
     PasteEventFailed,
     ReturnEventFailed,
     TargetFocusFailed,
+    TargetChanged,
+    ComposerNotFound,
+    ComposerAmbiguous,
+    FocusNotAcquired,
+    PasteNotConfirmed,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "snake_case")]
+pub enum AutosendCompletion {
+    PastedOnly,
+    Submitted,
 }
 
 #[derive(Clone, Debug, Serialize)]
 pub struct AutosendOutcome {
     pub copied: bool,
     pub sent: bool,
+    pub completion: Option<AutosendCompletion>,
     pub error: Option<String>,
     pub reason: Option<AutosendFailureReason>,
 }
@@ -54,6 +67,17 @@ impl AutosendOutcome {
         Self {
             copied: true,
             sent: true,
+            completion: Some(AutosendCompletion::Submitted),
+            error: None,
+            reason: None,
+        }
+    }
+
+    pub fn pasted_only() -> Self {
+        Self {
+            copied: true,
+            sent: false,
+            completion: Some(AutosendCompletion::PastedOnly),
             error: None,
             reason: None,
         }
@@ -63,6 +87,7 @@ impl AutosendOutcome {
         Self {
             copied: false,
             sent: false,
+            completion: None,
             error: Some(error),
             reason: Some(AutosendFailureReason::CopyFailed),
         }
@@ -74,8 +99,9 @@ impl AutosendOutcome {
 
     pub fn missing_accessibility_permission() -> Self {
         Self {
-            copied: true,
+            copied: false,
             sent: false,
+            completion: None,
             error: Some("Accessibility permission is only available on macOS.".to_string()),
             reason: Some(AutosendFailureReason::MissingAccessibilityPermission),
         }
@@ -85,6 +111,7 @@ impl AutosendOutcome {
         Self {
             copied: true,
             sent: false,
+            completion: None,
             error: Some(error),
             reason: Some(AutosendFailureReason::NoSafeTarget),
         }
@@ -94,6 +121,7 @@ impl AutosendOutcome {
         Self {
             copied: true,
             sent: false,
+            completion: None,
             error: Some(error),
             reason: Some(AutosendFailureReason::PasteEventFailed),
         }
@@ -103,6 +131,7 @@ impl AutosendOutcome {
         Self {
             copied: true,
             sent: false,
+            completion: None,
             error: Some(error),
             reason: Some(AutosendFailureReason::ReturnEventFailed),
         }
@@ -110,8 +139,9 @@ impl AutosendOutcome {
 
     pub fn target_focus_failed(error: String) -> Self {
         Self {
-            copied: true,
+            copied: false,
             sent: false,
+            completion: None,
             error: Some(error),
             reason: Some(AutosendFailureReason::TargetFocusFailed),
         }
@@ -128,7 +158,7 @@ pub struct InputTarget {
     pub pid: u32,
 }
 
-#[derive(Clone, Debug, PartialEq, Serialize)]
+#[derive(Clone, Debug, PartialEq, Serialize, serde::Deserialize)]
 pub struct CandidateInput {
     pub x: f64,
     pub y: f64,

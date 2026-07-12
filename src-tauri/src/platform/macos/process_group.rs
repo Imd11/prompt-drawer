@@ -1,6 +1,7 @@
 use std::path::{Path, PathBuf};
+use std::process::Command;
 
-use super::{CandidateInput, ProcessLaunchIdentity};
+use super::{app_info_for_pid, process_launch_identity, CandidateInput, ProcessLaunchIdentity};
 
 const WECHAT_BUNDLE_ID: &str = "com.tencent.xinWeChat";
 const WECHAT_APP_EX_BUNDLE_ID: &str = "com.tencent.flue.WeChatAppEx";
@@ -128,6 +129,81 @@ fn frames_overlap(left: &CandidateInput, right: &CandidateInput) -> bool {
     let width = (left.x + left.width).min(right.x + right.width) - left.x.max(right.x);
     let height = (left.y + left.height).min(right.y + right.height) - left.y.max(right.y);
     width > 0.0 && height > 0.0
+}
+
+pub(super) fn discover_trusted_candidate_pids(
+    main_pid: u32,
+    main_bundle_id: &str,
+) -> Vec<u32> {
+    let mut result = vec![main_pid];
+    if main_bundle_id != WECHAT_BUNDLE_ID {
+        return result;
+    }
+    let Some(main_path) = executable_path(main_pid) else {
+        return result;
+    };
+    let Some(main_root) = app_bundle_root(&main_path).map(Path::to_path_buf) else {
+        return result;
+    };
+    let Ok(output) = Command::new("ps").args(["-axo", "pid=,ppid="]).output() else {
+        return result;
+    };
+    let processes = String::from_utf8_lossy(&output.stdout)
+        .lines()
+        .filter_map(|line| {
+            let mut fields = line.split_whitespace();
+            Some((fields.next()?.parse().ok()?, fields.next()?.parse().ok()?))
+        })
+        .collect::<Vec<(u32, u32)>>();
+    for (pid, _) in &processes {
+        let Some(info) = app_info_for_pid(*pid) else {
+            continue;
+        };
+        let valid = info.app.bundle_id == WECHAT_APP_EX_BUNDLE_ID
+            && process_launch_identity(*pid).is_some()
+            && process_is_descendant(*pid, main_pid, &processes)
+            && executable_path(*pid)
+                .and_then(|path| app_bundle_root(&path).map(Path::to_path_buf))
+                .is_some_and(|root| root == main_root);
+        if valid {
+            result.push(*pid);
+        }
+    }
+    result.sort_unstable();
+    result.dedup();
+    result
+}
+
+fn process_is_descendant(pid: u32, ancestor: u32, processes: &[(u32, u32)]) -> bool {
+    let mut current = pid;
+    for _ in 0..32 {
+        let Some((_, parent)) = processes.iter().find(|(candidate, _)| *candidate == current) else {
+            return false;
+        };
+        if *parent == ancestor {
+            return true;
+        }
+        if *parent == 0 || *parent == current {
+            return false;
+        }
+        current = *parent;
+    }
+    false
+}
+
+fn executable_path(pid: u32) -> Option<PathBuf> {
+    let mut buffer = vec![0_u8; 4096];
+    let length = unsafe { proc_pidpath(pid as i32, buffer.as_mut_ptr().cast(), buffer.len() as u32) };
+    if length <= 0 {
+        return None;
+    }
+    buffer.truncate(length as usize);
+    Some(PathBuf::from(String::from_utf8(buffer).ok()?))
+}
+
+#[link(name = "proc")]
+unsafe extern "C" {
+    fn proc_pidpath(pid: i32, buffer: *mut std::ffi::c_void, buffersize: u32) -> i32;
 }
 
 #[cfg(test)]

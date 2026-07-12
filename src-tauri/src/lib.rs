@@ -177,6 +177,8 @@ pub struct AutosendSequenceOutcome {
     pub copied: bool,
     pub sent: bool,
     pub sent_count: usize,
+    pub processed_count: usize,
+    pub completion: Option<platform::AutosendCompletion>,
     pub failed_index: Option<usize>,
     pub error: Option<String>,
     pub reason: Option<platform::macos::AutosendFailureReason>,
@@ -188,6 +190,8 @@ impl AutosendSequenceOutcome {
             copied: true,
             sent: true,
             sent_count: count,
+            processed_count: count,
+            completion: Some(platform::AutosendCompletion::Submitted),
             failed_index: None,
             error: None,
             reason: None,
@@ -199,6 +203,8 @@ impl AutosendSequenceOutcome {
             copied: outcome.copied,
             sent: false,
             sent_count,
+            processed_count: sent_count,
+            completion: outcome.completion,
             failed_index: Some(failed_index),
             error: outcome.error,
             reason: outcome.reason,
@@ -258,6 +264,10 @@ fn paste_prompt_sequence_and_submit_to_last_target_impl(
     app: &tauri::AppHandle,
     submit_key: platform::macos::NativeSubmitKey,
 ) -> Result<AutosendSequenceOutcome, String> {
+    let captured_window = state
+        .captured_identity()
+        .or_else(|| recent_state.captured_identity())
+        .and_then(|identity| identity.window.map(|window| window.frame));
     paste_prompt_sequence_and_submit_to_session_target_with_senders(
         bodies,
         interval_ms,
@@ -269,6 +279,7 @@ fn paste_prompt_sequence_and_submit_to_last_target_impl(
                 body,
                 bundle_id,
                 click_point.map(|point| (point.x, point.y)),
+                captured_window.as_ref(),
                 submit_key,
                 |text| copy_text_to_clipboard(app, text),
             )
@@ -285,6 +296,10 @@ fn paste_prompt_and_submit_to_last_target_impl(
     app: &tauri::AppHandle,
     submit_key: platform::macos::NativeSubmitKey,
 ) -> Result<AutosendOutcome, String> {
+    let captured_window = state
+        .captured_identity()
+        .or_else(|| recent_state.captured_identity())
+        .and_then(|identity| identity.window.map(|window| window.frame));
     paste_prompt_and_submit_to_session_target_with_senders(
         body,
         state,
@@ -295,6 +310,7 @@ fn paste_prompt_and_submit_to_last_target_impl(
                 body,
                 bundle_id,
                 click_point.map(|point| (point.x, point.y)),
+                captured_window.as_ref(),
                 submit_key,
                 |text| copy_text_to_clipboard(app, text),
             )
@@ -699,7 +715,7 @@ where
 
     if submit_key == platform::macos::NativeSubmitKey::None {
         emit_autosend_diagnostic("sent-without-submit", target, None, None);
-        return AutosendOutcome::sent();
+        return AutosendOutcome::pasted_only();
     }
 
     let before_submit = frontmost_reader();
@@ -843,6 +859,29 @@ where
             copy_sender,
             "Target app is not safe for app-only autosend.",
         );
+        return Ok(AutosendSequenceOutcome::from_failure(outcome, 0, 1));
+    }
+
+    if submit_key == platform::macos::NativeSubmitKey::None {
+        let joined = clean_bodies.join("\n\n");
+        let outcome = app_sender(
+            &joined,
+            &target.app.bundle_id,
+            target.click_point,
+            submit_key,
+        );
+        if outcome.completion == Some(platform::AutosendCompletion::PastedOnly) {
+            return Ok(AutosendSequenceOutcome {
+                copied: true,
+                sent: false,
+                sent_count: 0,
+                processed_count: clean_bodies.len(),
+                completion: outcome.completion,
+                failed_index: None,
+                error: None,
+                reason: None,
+            });
+        }
         return Ok(AutosendSequenceOutcome::from_failure(outcome, 0, 1));
     }
 
@@ -1102,6 +1141,14 @@ impl PromptPickSessionState {
         let mut state = self.0.lock().expect("prompt pick session lock poisoned");
         let target = state.target.take()?;
         Some((target, state.identity.take()))
+    }
+
+    fn captured_identity(&self) -> Option<CapturedTargetIdentity> {
+        self.0
+            .lock()
+            .expect("prompt pick session lock poisoned")
+            .identity
+            .clone()
     }
 }
 
@@ -1709,6 +1756,7 @@ fn stale_target_outcome() -> AutosendOutcome {
     AutosendOutcome {
         copied: false,
         sent: false,
+        completion: None,
         error: Some("The captured target app or window is no longer available.".to_string()),
         reason: Some(platform::macos::AutosendFailureReason::NoSafeTarget),
     }
@@ -4271,6 +4319,42 @@ mod last_input_target_tests {
             ]
         );
         assert_eq!(sleeps, vec![700, 700]);
+    }
+
+    #[test]
+    fn paste_only_sequence_joins_bodies_and_reports_processed_without_submit() {
+        let state = PromptPickSessionState::default();
+        state.set(prompt_target(
+            "Codex",
+            "com.openai.codex",
+            Some(std::process::id()),
+        ));
+        let bodies = vec!["first".to_string(), "second".to_string()];
+        let outcome = paste_prompt_sequence_and_submit_to_session_target_with_senders(
+            &bodies,
+            700,
+            &state,
+            None,
+            platform::macos::NativeSubmitKey::None,
+            |body, bundle_id, _, submit_key| {
+                assert_eq!(body, "first\n\nsecond");
+                assert_eq!(bundle_id, "com.openai.codex");
+                assert_eq!(submit_key, platform::macos::NativeSubmitKey::None);
+                AutosendOutcome::pasted_only()
+            },
+            |_| panic!("copy fallback must not run"),
+            |_| panic!("joined paste-only group must not sleep between bodies"),
+        )
+        .unwrap();
+
+        assert!(!outcome.sent);
+        assert_eq!(outcome.sent_count, 0);
+        assert_eq!(outcome.processed_count, 2);
+        assert_eq!(
+            outcome.completion,
+            Some(platform::AutosendCompletion::PastedOnly)
+        );
+        assert_eq!(outcome.failed_index, None);
     }
 
     #[test]
