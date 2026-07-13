@@ -661,13 +661,14 @@ pub(crate) fn prewarm_prompt_popover(app: &tauri::AppHandle) -> Result<(), Strin
 }
 
 fn show_non_activating_overlay_window(window: &tauri::WebviewWindow) -> Result<(), String> {
-    crate::macos_panels::configure_non_activating_panel(window)?;
-
-    if !window.is_visible().unwrap_or(false) {
-        return Err("Overlay window did not become visible.".to_string());
+    #[cfg(target_os = "macos")]
+    {
+        crate::macos_panels::show_non_activating_panel(window)
     }
-
-    Ok(())
+    #[cfg(not(target_os = "macos"))]
+    {
+        window.show().map_err(|error| error.to_string())
+    }
 }
 
 async fn capture_prompt_pick_session_before_show(
@@ -1643,10 +1644,19 @@ mod tests {
     fn prompt_popover_is_prewarmed_hidden_for_immediate_first_open() {
         let windows_source = include_str!("windows.rs");
         let lib_source = include_str!("lib.rs");
+        let start = windows_source
+            .find("pub(crate) fn prewarm_prompt_popover")
+            .expect("popover prewarm helper should exist");
+        let end = windows_source[start..]
+            .find("fn show_non_activating_overlay_window")
+            .expect("overlay show helper should follow prewarm");
+        let prewarm = &windows_source[start..start + end];
 
         assert!(windows_source.contains("pub(crate) fn prewarm_prompt_popover"));
         assert!(windows_source.contains("build_prompt_popover_window(app, 0.0, 0.0, \"popover\")"));
         assert!(windows_source.contains(".visible(false)"));
+        assert!(prewarm.contains("configure_non_activating_panel(&window)?"));
+        assert!(!prewarm.contains("show_non_activating_panel"));
         assert!(lib_source.contains("crate::windows::prewarm_prompt_popover(app.handle())"));
     }
 
@@ -1751,10 +1761,10 @@ mod tests {
         let helper = &source[start..start + end];
 
         assert!(!helper.contains("window.set_focusable(false)"));
-        assert!(helper.contains("configure_non_activating_panel"));
-        assert!(!helper.contains("window.show()"));
-        assert!(helper.contains("window.is_visible().unwrap_or(false)"));
-        assert!(helper.contains("Overlay window did not become visible."));
+        assert!(helper.contains("show_non_activating_panel"));
+        assert!(helper.contains("#[cfg(target_os = \"macos\")]"));
+        assert!(helper.contains("#[cfg(not(target_os = \"macos\"))]"));
+        assert!(helper.contains("window.show()"));
     }
 
     #[test]

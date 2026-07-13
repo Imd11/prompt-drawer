@@ -138,7 +138,6 @@ fn configure_non_activating_panel_on_main_thread(
         panel.setFloatingPanel(true);
         panel.setBecomesKeyOnlyIfNeeded(true);
         configure_non_activating_webview_on_main_thread(window)?;
-        ns_window.orderFrontRegardless();
 
         let is_native_panel: bool = objc2::msg_send![ns_window, isKindOfClass: NSPanel::class()];
         let can_become_key: Bool = objc2::msg_send![ns_window, canBecomeKeyWindow];
@@ -163,6 +162,29 @@ fn configure_non_activating_panel_on_main_thread(
     }
 
     Ok(())
+}
+
+#[cfg(target_os = "macos")]
+pub fn show_non_activating_panel(window: &tauri::WebviewWindow) -> Result<(), String> {
+    let app = window.app_handle().clone();
+    let window = window.clone();
+    run_on_main_thread_sync(&app, move || {
+        configure_non_activating_panel_on_main_thread(&window)?;
+        let ns_window_ptr = window.ns_window().map_err(|error| error.to_string())?;
+        if ns_window_ptr.is_null() {
+            return Err("ns_window returned null".to_string());
+        }
+
+        unsafe {
+            let ns_window = &*(ns_window_ptr.cast::<NSWindow>());
+            ns_window.orderFrontRegardless();
+            let visible: Bool = objc2::msg_send![ns_window, isVisible];
+            visible
+                .as_bool()
+                .then_some(())
+                .ok_or_else(|| "Overlay window did not become visible.".to_string())
+        }
+    })
 }
 
 #[cfg(target_os = "macos")]
@@ -425,11 +447,34 @@ mod tests {
         assert!(webview_configuration.contains("class_addMethod"));
         assert!(!webview_configuration.contains("acceptsFirstResponder"));
         assert!(!webview_configuration.contains("set_class"));
+        assert!(configuration.contains("configure_non_activating_webview_on_main_thread"));
+    }
+
+    #[test]
+    fn overlay_configuration_and_presentation_are_separate() {
+        let source = include_str!("macos_panels.rs");
+        let configuration_start = source
+            .find("fn configure_non_activating_panel_on_main_thread")
+            .expect("native panel configuration helper should exist");
+        let configuration_end = source[configuration_start..]
+            .find("pub fn show_non_activating_panel")
+            .expect("native panel presentation helper should follow configuration");
+        let configuration = &source[configuration_start..configuration_start + configuration_end];
+        let presentation_start = configuration_start + configuration_end;
+        let presentation_end = source[presentation_start..]
+            .find("extern \"C-unwind\" fn reject_webview_key_focus")
+            .expect("webview configuration should follow presentation");
+        let presentation = &source[presentation_start..presentation_start + presentation_end];
+
+        assert!(!configuration.contains("orderFrontRegardless"));
+        assert!(presentation.contains("run_on_main_thread_sync"));
+        assert!(presentation.contains("configure_non_activating_panel_on_main_thread"));
+        assert!(presentation.contains("orderFrontRegardless"));
         assert!(
-            configuration
-                .find("configure_non_activating_webview_on_main_thread")
+            presentation
+                .find("configure_non_activating_panel_on_main_thread")
                 .unwrap()
-                < configuration.find("orderFrontRegardless").unwrap()
+                < presentation.find("orderFrontRegardless").unwrap()
         );
     }
 
