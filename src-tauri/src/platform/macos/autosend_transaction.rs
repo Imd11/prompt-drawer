@@ -24,6 +24,12 @@ pub(super) enum TransactionFailure {
     SubmitEventFailed,
 }
 
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(super) enum PostPasteVerification {
+    Confirmed,
+    Rejected(TransactionFailure),
+}
+
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub(super) struct TransactionResult {
     pub phases: Vec<AutosendPhase>,
@@ -34,7 +40,7 @@ pub(super) struct TransactionResult {
 }
 
 #[allow(clippy::too_many_arguments)]
-pub(super) fn run_transaction<V, R, F, C, K, P, E, S>(
+pub(super) fn run_transaction<V, R, F, C, K, P, E, B, S>(
     submit_key: NativeSubmitKey,
     mut validate_target: V,
     mut resolve_composer: R,
@@ -43,6 +49,7 @@ pub(super) fn run_transaction<V, R, F, C, K, P, E, S>(
     mut revalidate_focus: K,
     mut post_paste: P,
     mut verify_paste: E,
+    mut validate_before_submit: B,
     mut post_submit: S,
 ) -> TransactionResult
 where
@@ -52,7 +59,8 @@ where
     C: FnMut() -> bool,
     K: FnMut() -> bool,
     P: FnMut() -> bool,
-    E: FnMut() -> bool,
+    E: FnMut() -> PostPasteVerification,
+    B: FnMut() -> PostPasteVerification,
     S: FnMut(NativeSubmitKey) -> bool,
 {
     let mut result = TransactionResult {
@@ -113,16 +121,23 @@ where
     result.paste_posted = true;
 
     if submit_key != NativeSubmitKey::None {
-        require!(
-            AutosendPhase::VerifyAfterPaste,
-            verify_paste(),
-            TransactionFailure::PasteNotConfirmed
-        );
-        require!(
-            AutosendPhase::VerifyFocus,
-            validate_target() && revalidate_focus(),
-            TransactionFailure::TargetChanged
-        );
+        result.phases.push(AutosendPhase::VerifyAfterPaste);
+        if let PostPasteVerification::Rejected(failure) = verify_paste() {
+            result.phases.push(AutosendPhase::Aborted);
+            result.failure = Some(failure);
+            return result;
+        }
+        result.phases.push(AutosendPhase::VerifyFocus);
+        if !validate_target() {
+            result.phases.push(AutosendPhase::Aborted);
+            result.failure = Some(TransactionFailure::TargetChanged);
+            return result;
+        }
+        if let PostPasteVerification::Rejected(failure) = validate_before_submit() {
+            result.phases.push(AutosendPhase::Aborted);
+            result.failure = Some(failure);
+            return result;
+        }
         result.phases.push(AutosendPhase::Submit);
         if !post_submit(submit_key) {
             result.phases.push(AutosendPhase::Aborted);
@@ -172,7 +187,11 @@ mod tests {
             },
             || {
                 events.borrow_mut().push("verify-paste");
-                true
+                PostPasteVerification::Confirmed
+            },
+            || {
+                events.borrow_mut().push("validate-before-submit");
+                PostPasteVerification::Confirmed
             },
             |_| {
                 events.borrow_mut().push("submit");
@@ -210,7 +229,8 @@ mod tests {
                 paste.set(paste.get() + 1);
                 true
             },
-            || true,
+            || PostPasteVerification::Confirmed,
+            || PostPasteVerification::Confirmed,
             |_| {
                 submit.set(submit.get() + 1);
                 true
@@ -235,7 +255,8 @@ mod tests {
                 paste.set(paste.get() + 1);
                 true
             },
-            || false,
+            || PostPasteVerification::Rejected(TransactionFailure::PasteNotConfirmed),
+            || PostPasteVerification::Confirmed,
             |_| {
                 submit.set(submit.get() + 1);
                 true
@@ -249,6 +270,7 @@ mod tests {
     #[test]
     fn paste_only_structurally_skips_verification_and_submit() {
         let verify_paste = Cell::new(0);
+        let validate_before_submit = Cell::new(0);
         let submit = Cell::new(0);
         let result = run_transaction(
             NativeSubmitKey::None,
@@ -260,7 +282,11 @@ mod tests {
             || true,
             || {
                 verify_paste.set(verify_paste.get() + 1);
-                false
+                PostPasteVerification::Rejected(TransactionFailure::PasteNotConfirmed)
+            },
+            || {
+                validate_before_submit.set(validate_before_submit.get() + 1);
+                PostPasteVerification::Confirmed
             },
             |_| {
                 submit.set(submit.get() + 1);
@@ -270,8 +296,65 @@ mod tests {
         assert_eq!(result.failure, None);
         assert!(result.paste_posted);
         assert!(!result.submit_posted);
-        assert_eq!((verify_paste.get(), submit.get()), (0, 0));
+        assert_eq!(
+            (
+                verify_paste.get(),
+                validate_before_submit.get(),
+                submit.get()
+            ),
+            (0, 0, 0)
+        );
         assert!(!result.phases.contains(&AutosendPhase::Submit));
+    }
+
+    #[test]
+    fn recovered_target_change_reports_target_changed_without_submit() {
+        let paste = Cell::new(0);
+        let submit = Cell::new(0);
+        let result = run_transaction(
+            NativeSubmitKey::Enter,
+            || true,
+            || true,
+            || true,
+            || true,
+            || true,
+            || {
+                paste.set(paste.get() + 1);
+                true
+            },
+            || PostPasteVerification::Rejected(TransactionFailure::TargetChanged),
+            || PostPasteVerification::Confirmed,
+            |_| {
+                submit.set(submit.get() + 1);
+                true
+            },
+        );
+
+        assert_eq!(result.failure, Some(TransactionFailure::TargetChanged));
+        assert_eq!((paste.get(), submit.get()), (1, 0));
+    }
+
+    #[test]
+    fn recovered_editable_change_reports_focus_failure_without_submit() {
+        let submit = Cell::new(0);
+        let result = run_transaction(
+            NativeSubmitKey::Enter,
+            || true,
+            || true,
+            || true,
+            || true,
+            || true,
+            || true,
+            || PostPasteVerification::Confirmed,
+            || PostPasteVerification::Rejected(TransactionFailure::FocusNotAcquired),
+            |_| {
+                submit.set(submit.get() + 1);
+                true
+            },
+        );
+
+        assert_eq!(result.failure, Some(TransactionFailure::FocusNotAcquired));
+        assert_eq!(submit.get(), 0);
     }
 
     #[test]
@@ -289,7 +372,8 @@ mod tests {
             || true,
             || true,
             || true,
-            || true,
+            || PostPasteVerification::Confirmed,
+            || PostPasteVerification::Confirmed,
             |_| {
                 submit.set(submit.get() + 1);
                 true
@@ -318,7 +402,8 @@ mod tests {
                         paste.set(paste.get() + 1);
                         true
                     },
-                    || true,
+                    || PostPasteVerification::Confirmed,
+                    || PostPasteVerification::Confirmed,
                     |_| {
                         submit.set(submit.get() + 1);
                         true

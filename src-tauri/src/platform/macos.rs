@@ -8,7 +8,7 @@ mod focus_controller;
 mod input_profiles;
 mod process_group;
 
-use autosend_transaction::{run_transaction, TransactionFailure};
+use autosend_transaction::{run_transaction, PostPasteVerification, TransactionFailure};
 use ax_client::{
     ax_attribute_is_settable, ax_bool_attribute, ax_element_frame, ax_element_pid,
     ax_element_position, ax_element_size, ax_range_attribute, ax_string_attribute,
@@ -618,6 +618,37 @@ struct FocusedComposer {
     element: OwnedCf,
     window_element: OwnedCf,
     trusted_processes: Vec<TrustedProcess>,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+struct FocusedEditableIdentity {
+    owner_pid: u32,
+    launch_identity: ProcessLaunchIdentity,
+    role: String,
+    subrole: Option<String>,
+    identifier_hash: Option<String>,
+}
+
+struct RecoveredFocusedEditable {
+    identity: FocusedEditableIdentity,
+    element: OwnedCf,
+}
+
+struct RecoveredTargetEvidence {
+    bundle_id: String,
+    pid: u32,
+    launch_identity: ProcessLaunchIdentity,
+    window: TargetWindowIdentity,
+    focused_editable: Option<RecoveredFocusedEditable>,
+}
+
+#[derive(Clone, Debug)]
+struct RecoveredTargetSnapshot {
+    bundle_id: String,
+    pid: u32,
+    launch_identity: ProcessLaunchIdentity,
+    window: TargetWindowIdentity,
+    focused_editable: Option<FocusedEditableIdentity>,
 }
 
 enum NativeFocusAttempt {
@@ -1264,6 +1295,143 @@ fn focused_composer_matching(expected: &FocusedComposer) -> Option<NativeEditabl
     })
 }
 
+fn recovered_focused_editable(
+    target_pid: u32,
+    bundle_id: &str,
+    launch_identity: ProcessLaunchIdentity,
+    window: &TargetWindowIdentity,
+) -> Option<RecoveredFocusedEditable> {
+    discover_trusted_candidate_processes(
+        target_pid,
+        bundle_id,
+        launch_identity,
+        Some(&window.frame),
+        focused_window_frame_for_pid,
+    )
+    .into_iter()
+    .find_map(|process| {
+        let app = OwnedCf::created(unsafe { AXUIElementCreateApplication(process.pid as i32) })?;
+        unsafe {
+            AXUIElementSetMessagingTimeout(app.as_ptr(), 0.2);
+        }
+        let candidate = focused_editable_candidate(app.as_ptr())?;
+        (candidate.resolver.owner_pid == process.pid).then(|| RecoveredFocusedEditable {
+            identity: FocusedEditableIdentity {
+                owner_pid: process.pid,
+                launch_identity: process.launch_identity,
+                role: candidate.resolver.role.clone(),
+                subrole: candidate.resolver.subrole.clone(),
+                identifier_hash: identifier_hash(candidate.resolver.identifier.as_deref()),
+            },
+            element: candidate.element,
+        })
+    })
+}
+
+fn capture_recovered_target_evidence(
+    bundle_id: &str,
+    target_pid: u32,
+    launch_identity: ProcessLaunchIdentity,
+) -> Result<RecoveredTargetEvidence, String> {
+    if !frontmost_target_matches(bundle_id, target_pid, launch_identity) {
+        return Err("The recovered target is no longer frontmost.".to_string());
+    }
+    let window = current_target_window_identity(target_pid)
+        .filter(|window| window.owner_pid == target_pid)
+        .ok_or_else(|| "The recovered target does not expose its live window.".to_string())?;
+    let focused_editable =
+        recovered_focused_editable(target_pid, bundle_id, launch_identity, &window);
+    Ok(RecoveredTargetEvidence {
+        bundle_id: bundle_id.to_string(),
+        pid: target_pid,
+        launch_identity,
+        window,
+        focused_editable,
+    })
+}
+
+fn recovered_target_snapshots_match(
+    expected: &RecoveredTargetSnapshot,
+    current: &RecoveredTargetSnapshot,
+    focused_elements_equal: bool,
+    allow_missing_focused_editable: bool,
+) -> Result<(), TransactionFailure> {
+    if expected.bundle_id != current.bundle_id
+        || expected.pid != current.pid
+        || expected.launch_identity != current.launch_identity
+        || !target_window_identities_match(&expected.window, &current.window)
+    {
+        return Err(TransactionFailure::TargetChanged);
+    }
+
+    match (
+        expected.focused_editable.as_ref(),
+        current.focused_editable.as_ref(),
+    ) {
+        (Some(expected), Some(current))
+            if focused_elements_equal
+                || (expected.identifier_hash.is_some() && expected == current) =>
+        {
+            Ok(())
+        }
+        (Some(_), _) => Err(TransactionFailure::FocusNotAcquired),
+        (None, _) if allow_missing_focused_editable => Ok(()),
+        (None, _) => Err(TransactionFailure::FocusNotAcquired),
+    }
+}
+
+fn verify_recovered_target_evidence(expected: &RecoveredTargetEvidence) -> PostPasteVerification {
+    if !frontmost_target_matches(&expected.bundle_id, expected.pid, expected.launch_identity) {
+        return PostPasteVerification::Rejected(TransactionFailure::TargetChanged);
+    }
+    let Some(window) = current_target_window_identity(expected.pid) else {
+        return PostPasteVerification::Rejected(TransactionFailure::TargetChanged);
+    };
+    let focused_editable = recovered_focused_editable(
+        expected.pid,
+        &expected.bundle_id,
+        expected.launch_identity,
+        &window,
+    );
+    let focused_elements_equal = expected
+        .focused_editable
+        .as_ref()
+        .zip(focused_editable.as_ref())
+        .is_some_and(|(expected, current)| {
+            elements_equal(expected.element.as_ptr(), current.element.as_ptr())
+        });
+    let expected_snapshot = RecoveredTargetSnapshot {
+        bundle_id: expected.bundle_id.clone(),
+        pid: expected.pid,
+        launch_identity: expected.launch_identity,
+        window: expected.window.clone(),
+        focused_editable: expected
+            .focused_editable
+            .as_ref()
+            .map(|editable| editable.identity.clone()),
+    };
+    let Some(current_launch_identity) = process_launch_identity(expected.pid) else {
+        return PostPasteVerification::Rejected(TransactionFailure::TargetChanged);
+    };
+    let current_snapshot = RecoveredTargetSnapshot {
+        bundle_id: expected.bundle_id.clone(),
+        pid: expected.pid,
+        launch_identity: current_launch_identity,
+        window,
+        focused_editable: focused_editable.map(|editable| editable.identity),
+    };
+
+    match recovered_target_snapshots_match(
+        &expected_snapshot,
+        &current_snapshot,
+        focused_elements_equal,
+        true,
+    ) {
+        Ok(()) => PostPasteVerification::Confirmed,
+        Err(failure) => PostPasteVerification::Rejected(failure),
+    }
+}
+
 fn paste_evidence_snapshot(element: AXUIElementRef) -> PasteEvidenceSnapshot {
     PasteEvidenceSnapshot {
         value_hash: ax_string_attribute(element, "AXValue").map(|value| {
@@ -1292,8 +1460,22 @@ fn paste_evidence_changed(
                 && before.selected_range != after.selected_range
         }
         input_profiles::PasteVerificationPolicy::FocusStableAfterProfiledDelay { .. }
+        | input_profiles::PasteVerificationPolicy::RecoveredTargetStableAfterDelay { .. }
         | input_profiles::PasteVerificationPolicy::PasteOnlyWithoutSubmitEvidence => false,
     }
+}
+
+fn post_paste_verification_delay(policy: PasteVerificationPolicy) -> Duration {
+    let delay_ms = match policy {
+        PasteVerificationPolicy::FocusStableAfterProfiledDelay { min_ms, max_ms } => {
+            220_u64.clamp(min_ms, max_ms.max(min_ms))
+        }
+        PasteVerificationPolicy::RecoveredTargetStableAfterDelay { delay_ms } => delay_ms,
+        PasteVerificationPolicy::ValueLengthOrHashChange
+        | PasteVerificationPolicy::SelectionRangeChange
+        | PasteVerificationPolicy::PasteOnlyWithoutSubmitEvidence => 220,
+    };
+    Duration::from_millis(delay_ms)
 }
 
 pub fn current_input_target() -> Option<InputTarget> {
@@ -1929,15 +2111,30 @@ where
     let focused_composer = std::cell::RefCell::new(None::<FocusedComposer>);
     let calibrated_pointer_origin = std::cell::RefCell::new(None::<(f64, f64)>);
     let before_paste = std::cell::RefCell::new(None::<PasteEvidenceSnapshot>);
+    let recovered_target_evidence = std::cell::RefCell::new(None::<RecoveredTargetEvidence>);
     let observed_version = app_version_for_pid(target_pid);
     let profile =
         input_capability_profile_for_page(bundle_id, observed_version.as_deref(), page_url);
+    let submit_key = match profile {
+        InputCapabilityProfile::Accessibility(accessibility) if !accessibility.permits_submit() => {
+            NativeSubmitKey::None
+        }
+        _ => submit_key,
+    };
+    let verification_delay = match profile {
+        InputCapabilityProfile::Accessibility(accessibility) => {
+            post_paste_verification_delay(accessibility.paste_verification)
+        }
+        InputCapabilityProfile::CodexFirstResponder
+        | InputCapabilityProfile::LegacyCapturedTarget => Duration::from_millis(220),
+    };
     let outcome = paste_prompt_and_submit_to_app_clipboard_with_ops(
         body,
         bundle_id,
         click_point,
         captured_window,
         submit_key,
+        verification_delay,
         copy_sender,
         is_accessibility_trusted,
         || process_launch_identity(target_pid) == Some(target_launch_identity),
@@ -1957,9 +2154,37 @@ where
             )?;
             *focused_composer.borrow_mut() = recovered.composer;
             *calibrated_pointer_origin.borrow_mut() = recovered.pointer_origin;
+            if matches!(
+                profile,
+                InputCapabilityProfile::Accessibility(input_profiles::AccessibilityProfile {
+                    paste_verification: PasteVerificationPolicy::RecoveredTargetStableAfterDelay { .. },
+                    ..
+                })
+            ) {
+                *recovered_target_evidence.borrow_mut() = Some(capture_recovered_target_evidence(
+                    bundle_id,
+                    target_pid,
+                    target_launch_identity,
+                )?);
+            }
             Ok(())
         },
         |bundle_id, captured_window| {
+            if matches!(
+                profile,
+                InputCapabilityProfile::Accessibility(input_profiles::AccessibilityProfile {
+                    paste_verification: PasteVerificationPolicy::RecoveredTargetStableAfterDelay { .. },
+                    ..
+                })
+            ) {
+                return recovered_target_evidence
+                    .borrow()
+                    .as_ref()
+                    .map(verify_recovered_target_evidence)
+                    .unwrap_or(PostPasteVerification::Rejected(
+                        TransactionFailure::TargetChanged,
+                    ));
+            }
             let composer = focused_composer.borrow();
             let verified = verify_target_focus_for_autosend(
                 bundle_id,
@@ -1977,7 +2202,11 @@ where
                     }
                 }
             }
-            verified
+            if verified {
+                PostPasteVerification::Confirmed
+            } else {
+                PostPasteVerification::Rejected(TransactionFailure::TargetChanged)
+            }
         },
         || match profile {
             InputCapabilityProfile::Accessibility(accessibility)
@@ -1992,35 +2221,57 @@ where
         },
         || match profile {
             InputCapabilityProfile::CodexFirstResponder
-            | InputCapabilityProfile::LegacyCapturedTarget => true,
+            | InputCapabilityProfile::LegacyCapturedTarget => PostPasteVerification::Confirmed,
             InputCapabilityProfile::Accessibility(accessibility)
                 if matches!(
                     accessibility.paste_verification,
                     PasteVerificationPolicy::FocusStableAfterProfiledDelay { .. }
                 ) =>
             {
-                verify_target_focus_for_autosend(
+                if verify_target_focus_for_autosend(
                     bundle_id,
                     target_pid,
                     target_launch_identity,
                     captured_window,
                     profile,
                     None,
-                )
+                ) {
+                    PostPasteVerification::Confirmed
+                } else {
+                    PostPasteVerification::Rejected(TransactionFailure::PasteNotConfirmed)
+                }
+            }
+            InputCapabilityProfile::Accessibility(accessibility)
+                if matches!(
+                    accessibility.paste_verification,
+                    PasteVerificationPolicy::RecoveredTargetStableAfterDelay { .. }
+                ) =>
+            {
+                recovered_target_evidence
+                    .borrow()
+                    .as_ref()
+                    .map(verify_recovered_target_evidence)
+                    .unwrap_or(PostPasteVerification::Rejected(
+                        TransactionFailure::TargetChanged,
+                    ))
             }
             InputCapabilityProfile::Accessibility(accessibility) => {
                 let composer = focused_composer.borrow();
                 let Some(composer) = composer.as_ref() else {
-                    return false;
+                    return PostPasteVerification::Rejected(TransactionFailure::PasteNotConfirmed);
                 };
                 let Some(candidate) = focused_composer_matching(composer) else {
-                    return false;
+                    return PostPasteVerification::Rejected(TransactionFailure::PasteNotConfirmed);
                 };
                 let Some(before) = before_paste.borrow().as_ref().cloned() else {
-                    return false;
+                    return PostPasteVerification::Rejected(TransactionFailure::PasteNotConfirmed);
                 };
                 let after = paste_evidence_snapshot(candidate.element.as_ptr());
-                paste_evidence_changed(accessibility.paste_verification, &before, &after)
+                if paste_evidence_changed(accessibility.paste_verification, &before, &after) {
+                    PostPasteVerification::Confirmed
+                } else {
+                    PostPasteVerification::Rejected(TransactionFailure::PasteNotConfirmed)
+                }
             }
         },
         post_focus_preserving_submit_key,
@@ -2041,11 +2292,12 @@ fn paste_prompt_and_submit_to_app_clipboard_with_ops<C, T, I, R, V, P, E, S, W>(
     click_point: Option<(f64, f64)>,
     captured_window: Option<&TargetWindowIdentity>,
     submit_key: NativeSubmitKey,
+    verification_delay: Duration,
     copy_sender: C,
     is_trusted: T,
     initial_target_valid: I,
     mut recover_target: R,
-    mut verify_target: V,
+    verify_target: V,
     mut paste_sender: P,
     mut verify_paste: E,
     mut submit_sender: S,
@@ -2056,9 +2308,9 @@ where
     T: FnOnce() -> bool,
     I: FnMut() -> bool,
     R: FnMut(&str, Option<(f64, f64)>, Option<&TargetWindowIdentity>) -> Result<(), String>,
-    V: FnMut(&str, Option<&TargetWindowIdentity>) -> bool,
+    V: FnMut(&str, Option<&TargetWindowIdentity>) -> PostPasteVerification,
     P: FnMut() -> Result<(), String>,
-    E: FnMut() -> bool,
+    E: FnMut() -> PostPasteVerification,
     S: FnMut(NativeSubmitKey) -> Result<(), String>,
     W: FnMut(Duration),
 {
@@ -2066,6 +2318,7 @@ where
         return AutosendOutcome::missing_accessibility_permission();
     }
     let mut copy_sender = Some(copy_sender);
+    let verify_target = std::cell::RefCell::new(verify_target);
     let transaction = run_transaction(
         submit_key,
         initial_target_valid,
@@ -2076,12 +2329,18 @@ where
                 .take()
                 .is_some_and(|copy_sender| copy_sender(body).is_ok())
         },
-        || verify_target(bundle_id, captured_window),
+        || {
+            matches!(
+                (verify_target.borrow_mut())(bundle_id, captured_window),
+                PostPasteVerification::Confirmed
+            )
+        },
         || paste_sender().is_ok(),
         || {
-            sleeper(Duration::from_millis(220));
+            sleeper(verification_delay);
             verify_paste()
         },
+        || (verify_target.borrow_mut())(bundle_id, captured_window),
         |key| submit_sender(key).is_ok(),
     );
 
@@ -3092,6 +3351,7 @@ mod tests {
             click_point,
             None,
             submit_key,
+            Duration::from_millis(220),
             |body| {
                 events.borrow_mut().push(format!("copy:{body}"));
                 Ok(())
@@ -3108,13 +3368,13 @@ mod tests {
             },
             |_, _| {
                 events.borrow_mut().push("verify".to_string());
-                true
+                PostPasteVerification::Confirmed
             },
             || {
                 events.borrow_mut().push("paste".to_string());
                 Ok(())
             },
-            || true,
+            || PostPasteVerification::Confirmed,
             |key| {
                 events.borrow_mut().push("submit".to_string());
                 submitted_key.replace(Some(key));
@@ -3192,6 +3452,7 @@ mod tests {
             None,
             None,
             NativeSubmitKey::Enter,
+            Duration::from_millis(220),
             |_| Ok(()),
             || true,
             || {
@@ -3200,7 +3461,7 @@ mod tests {
                 next == 1
             },
             |_, _, _| Ok(()),
-            |_, _| true,
+            |_, _| PostPasteVerification::Confirmed,
             || panic!("paste must not run after the target changes"),
             || panic!("paste verification must not run after the target changes"),
             |_| panic!("submit must not run after the target changes"),
@@ -3238,6 +3499,190 @@ mod tests {
         current = captured.clone();
         current.owner_pid = 43;
         assert!(!target_window_identities_match(&captured, &current));
+    }
+
+    fn recovered_target_snapshot(
+        launch_seconds: u64,
+        title_hash: &str,
+        focused_identifier: Option<&str>,
+    ) -> RecoveredTargetSnapshot {
+        RecoveredTargetSnapshot {
+            bundle_id: "com.tencent.xinWeChat".to_string(),
+            pid: 42,
+            launch_identity: ProcessLaunchIdentity {
+                seconds: launch_seconds,
+                microseconds: 0,
+            },
+            window: TargetWindowIdentity {
+                owner_pid: 42,
+                frame: CandidateInput {
+                    x: 10.0,
+                    y: 20.0,
+                    width: 800.0,
+                    height: 600.0,
+                },
+                role: Some("AXWindow".to_string()),
+                title_hash: Some(title_hash.to_string()),
+                cg_window_id: None,
+            },
+            focused_editable: focused_identifier.map(|identifier| FocusedEditableIdentity {
+                owner_pid: 43,
+                launch_identity: ProcessLaunchIdentity {
+                    seconds: 2,
+                    microseconds: 0,
+                },
+                role: "AXTextArea".to_string(),
+                subrole: None,
+                identifier_hash: Some(identifier.to_string()),
+            }),
+        }
+    }
+
+    #[test]
+    fn recovered_target_evidence_rejects_process_replacement() {
+        let expected = recovered_target_snapshot(1, "chat", Some("composer"));
+        let current = recovered_target_snapshot(2, "chat", Some("composer"));
+
+        assert_eq!(
+            recovered_target_snapshots_match(&expected, &current, true, true),
+            Err(TransactionFailure::TargetChanged)
+        );
+    }
+
+    #[test]
+    fn recovered_target_evidence_rejects_window_change() {
+        let expected = recovered_target_snapshot(1, "chat-a", Some("composer"));
+        let current = recovered_target_snapshot(1, "chat-b", Some("composer"));
+
+        assert_eq!(
+            recovered_target_snapshots_match(&expected, &current, true, true),
+            Err(TransactionFailure::TargetChanged)
+        );
+    }
+
+    #[test]
+    fn recovered_target_evidence_allows_composer_resize() {
+        let expected = recovered_target_snapshot(1, "chat", Some("composer"));
+        let current = recovered_target_snapshot(1, "chat", Some("composer"));
+
+        assert_eq!(
+            recovered_target_snapshots_match(&expected, &current, false, true),
+            Ok(())
+        );
+    }
+
+    #[test]
+    fn recovered_target_evidence_rejects_focused_element_change() {
+        let expected = recovered_target_snapshot(1, "chat", Some("composer"));
+        let current = recovered_target_snapshot(1, "chat", Some("search"));
+
+        assert_eq!(
+            recovered_target_snapshots_match(&expected, &current, false, true),
+            Err(TransactionFailure::FocusNotAcquired)
+        );
+    }
+
+    #[test]
+    fn recovered_target_evidence_allows_known_wechat_without_ax_editable_when_window_is_stable() {
+        let expected = recovered_target_snapshot(1, "chat", None);
+        let current = recovered_target_snapshot(1, "chat", None);
+
+        assert_eq!(
+            recovered_target_snapshots_match(&expected, &current, false, true),
+            Ok(())
+        );
+        assert_eq!(
+            recovered_target_snapshots_match(&expected, &current, false, false),
+            Err(TransactionFailure::FocusNotAcquired)
+        );
+    }
+
+    #[test]
+    fn recovered_wechat_without_ax_editable_pastes_and_submits_exactly_once() {
+        let expected = recovered_target_snapshot(1, "chat", None);
+        let current = recovered_target_snapshot(1, "chat", None);
+        let paste_count = std::cell::Cell::new(0);
+        let submit_count = std::cell::Cell::new(0);
+        let verify = || match recovered_target_snapshots_match(&expected, &current, false, true) {
+            Ok(()) => PostPasteVerification::Confirmed,
+            Err(failure) => PostPasteVerification::Rejected(failure),
+        };
+
+        let result = run_transaction(
+            NativeSubmitKey::Enter,
+            || true,
+            || true,
+            || true,
+            || true,
+            || true,
+            || {
+                paste_count.set(paste_count.get() + 1);
+                true
+            },
+            verify,
+            verify,
+            |_| {
+                submit_count.set(submit_count.get() + 1);
+                true
+            },
+        );
+
+        assert_eq!(result.failure, None);
+        assert_eq!((paste_count.get(), submit_count.get()), (1, 1));
+    }
+
+    #[test]
+    fn recovered_wechat_window_change_before_submit_never_submits() {
+        let expected = recovered_target_snapshot(1, "chat-a", None);
+        let stable = recovered_target_snapshot(1, "chat-a", None);
+        let changed = recovered_target_snapshot(1, "chat-b", None);
+        let submit_count = std::cell::Cell::new(0);
+
+        let result = run_transaction(
+            NativeSubmitKey::Enter,
+            || true,
+            || true,
+            || true,
+            || true,
+            || true,
+            || true,
+            || match recovered_target_snapshots_match(&expected, &stable, false, true) {
+                Ok(()) => PostPasteVerification::Confirmed,
+                Err(failure) => PostPasteVerification::Rejected(failure),
+            },
+            || match recovered_target_snapshots_match(&expected, &changed, false, true) {
+                Ok(()) => PostPasteVerification::Confirmed,
+                Err(failure) => PostPasteVerification::Rejected(failure),
+            },
+            |_| {
+                submit_count.set(submit_count.get() + 1);
+                true
+            },
+        );
+
+        assert_eq!(result.failure, Some(TransactionFailure::TargetChanged));
+        assert_eq!(submit_count.get(), 0);
+    }
+
+    #[test]
+    fn post_paste_verification_delay_is_profile_owned() {
+        assert_eq!(
+            post_paste_verification_delay(
+                PasteVerificationPolicy::RecoveredTargetStableAfterDelay { delay_ms: 275 }
+            ),
+            Duration::from_millis(275)
+        );
+        assert_eq!(
+            post_paste_verification_delay(PasteVerificationPolicy::FocusStableAfterProfiledDelay {
+                min_ms: 250,
+                max_ms: 420,
+            }),
+            Duration::from_millis(250)
+        );
+        assert_eq!(
+            post_paste_verification_delay(PasteVerificationPolicy::ValueLengthOrHashChange),
+            Duration::from_millis(220)
+        );
     }
 
     #[test]
@@ -3373,6 +3818,7 @@ mod tests {
             None,
             None,
             NativeSubmitKey::Enter,
+            Duration::from_millis(220),
             |_| panic!("copy must not run before accessibility permission"),
             || false,
             || panic!("target validation must not run without accessibility permission"),
@@ -3400,6 +3846,7 @@ mod tests {
             None,
             None,
             NativeSubmitKey::Enter,
+            Duration::from_millis(220),
             |_| panic!("copy must not run before target focus is verified"),
             || true,
             || true,
@@ -3429,6 +3876,7 @@ mod tests {
             None,
             None,
             NativeSubmitKey::Enter,
+            Duration::from_millis(220),
             |_| {
                 copy_count.set(copy_count.get() + 1);
                 Ok(())
@@ -3436,7 +3884,7 @@ mod tests {
             || true,
             || true,
             |_, _, _| Ok(()),
-            |_, _| true,
+            |_, _| PostPasteVerification::Confirmed,
             || {
                 paste_count.set(paste_count.get() + 1);
                 Err("paste completion unknown".to_string())

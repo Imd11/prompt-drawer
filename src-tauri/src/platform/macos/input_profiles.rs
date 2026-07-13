@@ -58,6 +58,7 @@ pub(super) enum PasteVerificationPolicy {
     ValueLengthOrHashChange,
     SelectionRangeChange,
     FocusStableAfterProfiledDelay { min_ms: u64, max_ms: u64 },
+    RecoveredTargetStableAfterDelay { delay_ms: u64 },
     PasteOnlyWithoutSubmitEvidence,
 }
 
@@ -68,17 +69,24 @@ pub(super) fn input_capability_profile(
     match bundle_id {
         "com.openai.codex" => InputCapabilityProfile::CodexFirstResponder,
         "com.anthropic.claudefordesktop" => calibrated_profile(80),
-        "com.tencent.xinWeChat" => InputCapabilityProfile::Accessibility(accessibility_profile(
-            ProcessScope::MainAndValidatedBrowserApplications,
-            ManualAccessibilityPolicy::Never,
-            (observed_version == Some("4.1.2"))
-                .then_some(FocusAcquisitionPolicy::CalibratedWindowPoint {
-                    horizontal_percent: 50,
-                    bottom_offset: 65,
-                })
-                .unwrap_or(FocusAcquisitionPolicy::ExactAccessibility),
-            PasteVerificationPolicy::PasteOnlyWithoutSubmitEvidence,
-        )),
+        "com.tencent.xinWeChat" => {
+            let calibrated = observed_version == Some("4.1.2");
+            InputCapabilityProfile::Accessibility(accessibility_profile(
+                ProcessScope::MainAndValidatedBrowserApplications,
+                ManualAccessibilityPolicy::Never,
+                calibrated
+                    .then_some(FocusAcquisitionPolicy::CalibratedWindowPoint {
+                        horizontal_percent: 50,
+                        bottom_offset: 65,
+                    })
+                    .unwrap_or(FocusAcquisitionPolicy::ExactAccessibility),
+                if calibrated {
+                    PasteVerificationPolicy::RecoveredTargetStableAfterDelay { delay_ms: 220 }
+                } else {
+                    PasteVerificationPolicy::PasteOnlyWithoutSubmitEvidence
+                },
+            ))
+        }
         bundle_id if is_supported_browser(bundle_id) => calibrated_profile(80),
         _ => InputCapabilityProfile::LegacyCapturedTarget,
     }
@@ -319,6 +327,11 @@ mod tests {
                 bottom_offset: 65,
             }
         );
+        assert_eq!(
+            wechat.paste_verification,
+            PasteVerificationPolicy::RecoveredTargetStableAfterDelay { delay_ms: 220 }
+        );
+        assert!(wechat.permits_submit());
     }
 
     #[test]
@@ -336,11 +349,33 @@ mod tests {
             assert!(!profile.allowed_roles.contains(&"AXWebArea"));
             assert!(profile.permits_calibrated_window_point);
             assert!(!profile.permits_web_area_composer);
-            if bundle_id == "com.tencent.xinWeChat" {
-                assert!(!profile.permits_submit());
-            } else {
-                assert!(profile.permits_submit());
-            }
+            assert!(profile.permits_submit());
+        }
+    }
+
+    #[test]
+    fn only_calibrated_wechat_selects_recovered_target_submit_evidence() {
+        let InputCapabilityProfile::Accessibility(known) =
+            input_capability_profile("com.tencent.xinWeChat", Some("4.1.2"))
+        else {
+            panic!("expected accessibility profile");
+        };
+        assert_eq!(
+            known.paste_verification,
+            PasteVerificationPolicy::RecoveredTargetStableAfterDelay { delay_ms: 220 }
+        );
+
+        for version in [None, Some("4.1.3"), Some("99.0")] {
+            let InputCapabilityProfile::Accessibility(unknown) =
+                input_capability_profile("com.tencent.xinWeChat", version)
+            else {
+                panic!("expected accessibility profile");
+            };
+            assert_eq!(
+                unknown.paste_verification,
+                PasteVerificationPolicy::PasteOnlyWithoutSubmitEvidence
+            );
+            assert!(!unknown.permits_submit());
         }
     }
 
