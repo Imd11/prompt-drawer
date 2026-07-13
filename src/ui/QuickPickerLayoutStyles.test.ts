@@ -4,7 +4,8 @@ import { describe, expect, it } from "vitest";
 describe("quick picker layout styles", () => {
   const css = readFileSync("src/styles.css", "utf8");
   const rule = (selector: string) => {
-    const match = css.match(new RegExp(`${selector.replace(".", "\\.")}\\s*{[^}]*}`));
+    const escapedSelector = selector.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+    const match = css.match(new RegExp(`${escapedSelector}\\s*{[^}]*}`));
     return match?.[0] ?? "";
   };
 
@@ -36,10 +37,10 @@ describe("quick picker layout styles", () => {
   });
 
   it("gives prompt cards immediate hover and pressed feedback", () => {
-    const hoverRule = rule(".prompt-quick-item.is-hovered");
+    const hoverRule = rule(".prompt-quick-item:not(:disabled):hover");
     const activeRule = rule(".prompt-quick-item:active");
 
-    expect(css).not.toContain(".prompt-quick-item:hover {");
+    expect(css).not.toContain(".prompt-quick-item.is-hovered");
     expect(hoverRule).toContain("background: #e7eef8");
     expect(hoverRule).toContain("border-color: #7f93ad");
     expect(hoverRule).toContain("rgba(15, 23, 42, 0.14)");

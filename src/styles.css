@@ -805,7 +805,7 @@ button {
     box-shadow 120ms ease;
 }
 
-.prompt-quick-item.is-hovered {
+.prompt-quick-item:not(:disabled):hover {
   background: #e7eef8;
   border-color: #7f93ad;
   box-shadow: 0 4px 12px rgba(15, 23, 42, 0.14);

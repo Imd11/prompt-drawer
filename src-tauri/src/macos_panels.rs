@@ -126,6 +126,7 @@ fn configure_non_activating_panel_on_main_thread(
         ns_window.setCanHide(false);
         ns_window.setHidesOnDeactivate(false);
         ns_window.setIgnoresMouseEvents(false);
+        ns_window.setAcceptsMouseMovedEvents(true);
         ns_window.setCollectionBehavior(
             NSWindowCollectionBehavior::CanJoinAllSpaces
                 | NSWindowCollectionBehavior::CanJoinAllApplications
@@ -448,6 +449,7 @@ mod tests {
         assert!(!webview_configuration.contains("acceptsFirstResponder"));
         assert!(!webview_configuration.contains("set_class"));
         assert!(configuration.contains("configure_non_activating_webview_on_main_thread"));
+        assert!(configuration.contains("setAcceptsMouseMovedEvents(true)"));
     }
 
     #[test]

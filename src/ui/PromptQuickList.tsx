@@ -55,7 +55,6 @@ export function PromptQuickList({
   hoverResetKey = 0,
   onGroupPreview,
 }: PromptQuickListProps) {
-  const [hoveredPromptId, setHoveredPromptId] = useState<string | null>(null);
   const [hoverPreview, setHoverPreview] = useState<HoverPreviewState | null>(null);
   const listRef = useRef<HTMLDivElement | null>(null);
   const hoverPreviewTimerRef = useRef<number | null>(null);
@@ -172,12 +171,10 @@ export function PromptQuickList({
   }
 
   function showPromptHover(prompt: PromptContainer) {
-    setHoveredPromptId(prompt.id);
     reportGroupPreview(prompt);
   }
 
   function hidePromptHover() {
-    setHoveredPromptId(null);
     hideHoverPreview();
   }
 
@@ -236,14 +233,13 @@ export function PromptQuickList({
               key={prompt.id}
               className={`prompt-quick-item ${
                 prompt.type === "group" ? "prompt-quick-item-group" : ""
-              } ${prompt.id === hoveredPromptId ? "is-hovered" : ""}`}
+              }`}
               type="button"
               role="option"
               aria-selected="false"
               disabled={submittingPromptId === prompt.id}
               onPointerEnter={() => showPromptHover(prompt)}
               onPointerMove={(event) => {
-                setHoveredPromptId(prompt.id);
                 scheduleHoverPreview(prompt, event.currentTarget);
               }}
               onPointerLeave={hidePromptHover}
