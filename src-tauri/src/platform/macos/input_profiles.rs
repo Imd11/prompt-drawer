@@ -74,12 +74,14 @@ pub(super) fn input_capability_profile(
             InputCapabilityProfile::Accessibility(accessibility_profile(
                 ProcessScope::MainAndValidatedBrowserApplications,
                 ManualAccessibilityPolicy::Never,
-                calibrated
-                    .then_some(FocusAcquisitionPolicy::CalibratedWindowPoint {
+                if calibrated {
+                    FocusAcquisitionPolicy::CalibratedWindowPoint {
                         horizontal_percent: 50,
                         bottom_offset: 65,
-                    })
-                    .unwrap_or(FocusAcquisitionPolicy::ExactAccessibility),
+                    }
+                } else {
+                    FocusAcquisitionPolicy::ExactAccessibility
+                },
                 if calibrated {
                     PasteVerificationPolicy::RecoveredTargetStableAfterDelay { delay_ms: 220 }
                 } else {
