@@ -634,6 +634,12 @@ struct RecoveredFocusedEditable {
     element: OwnedCf,
 }
 
+enum RecoveredEditableObservation {
+    Composer(RecoveredFocusedEditable),
+    Missing,
+    Rejected,
+}
+
 struct RecoveredTargetEvidence {
     bundle_id: String,
     pid: u32,
@@ -1300,22 +1306,41 @@ fn recovered_focused_editable(
     bundle_id: &str,
     launch_identity: ProcessLaunchIdentity,
     window: &TargetWindowIdentity,
-) -> Option<RecoveredFocusedEditable> {
-    discover_trusted_candidate_processes(
+) -> RecoveredEditableObservation {
+    let trusted_processes = discover_trusted_candidate_processes(
         target_pid,
         bundle_id,
         launch_identity,
         Some(&window.frame),
         focused_window_frame_for_pid,
-    )
-    .into_iter()
-    .find_map(|process| {
-        let app = OwnedCf::created(unsafe { AXUIElementCreateApplication(process.pid as i32) })?;
+    );
+    let trusted_pids = trusted_processes
+        .iter()
+        .map(|process| process.pid)
+        .collect::<Vec<_>>();
+    let mut rejected_editable_observed = false;
+
+    for process in trusted_processes {
+        let Some(app) =
+            OwnedCf::created(unsafe { AXUIElementCreateApplication(process.pid as i32) })
+        else {
+            continue;
+        };
         unsafe {
             AXUIElementSetMessagingTimeout(app.as_ptr(), 0.2);
         }
-        let candidate = focused_editable_candidate(app.as_ptr())?;
-        (candidate.resolver.owner_pid == process.pid).then(|| RecoveredFocusedEditable {
+        let Some(candidate) = focused_editable_candidate(app.as_ptr()) else {
+            continue;
+        };
+        if candidate.resolver.owner_pid != process.pid {
+            rejected_editable_observed = true;
+            continue;
+        }
+        if !recovered_editable_is_composer(&candidate.resolver, &trusted_pids, &window.frame) {
+            rejected_editable_observed = true;
+            continue;
+        }
+        return RecoveredEditableObservation::Composer(RecoveredFocusedEditable {
             identity: FocusedEditableIdentity {
                 owner_pid: process.pid,
                 launch_identity: process.launch_identity,
@@ -1324,8 +1349,22 @@ fn recovered_focused_editable(
                 identifier_hash: identifier_hash(candidate.resolver.identifier.as_deref()),
             },
             element: candidate.element,
-        })
-    })
+        });
+    }
+
+    if rejected_editable_observed {
+        RecoveredEditableObservation::Rejected
+    } else {
+        RecoveredEditableObservation::Missing
+    }
+}
+
+fn recovered_editable_is_composer(
+    candidate: &ComposerCandidate,
+    trusted_pids: &[u32],
+    window: &CandidateInput,
+) -> bool {
+    resolve_composer(std::slice::from_ref(candidate), trusted_pids, window) == Ok(0)
 }
 
 fn capture_recovered_target_evidence(
@@ -1340,7 +1379,13 @@ fn capture_recovered_target_evidence(
         .filter(|window| window.owner_pid == target_pid)
         .ok_or_else(|| "The recovered target does not expose its live window.".to_string())?;
     let focused_editable =
-        recovered_focused_editable(target_pid, bundle_id, launch_identity, &window);
+        match recovered_focused_editable(target_pid, bundle_id, launch_identity, &window) {
+            RecoveredEditableObservation::Composer(editable) => Some(editable),
+            RecoveredEditableObservation::Missing => None,
+            RecoveredEditableObservation::Rejected => {
+                return Err("The recovered focus is not the message composer.".to_string())
+            }
+        };
     Ok(RecoveredTargetEvidence {
         bundle_id: bundle_id.to_string(),
         pid: target_pid,
@@ -1387,12 +1432,18 @@ fn verify_recovered_target_evidence(expected: &RecoveredTargetEvidence) -> PostP
     let Some(window) = current_target_window_identity(expected.pid) else {
         return PostPasteVerification::Rejected(TransactionFailure::TargetChanged);
     };
-    let focused_editable = recovered_focused_editable(
+    let focused_editable = match recovered_focused_editable(
         expected.pid,
         &expected.bundle_id,
         expected.launch_identity,
         &window,
-    );
+    ) {
+        RecoveredEditableObservation::Composer(editable) => Some(editable),
+        RecoveredEditableObservation::Missing => None,
+        RecoveredEditableObservation::Rejected => {
+            return PostPasteVerification::Rejected(TransactionFailure::FocusNotAcquired)
+        }
+    };
     let focused_elements_equal = expected
         .focused_editable
         .as_ref()
@@ -3536,6 +3587,60 @@ mod tests {
                 identifier_hash: Some(identifier.to_string()),
             }),
         }
+    }
+
+    fn recovered_editable_candidate(description: &str) -> ComposerCandidate {
+        ComposerCandidate {
+            owner_pid: 43,
+            role: "AXTextArea".to_string(),
+            subrole: None,
+            identifier: Some("message-composer".to_string()),
+            title: None,
+            description: Some(description.to_string()),
+            placeholder: None,
+            help: None,
+            frame: CandidateInput {
+                x: 80.0,
+                y: 520.0,
+                width: 700.0,
+                height: 80.0,
+            },
+            enabled: true,
+            visible: true,
+            focused: true,
+            window_matches: true,
+            editable: true,
+            secure: false,
+            depth: 2,
+        }
+    }
+
+    #[test]
+    fn recovered_editable_rejects_semantic_search_field() {
+        let window = CandidateInput {
+            x: 0.0,
+            y: 0.0,
+            width: 900.0,
+            height: 650.0,
+        };
+        let mut candidate = recovered_editable_candidate("搜索联系人");
+        candidate.role = "AXTextField".to_string();
+        candidate.identifier = Some("contact-search".to_string());
+
+        assert!(!recovered_editable_is_composer(&candidate, &[43], &window));
+    }
+
+    #[test]
+    fn recovered_editable_accepts_message_composer() {
+        let window = CandidateInput {
+            x: 0.0,
+            y: 0.0,
+            width: 900.0,
+            height: 650.0,
+        };
+        let candidate = recovered_editable_candidate("消息输入框");
+
+        assert!(recovered_editable_is_composer(&candidate, &[43], &window));
     }
 
     #[test]
