@@ -30,8 +30,16 @@ use std::hash::{Hash, Hasher};
 use std::process::Command;
 use std::time::{Duration, Instant};
 
+use core_foundation::base::{CFType, TCFType};
+use core_foundation::dictionary::{CFDictionary, CFDictionaryRef};
+use core_foundation::number::CFNumber;
+use core_foundation::string::{CFString, CFStringRef};
 use core_graphics::event::CGEvent;
 use core_graphics::event_source::{CGEventSource, CGEventSourceStateID};
+use core_graphics::window::{
+    copy_window_info, kCGNullWindowID, kCGWindowAlpha, kCGWindowLayer,
+    kCGWindowListExcludeDesktopElements, kCGWindowListOptionOnScreenOnly, kCGWindowOwnerPID,
+};
 
 const ACCESSIBILITY_PERMISSION_REQUIRED_ERROR: &str =
     "Accessibility permission required for prompt insertion.";
@@ -330,6 +338,67 @@ pub fn frontmost_app() -> Option<FrontmostApp> {
 
 pub fn frontmost_app_with_pid() -> Option<FrontmostAppWithPid> {
     frontmost_app_info().map(|info| FrontmostAppWithPid {
+        app: info.app,
+        pid: Some(info.pid),
+    })
+}
+
+#[derive(Clone, Copy, Debug)]
+struct WindowOwnerCandidate {
+    pid: u32,
+    layer: i32,
+    alpha: f64,
+}
+
+fn topmost_external_window_pid(windows: &[WindowOwnerCandidate], excluded_pid: u32) -> Option<u32> {
+    windows
+        .iter()
+        .find(|window| {
+            window.pid != excluded_pid && window.layer == 0 && window.alpha > f64::EPSILON
+        })
+        .map(|window| window.pid)
+}
+
+fn window_dictionary_number(
+    dictionary: &CFDictionary<CFString, CFType>,
+    key: CFStringRef,
+) -> Option<CFNumber> {
+    let key = unsafe { CFString::wrap_under_get_rule(key) };
+    dictionary.find(&key)?.downcast::<CFNumber>()
+}
+
+fn visible_window_owner_candidates() -> Vec<WindowOwnerCandidate> {
+    let options = kCGWindowListOptionOnScreenOnly | kCGWindowListExcludeDesktopElements;
+    let Some(windows) = copy_window_info(options, kCGNullWindowID) else {
+        return Vec::new();
+    };
+
+    windows
+        .get_all_values()
+        .into_iter()
+        .filter_map(|value| {
+            let dictionary = unsafe {
+                CFDictionary::<CFString, CFType>::wrap_under_get_rule(value as CFDictionaryRef)
+            };
+            let pid = window_dictionary_number(&dictionary, unsafe { kCGWindowOwnerPID })?
+                .to_i32()?
+                .try_into()
+                .ok()?;
+            let layer =
+                window_dictionary_number(&dictionary, unsafe { kCGWindowLayer })?.to_i32()?;
+            let alpha = window_dictionary_number(&dictionary, unsafe { kCGWindowAlpha })
+                .and_then(|number| number.to_f64())
+                .unwrap_or(1.0);
+            Some(WindowOwnerCandidate { pid, layer, alpha })
+        })
+        .collect()
+}
+
+pub fn topmost_external_app_with_pid(excluded_pid: u32) -> Option<FrontmostAppWithPid> {
+    let candidates = visible_window_owner_candidates();
+    let pid = topmost_external_window_pid(&candidates, excluded_pid)?;
+    let info = app_info_for_pid(pid)?;
+    Some(FrontmostAppWithPid {
         app: info.app,
         pid: Some(info.pid),
     })
@@ -2662,6 +2731,44 @@ fn input_click_point_for_frame(frame: &CandidateInput) -> (f64, f64) {
 mod tests {
     use super::*;
     use std::cell::RefCell;
+
+    #[test]
+    fn topmost_external_window_skips_the_picker_and_non_normal_layers() {
+        let windows = [
+            WindowOwnerCandidate {
+                pid: 100,
+                layer: 25,
+                alpha: 1.0,
+            },
+            WindowOwnerCandidate {
+                pid: 100,
+                layer: 0,
+                alpha: 1.0,
+            },
+            WindowOwnerCandidate {
+                pid: 200,
+                layer: 3,
+                alpha: 1.0,
+            },
+            WindowOwnerCandidate {
+                pid: 300,
+                layer: 0,
+                alpha: 0.0,
+            },
+            WindowOwnerCandidate {
+                pid: 400,
+                layer: 0,
+                alpha: 1.0,
+            },
+            WindowOwnerCandidate {
+                pid: 500,
+                layer: 0,
+                alpha: 1.0,
+            },
+        ];
+
+        assert_eq!(topmost_external_window_pid(&windows, 100), Some(400));
+    }
 
     #[test]
     fn composer_hit_test_points_are_bounded_to_the_lower_window_region() {

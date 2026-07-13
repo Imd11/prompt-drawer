@@ -131,13 +131,21 @@ pub(crate) fn capture_prompt_pick_session_target(
     session_id: u64,
 ) -> Option<FrontmostApp> {
     session_state.begin_if_new(session_id);
+    let frontmost = platform::frontmost_app_with_pid();
+    let needs_underlying_app = frontmost.as_ref().is_none_or(|frontmost| {
+        frontmost.pid == Some(std::process::id()) || is_prompt_picker_app(&frontmost.app)
+    });
+    let underlying_app = needs_underlying_app
+        .then(|| platform::macos::topmost_external_app_with_pid(std::process::id()))
+        .flatten();
+    let frontmost = prompt_pick_frontmost_candidate(frontmost, underlying_app);
+
     if let Some(input_target) = platform::macos::current_input_target() {
         record_last_input_target_if_valid(recent_state, &input_target);
     }
 
     let recent_identity = recent_state.captured_identity();
-    let target =
-        prompt_pick_session_target(platform::frontmost_app_with_pid(), recent_state.get())?;
+    let target = prompt_pick_session_target(frontmost, recent_state.get())?;
     let identity = captured_identity_for_target(&target, recent_identity.as_ref())?;
     let target_pid = target.pid;
     let target_bundle_id = target.app.bundle_id.clone();
@@ -1956,6 +1964,22 @@ fn prompt_pick_session_target(
             observed_at_ms: now_ms(),
             click_point: target.click_point,
         })
+}
+
+fn prompt_pick_frontmost_candidate(
+    frontmost: Option<FrontmostAppWithPid>,
+    underlying_app: Option<FrontmostAppWithPid>,
+) -> Option<FrontmostAppWithPid> {
+    match frontmost {
+        Some(frontmost)
+            if frontmost.pid == Some(std::process::id())
+                || is_prompt_picker_app(&frontmost.app) =>
+        {
+            underlying_app.or(Some(frontmost))
+        }
+        Some(frontmost) => Some(frontmost),
+        None => underlying_app,
+    }
 }
 
 fn record_last_input_target_if_valid(state: &LastInputTargetState, target: &platform::InputTarget) {
@@ -4290,6 +4314,54 @@ mod last_input_target_tests {
         );
 
         assert!(target.is_none());
+    }
+
+    #[test]
+    fn prompt_pick_session_uses_topmost_underlying_app_when_picker_stole_activation() {
+        let frontmost = prompt_pick_frontmost_candidate(
+            Some(frontmost_target(
+                "Prompt Drawer",
+                "local.promptpicker.dev",
+                Some(std::process::id()),
+            )),
+            Some(frontmost_target(
+                "Google Chrome",
+                "com.google.Chrome",
+                Some(456),
+            )),
+        );
+        let target = prompt_pick_session_target(
+            frontmost,
+            Some(LastInputTarget {
+                app: FrontmostApp {
+                    name: "Claude".to_string(),
+                    bundle_id: "com.anthropic.claudefordesktop".to_string(),
+                },
+                pid: Some(123),
+                observed_at_ms: now_ms() - PROMPT_PICK_RECENT_TARGET_MAX_AGE_MS - 1,
+                click_point: None,
+            }),
+        )
+        .unwrap();
+
+        assert_eq!(target.app.bundle_id, "com.google.Chrome");
+        assert_eq!(target.pid, Some(456));
+    }
+
+    #[test]
+    fn prompt_pick_session_keeps_a_real_frontmost_app_over_the_underlying_fallback() {
+        let frontmost = prompt_pick_frontmost_candidate(
+            Some(frontmost_target("Codex", "com.openai.codex", Some(123))),
+            Some(frontmost_target(
+                "Google Chrome",
+                "com.google.Chrome",
+                Some(456),
+            )),
+        )
+        .unwrap();
+
+        assert_eq!(frontmost.app.bundle_id, "com.openai.codex");
+        assert_eq!(frontmost.pid, Some(123));
     }
 
     #[test]

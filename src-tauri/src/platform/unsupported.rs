@@ -199,6 +199,10 @@ pub fn frontmost_app_with_pid() -> Option<FrontmostAppWithPid> {
     None
 }
 
+pub fn topmost_external_app_with_pid(_excluded_pid: u32) -> Option<FrontmostAppWithPid> {
+    None
+}
+
 pub fn current_input_target() -> Option<InputTarget> {
     None
 }

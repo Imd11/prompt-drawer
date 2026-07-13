@@ -1,7 +1,7 @@
 #[cfg(target_os = "macos")]
 use objc2::{
-    runtime::{AnyObject, Bool, NSObjectProtocol},
-    ClassType,
+    runtime::{AnyClass, AnyObject, Bool, Imp, NSObjectProtocol, Sel},
+    sel, ClassType,
 };
 #[cfg(target_os = "macos")]
 use objc2_app_kit::{
@@ -137,6 +137,7 @@ fn configure_non_activating_panel_on_main_thread(
         let panel: &NSPanel = &*(ns_window_ptr.cast::<NSPanel>());
         panel.setFloatingPanel(true);
         panel.setBecomesKeyOnlyIfNeeded(true);
+        configure_non_activating_webview_on_main_thread(window)?;
         ns_window.orderFrontRegardless();
 
         let is_native_panel: bool = objc2::msg_send![ns_window, isKindOfClass: NSPanel::class()];
@@ -162,6 +163,61 @@ fn configure_non_activating_panel_on_main_thread(
     }
 
     Ok(())
+}
+
+#[cfg(target_os = "macos")]
+extern "C-unwind" fn reject_webview_key_focus(_: &AnyObject, _: Sel) -> Bool {
+    Bool::NO
+}
+
+#[cfg(target_os = "macos")]
+fn configure_non_activating_webview_on_main_thread(
+    window: &tauri::WebviewWindow,
+) -> Result<(), String> {
+    let (sender, receiver) = std::sync::mpsc::sync_channel(1);
+    let label = window.label().to_string();
+    window
+        .with_webview(move |webview| {
+            let object = unsafe { &*(webview.inner().cast::<AnyObject>()) };
+            let result = configure_non_key_webview_object(object, &label);
+            let _ = sender.send(result);
+        })
+        .map_err(|error| error.to_string())?;
+
+    receiver
+        .recv()
+        .map_err(|_| "Overlay webview focus configuration produced no result.".to_string())?
+}
+
+#[cfg(target_os = "macos")]
+fn configure_non_key_webview_object(object: &AnyObject, label: &str) -> Result<(), String> {
+    let class = object.class();
+    let selector = sel!(needsPanelToBecomeKey);
+    let inherited_method = class.instance_method(selector).ok_or_else(|| {
+        format!("Overlay {label} webview does not implement needsPanelToBecomeKey.")
+    })?;
+
+    // Adding an override to WryWebView avoids changing the class of a live
+    // WKWebView, which invalidates AppKit's cached view properties. This
+    // selector is only consulted by NSPanel when becomesKeyOnlyIfNeeded is set.
+    unsafe {
+        let implementation: Imp = std::mem::transmute(
+            reject_webview_key_focus as extern "C-unwind" fn(&AnyObject, Sel) -> Bool,
+        );
+        objc2::ffi::class_addMethod(
+            class as *const AnyClass as *mut AnyClass,
+            selector,
+            implementation,
+            objc2::ffi::method_getTypeEncoding(inherited_method),
+        );
+    }
+
+    let needs_panel_key: Bool = unsafe { objc2::msg_send![object, needsPanelToBecomeKey] };
+    if needs_panel_key.as_bool() {
+        Err(format!("Overlay {label} webview still requests key focus."))
+    } else {
+        Ok(())
+    }
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -345,6 +401,36 @@ mod tests {
         assert!(source.contains("PromptDrawerOverlayPanel"));
         assert!(source.contains("NSPanel::class()"));
         assert!(source.contains("isKindOfClass"));
+    }
+
+    #[test]
+    fn overlay_webview_rejects_key_focus_before_panel_is_shown() {
+        let source = include_str!("macos_panels.rs");
+        let start = source
+            .find("fn configure_non_activating_panel_on_main_thread")
+            .unwrap();
+        let end = source[start..]
+            .find("extern \"C-unwind\" fn reject_webview_key_focus")
+            .unwrap();
+        let configuration = &source[start..start + end];
+        let webview_configuration_start =
+            source.find("fn configure_non_key_webview_object").unwrap();
+        let webview_configuration_end = source[webview_configuration_start..]
+            .find("enum PanelClassAction")
+            .unwrap();
+        let webview_configuration = &source
+            [webview_configuration_start..webview_configuration_start + webview_configuration_end];
+
+        assert!(source.contains("sel!(needsPanelToBecomeKey)"));
+        assert!(webview_configuration.contains("class_addMethod"));
+        assert!(!webview_configuration.contains("acceptsFirstResponder"));
+        assert!(!webview_configuration.contains("set_class"));
+        assert!(
+            configuration
+                .find("configure_non_activating_webview_on_main_thread")
+                .unwrap()
+                < configuration.find("orderFrontRegardless").unwrap()
+        );
     }
 
     #[test]
