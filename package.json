@@ -1,6 +1,6 @@
 {
   "name": "prompt-picker",
-  "version": "1.0.13",
+  "version": "1.0.14",
   "description": "Prompt Drawer is a local-first prompt library and launcher.",
   "type": "module",
   "scripts": {
