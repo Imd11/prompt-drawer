@@ -1,6 +1,6 @@
 [package]
 name = "prompt-picker"
-version = "1.0.12"
+version = "1.0.13"
 description = "Prompt Drawer local-first prompt library and launcher"
 authors = [""]
 license = "MIT"

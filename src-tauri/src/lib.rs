@@ -116,45 +116,42 @@ async fn begin_prompt_pick_session(
 ) -> Result<Option<FrontmostApp>, String> {
     let session_state = session_state.inner().clone();
     let recent_state = recent_state.inner().clone();
-    session_state.begin_if_new(session_id);
-
     let captured_app = tauri::async_runtime::spawn_blocking(move || {
-        if let Some(input_target) = platform::macos::current_input_target() {
-            record_last_input_target_if_valid(&recent_state, &input_target);
-        }
-
-        let recent_identity = recent_state.captured_identity();
-        let Some(target) =
-            prompt_pick_session_target(platform::frontmost_app_with_pid(), recent_state.get())
-        else {
-            return None;
-        };
-        let Some(identity) = captured_identity_for_target(&target, recent_identity.as_ref()) else {
-            return None;
-        };
-        let target_pid = target.pid;
-        let target_bundle_id = target.app.bundle_id.clone();
-        let captured_app = record_prompt_pick_session_target_if_valid(
-            &session_state,
-            target,
-            identity,
-            session_id,
-        );
-        if captured_app.is_some() {
-            if let Some(pid) = target_pid {
-                if let Some(page_url) =
-                    platform::macos::active_browser_page_url(pid, &target_bundle_id)
-                {
-                    session_state.set_page_url_if_current(session_id, &target_bundle_id, page_url);
-                }
-            }
-        }
-        captured_app
+        capture_prompt_pick_session_target(&session_state, &recent_state, session_id)
     })
     .await
     .map_err(|error| format!("Prompt pick session task failed: {}", error))?;
 
     Ok(captured_app)
+}
+
+pub(crate) fn capture_prompt_pick_session_target(
+    session_state: &PromptPickSessionState,
+    recent_state: &LastInputTargetState,
+    session_id: u64,
+) -> Option<FrontmostApp> {
+    session_state.begin_if_new(session_id);
+    if let Some(input_target) = platform::macos::current_input_target() {
+        record_last_input_target_if_valid(recent_state, &input_target);
+    }
+
+    let recent_identity = recent_state.captured_identity();
+    let target =
+        prompt_pick_session_target(platform::frontmost_app_with_pid(), recent_state.get())?;
+    let identity = captured_identity_for_target(&target, recent_identity.as_ref())?;
+    let target_pid = target.pid;
+    let target_bundle_id = target.app.bundle_id.clone();
+    let captured_app =
+        record_prompt_pick_session_target_if_valid(session_state, target, identity, session_id);
+    if captured_app.is_some() {
+        if let Some(pid) = target_pid {
+            if let Some(page_url) = platform::macos::active_browser_page_url(pid, &target_bundle_id)
+            {
+                session_state.set_page_url_if_current(session_id, &target_bundle_id, page_url);
+            }
+        }
+    }
+    captured_app
 }
 
 #[tauri::command]
@@ -1887,6 +1884,7 @@ fn stale_target_outcome() -> AutosendOutcome {
     }
 }
 
+#[cfg(test)]
 pub(crate) fn freeze_prompt_pick_session_target(
     state: &PromptPickSessionState,
     frontmost: Option<FrontmostAppWithPid>,

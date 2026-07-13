@@ -664,15 +664,22 @@ fn show_non_activating_overlay_window(window: &tauri::WebviewWindow) -> Result<(
     crate::macos_panels::configure_non_activating_panel(window)?;
 
     if !window.is_visible().unwrap_or(false) {
-        window.show().map_err(|e| e.to_string())?;
-        crate::macos_panels::configure_non_activating_panel(window)?;
-    }
-
-    if !window.is_visible().unwrap_or(false) {
         return Err("Overlay window did not become visible.".to_string());
     }
 
     Ok(())
+}
+
+async fn capture_prompt_pick_session_before_show(
+    session_id: u64,
+    session_state: crate::PromptPickSessionState,
+    recent_state: crate::LastInputTargetState,
+) -> Result<Option<crate::platform::FrontmostApp>, String> {
+    tauri::async_runtime::spawn_blocking(move || {
+        crate::capture_prompt_pick_session_target(&session_state, &recent_state, session_id)
+    })
+    .await
+    .map_err(|error| format!("Prompt pick session task failed: {error}"))
 }
 
 fn build_prompt_button_window(
@@ -898,13 +905,12 @@ pub async fn show_prompt_popover_from_button(
     recent_state: tauri::State<'_, crate::LastInputTargetState>,
     app: tauri::AppHandle,
 ) -> Result<(), String> {
-    session_state.begin_if_new(session_id);
-    crate::freeze_prompt_pick_session_target(
-        session_state.inner(),
-        crate::platform::macos::frontmost_app_with_pid(),
-        recent_state.get(),
+    capture_prompt_pick_session_before_show(
         session_id,
-    );
+        session_state.inner().clone(),
+        recent_state.inner().clone(),
+    )
+    .await?;
     let position = button_relative_popover_position(
         &app,
         BUTTON_VISUAL_WIDTH,
@@ -942,13 +948,12 @@ pub async fn toggle_prompt_popover_from_button(
         }
     }
 
-    session_state.begin_if_new(session_id);
-    crate::freeze_prompt_pick_session_target(
-        session_state.inner(),
-        crate::platform::macos::frontmost_app_with_pid(),
-        recent_state.get(),
+    capture_prompt_pick_session_before_show(
         session_id,
-    );
+        session_state.inner().clone(),
+        recent_state.inner().clone(),
+    )
+    .await?;
     let position = button_relative_popover_position(
         &app,
         BUTTON_VISUAL_WIDTH,
@@ -1619,9 +1624,19 @@ mod tests {
             .find("pub async fn show_prompt_button_controls_from_button")
             .expect("next command should follow toggle");
         let command_source = &source[start..start + end];
+        let capture_start = source
+            .find("async fn capture_prompt_pick_session_before_show")
+            .expect("capture helper should exist");
+        let capture_end = source[capture_start..]
+            .find("fn build_prompt_button_window")
+            .expect("button builder should follow capture helper");
+        let capture_source = &source[capture_start..capture_start + capture_end];
 
-        assert!(command_source.contains("session_state.begin_if_new(session_id);"));
+        assert!(command_source.contains("capture_prompt_pick_session_before_show"));
+        assert!(command_source.contains(".await"));
         assert!(command_source.contains("session_state.begin(session_id);"));
+        assert!(capture_source.contains("capture_prompt_pick_session_target"));
+        assert!(capture_source.contains("spawn_blocking"));
     }
 
     #[test]
@@ -1737,6 +1752,7 @@ mod tests {
 
         assert!(!helper.contains("window.set_focusable(false)"));
         assert!(helper.contains("configure_non_activating_panel"));
+        assert!(!helper.contains("window.show()"));
         assert!(helper.contains("window.is_visible().unwrap_or(false)"));
         assert!(helper.contains("Overlay window did not become visible."));
     }

@@ -255,8 +255,6 @@ btn.addEventListener('pointerup', async (event) => {
       await notifyVisual('reset');
     } else {
       const sessionId = ++promptPickSessionId;
-      const sessionPromise = invoke('begin_prompt_pick_session', { sessionId });
-      void sessionPromise.catch(() => null);
       const toggleResult = await invoke('toggle_prompt_popover_from_button', { sessionId });
       if (!toggleResult?.opened) {
         await notifyVisual('reset');
