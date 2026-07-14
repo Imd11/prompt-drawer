@@ -98,7 +98,7 @@ describe("PromptQuickList", () => {
     expect(screen.queryByText("Single · 1 prompt")).toBeNull();
   });
 
-  it("leaves live pointer highlighting to native CSS hover", () => {
+  it("starts unhighlighted and follows the live pointer position", () => {
     renderQuickList();
 
     const first = screen.getByRole("option", { name: /讨论方案/i });
@@ -107,18 +107,26 @@ describe("PromptQuickList", () => {
     expect(second.classList.contains("is-hovered")).toBe(false);
 
     fireEvent.pointerEnter(first);
+    expect(first.classList.contains("is-hovered")).toBe(false);
+
+    fireEvent.pointerMove(first);
+    expect(first.classList.contains("is-hovered")).toBe(true);
+    expect(second.classList.contains("is-hovered")).toBe(false);
+
     fireEvent.pointerMove(second);
     expect(first.classList.contains("is-hovered")).toBe(false);
-    expect(second.classList.contains("is-hovered")).toBe(false);
+    expect(second.classList.contains("is-hovered")).toBe(true);
 
     fireEvent.pointerLeave(second);
     expect(second.classList.contains("is-hovered")).toBe(false);
   });
 
-  it("clears stale focus when a reused popover resets", () => {
+  it("clears stale pointer highlighting and focus when a reused popover resets", () => {
     const { rerender } = renderQuickList({ hoverResetKey: 0 });
     const option = screen.getByRole("option", { name: /讨论方案/i });
+    fireEvent.pointerMove(option);
     option.focus();
+    expect(option.classList.contains("is-hovered")).toBe(true);
     expect(document.activeElement).toBe(option);
 
     const zh = getMessages("zh-CN");
@@ -132,6 +140,7 @@ describe("PromptQuickList", () => {
       />
     );
 
+    expect(option.classList.contains("is-hovered")).toBe(false);
     expect(document.activeElement).not.toBe(option);
   });
 

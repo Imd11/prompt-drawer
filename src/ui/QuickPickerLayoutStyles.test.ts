@@ -36,14 +36,14 @@ describe("quick picker layout styles", () => {
     expect(css).toContain(".prompt-quick-title-row .prompt-quick-meta");
   });
 
-  it("gives prompt cards immediate hover and pressed feedback", () => {
-    const hoverRule = rule(".prompt-quick-item:not(:disabled):hover");
+  it("gives prompt cards subtle live-pointer and pressed feedback", () => {
+    const hoverRule = rule(".prompt-quick-item.is-hovered");
     const activeRule = rule(".prompt-quick-item:active");
 
-    expect(css).not.toContain(".prompt-quick-item.is-hovered");
-    expect(hoverRule).toContain("background: #e7eef8");
-    expect(hoverRule).toContain("border-color: #7f93ad");
-    expect(hoverRule).toContain("rgba(15, 23, 42, 0.14)");
+    expect(css).not.toContain(".prompt-quick-item:not(:disabled):hover");
+    expect(hoverRule).toContain("background: #f3f6fa");
+    expect(hoverRule).toContain("border-color: #cbd5e1");
+    expect(hoverRule).toContain("box-shadow: none");
     expect(activeRule).toContain("background: #dce6f2");
   });
 
