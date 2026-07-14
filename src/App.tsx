@@ -26,6 +26,7 @@ import {
 import type { AutosendOutcome, AutosendSequenceOutcome, NativeSubmitKey } from "./platform/platformApi";
 import { useInputTargetPolling } from "./overlay/useInputTargetPolling";
 import { PromptQuickList } from "./ui/PromptQuickList";
+import type { NativePopoverPointerPosition } from "./ui/PromptQuickList";
 import { PromptManager } from "./ui/PromptManager";
 import { SettingsPanel } from "./ui/SettingsPanel";
 import type { AppMode } from "./app/AppMode";
@@ -271,6 +272,8 @@ export function App({
   const [activeSettings, setActiveSettings] = useState<Settings>(settings);
   const [settingsLoaded, setSettingsLoaded] = useState(false);
   const [hoverResetKey, setHoverResetKey] = useState(0);
+  const [nativePopoverPointer, setNativePopoverPointer] =
+    useState<NativePopoverPointerPosition | null>(null);
   const [settingsReturnTarget, setSettingsReturnTarget] = useState<"manager" | null>(null);
   const [promptLibraryDraftActive, setPromptLibraryDraftActive] = useState(false);
   const [pendingPromptImport, setPendingPromptImport] = useState<PendingPromptImport | null>(null);
@@ -507,8 +510,24 @@ export function App({
         console.warn("Failed to listen for prompt popover mode requests:", error);
       });
 
+    listen<NativePopoverPointerPosition>("prompt-popover-pointer-position", (event) => {
+      if (!active) return;
+      setNativePopoverPointer(event.payload);
+    })
+      .then((unlisten) => {
+        if (active) {
+          disposers.push(unlisten);
+          return;
+        }
+        unlisten();
+      })
+      .catch((error) => {
+        console.warn("Failed to listen for prompt popover pointer position:", error);
+      });
+
     listen<string>("prompt-popover-opened", async (event) => {
       if (!active || event.payload !== "popover") return;
+      setNativePopoverPointer(null);
       resetPromptHoverPreview();
       promptListRefreshingRef.current = true;
       try {
@@ -533,6 +552,7 @@ export function App({
 
     listen("prompt-popover-dismissed", () => {
       if (!active || currentWindowLabel() !== "prompt-popover") return;
+      setNativePopoverPointer(null);
       resetPromptHoverPreview();
     })
       .then((unlisten) => {
@@ -900,6 +920,7 @@ export function App({
           onSelect={handleSelect}
           submittingPromptId={submittingPromptId}
           hoverResetKey={hoverResetKey}
+          nativePointerPosition={nativePopoverPointer}
           onGroupPreview={() => {
             emitCalicoMotion("react-poke", "group-preview", 2500);
           }}

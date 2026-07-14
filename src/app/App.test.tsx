@@ -570,6 +570,29 @@ describe("app", () => {
     expect(screen.queryByRole("tooltip")).toBeNull();
   });
 
+  it("applies native pointer tracking without activating the prompt popover", async () => {
+    currentWindowLabel = "prompt-popover";
+    window.history.pushState({}, "", "/?mode=popover");
+    await renderPromptPopover();
+    const option = screen.getByRole("option", { name: /Test Prompt/i });
+    Object.defineProperty(document, "elementFromPoint", {
+      configurable: true,
+      value: vi.fn().mockReturnValue(option),
+    });
+
+    try {
+      await act(async () => {
+        await eventHandlers.get("prompt-popover-pointer-position")?.({
+          payload: { x: 40, y: 80, inside: true },
+        });
+      });
+
+      expect(option.classList.contains("is-hovered")).toBe(true);
+    } finally {
+      Reflect.deleteProperty(document, "elementFromPoint");
+    }
+  });
+
   it("does not select stale prompt rows while a reused popover is refreshing", async () => {
     currentWindowLabel = "prompt-popover";
     window.history.pushState({}, "", "/?mode=popover");

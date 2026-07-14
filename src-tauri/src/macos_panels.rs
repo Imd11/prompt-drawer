@@ -1,19 +1,126 @@
 #[cfg(target_os = "macos")]
 use objc2::{
-    runtime::{AnyClass, AnyObject, Bool, Imp, NSObjectProtocol, Sel},
-    sel, ClassType,
+    ffi::OBJC_ASSOCIATION_RETAIN_NONATOMIC,
+    runtime::{AnyClass, AnyObject, Bool, Imp, NSObject, NSObjectProtocol, Sel},
+    sel, AllocAnyThread, ClassType, DefinedClass,
 };
 #[cfg(target_os = "macos")]
 use objc2_app_kit::{
-    NSApplication, NSApplicationActivationOptions, NSColor, NSPanel, NSRunningApplication,
-    NSScreenSaverWindowLevel, NSWindow, NSWindowCollectionBehavior, NSWindowStyleMask,
+    NSApplication, NSApplicationActivationOptions, NSColor, NSEvent, NSPanel, NSRunningApplication,
+    NSScreenSaverWindowLevel, NSTrackingArea, NSTrackingAreaOptions, NSView, NSWindow,
+    NSWindowCollectionBehavior, NSWindowStyleMask,
 };
 #[cfg(target_os = "macos")]
-use objc2_foundation::{NSNumber, NSString};
+use objc2_foundation::{NSNumber, NSRect, NSString};
 #[cfg(target_os = "macos")]
 use objc2_web_kit::WKWebView;
 #[cfg(target_os = "macos")]
-use tauri::Manager;
+use tauri::{Emitter, Manager};
+
+#[cfg(target_os = "macos")]
+const PROMPT_POPOVER_LABEL: &str = "prompt-popover";
+#[cfg(target_os = "macos")]
+const PROMPT_POPOVER_POINTER_EVENT: &str = "prompt-popover-pointer-position";
+#[cfg(target_os = "macos")]
+static PROMPT_POPOVER_POINTER_TRACKER_KEY: u8 = 0;
+
+#[cfg(target_os = "macos")]
+#[derive(Clone, Copy, serde::Serialize)]
+struct PromptPopoverPointerPosition {
+    x: f64,
+    y: f64,
+    inside: bool,
+}
+
+#[cfg(target_os = "macos")]
+struct PromptPopoverPointerTrackerIvars {
+    app: tauri::AppHandle,
+}
+
+#[cfg(target_os = "macos")]
+objc2::define_class!(
+    #[unsafe(super(NSObject))]
+    #[name = "PromptDrawerPopoverPointerTracker"]
+    #[ivars = PromptPopoverPointerTrackerIvars]
+    struct PromptPopoverPointerTracker;
+
+    unsafe impl NSObjectProtocol for PromptPopoverPointerTracker {}
+
+    impl PromptPopoverPointerTracker {
+        #[unsafe(method(mouseEntered:))]
+        fn mouse_entered(&self, event: &NSEvent) {
+            self.emit_pointer_position(event, true);
+        }
+
+        #[unsafe(method(mouseMoved:))]
+        fn mouse_moved(&self, event: &NSEvent) {
+            self.emit_pointer_position(event, true);
+        }
+
+        #[unsafe(method(mouseExited:))]
+        fn mouse_exited(&self, event: &NSEvent) {
+            self.emit_pointer_position(event, false);
+        }
+    }
+);
+
+#[cfg(target_os = "macos")]
+impl PromptPopoverPointerTracker {
+    fn new(app: tauri::AppHandle) -> objc2::rc::Retained<Self> {
+        let tracker = Self::alloc().set_ivars(PromptPopoverPointerTrackerIvars { app });
+        unsafe { objc2::msg_send![super(tracker), init] }
+    }
+
+    fn emit_pointer_position(&self, event: &NSEvent, inside: bool) {
+        let position = if inside {
+            pointer_position_from_event(event).unwrap_or(PromptPopoverPointerPosition {
+                x: 0.0,
+                y: 0.0,
+                inside: false,
+            })
+        } else {
+            PromptPopoverPointerPosition {
+                x: 0.0,
+                y: 0.0,
+                inside: false,
+            }
+        };
+        let _ =
+            self.ivars()
+                .app
+                .emit_to(PROMPT_POPOVER_LABEL, PROMPT_POPOVER_POINTER_EVENT, position);
+    }
+}
+
+#[cfg(target_os = "macos")]
+fn pointer_position_from_event(event: &NSEvent) -> Option<PromptPopoverPointerPosition> {
+    let mtm = objc2::MainThreadMarker::new()?;
+    let window = event.window(mtm)?;
+    let content_view = window.contentView()?;
+    let bounds = content_view.bounds();
+    let point = content_view.convertPoint_fromView(event.locationInWindow(), None);
+    let (x, y) = top_left_pointer_position(
+        point.x - bounds.origin.x,
+        point.y - bounds.origin.y,
+        bounds.size.height,
+        content_view.isFlipped(),
+    );
+    Some(PromptPopoverPointerPosition { x, y, inside: true })
+}
+
+#[cfg(target_os = "macos")]
+fn top_left_pointer_position(x: f64, y: f64, height: f64, is_flipped: bool) -> (f64, f64) {
+    let top = if is_flipped { y } else { height - y };
+    (x.max(0.0), top.max(0.0))
+}
+
+#[cfg(target_os = "macos")]
+fn prompt_popover_pointer_tracking_options() -> NSTrackingAreaOptions {
+    NSTrackingAreaOptions::MouseEnteredAndExited
+        | NSTrackingAreaOptions::MouseMoved
+        | NSTrackingAreaOptions::ActiveAlways
+        | NSTrackingAreaOptions::InVisibleRect
+}
 
 #[cfg(target_os = "macos")]
 objc2::define_class!(
@@ -199,10 +306,12 @@ fn configure_non_activating_webview_on_main_thread(
 ) -> Result<(), String> {
     let (sender, receiver) = std::sync::mpsc::sync_channel(1);
     let label = window.label().to_string();
+    let app = window.app_handle().clone();
     window
         .with_webview(move |webview| {
             let object = unsafe { &*(webview.inner().cast::<AnyObject>()) };
-            let result = configure_non_key_webview_object(object, &label);
+            let result = configure_non_key_webview_object(object, &label)
+                .and_then(|_| configure_prompt_popover_pointer_tracking(&app, object, &label));
             let _ = sender.send(result);
         })
         .map_err(|error| error.to_string())?;
@@ -210,6 +319,47 @@ fn configure_non_activating_webview_on_main_thread(
     receiver
         .recv()
         .map_err(|_| "Overlay webview focus configuration produced no result.".to_string())?
+}
+
+#[cfg(target_os = "macos")]
+fn configure_prompt_popover_pointer_tracking(
+    app: &tauri::AppHandle,
+    object: &AnyObject,
+    label: &str,
+) -> Result<(), String> {
+    if label != PROMPT_POPOVER_LABEL {
+        return Ok(());
+    }
+
+    let key = std::ptr::addr_of!(PROMPT_POPOVER_POINTER_TRACKER_KEY).cast();
+    let existing_tracker = unsafe { objc2::ffi::objc_getAssociatedObject(object, key) };
+    if !existing_tracker.is_null() {
+        return Ok(());
+    }
+
+    let tracker = PromptPopoverPointerTracker::new(app.clone());
+    let tracking_area = unsafe {
+        NSTrackingArea::initWithRect_options_owner_userInfo(
+            NSTrackingArea::alloc(),
+            NSRect::ZERO,
+            prompt_popover_pointer_tracking_options(),
+            Some(&tracker),
+            None,
+        )
+    };
+    let view = unsafe { &*(object as *const AnyObject).cast::<NSView>() };
+
+    unsafe {
+        objc2::ffi::objc_setAssociatedObject(
+            object as *const AnyObject as *mut AnyObject,
+            key,
+            objc2::rc::Retained::as_ptr(&tracker) as *mut AnyObject,
+            OBJC_ASSOCIATION_RETAIN_NONATOMIC,
+        );
+        view.addTrackingArea(&tracking_area);
+    }
+
+    Ok(())
 }
 
 #[cfg(target_os = "macos")]
@@ -450,6 +600,31 @@ mod tests {
         assert!(!webview_configuration.contains("set_class"));
         assert!(configuration.contains("configure_non_activating_webview_on_main_thread"));
         assert!(configuration.contains("setAcceptsMouseMovedEvents(true)"));
+    }
+
+    #[cfg(target_os = "macos")]
+    #[test]
+    fn prompt_popover_pointer_tracking_stays_active_without_key_focus() {
+        let options = prompt_popover_pointer_tracking_options();
+
+        assert!(options.contains(NSTrackingAreaOptions::MouseEnteredAndExited));
+        assert!(options.contains(NSTrackingAreaOptions::MouseMoved));
+        assert!(options.contains(NSTrackingAreaOptions::ActiveAlways));
+        assert!(options.contains(NSTrackingAreaOptions::InVisibleRect));
+        assert!(!options.contains(NSTrackingAreaOptions::ActiveInKeyWindow));
+    }
+
+    #[cfg(target_os = "macos")]
+    #[test]
+    fn native_pointer_coordinates_are_converted_to_web_coordinates() {
+        assert_eq!(
+            top_left_pointer_position(20.0, 75.0, 120.0, false),
+            (20.0, 45.0)
+        );
+        assert_eq!(
+            top_left_pointer_position(20.0, 75.0, 120.0, true),
+            (20.0, 75.0)
+        );
     }
 
     #[test]

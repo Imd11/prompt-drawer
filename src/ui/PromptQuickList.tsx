@@ -17,8 +17,15 @@ interface PromptQuickListProps {
   onSelect: (prompt: PromptContainer) => void;
   submittingPromptId?: string | null;
   hoverResetKey?: number;
+  nativePointerPosition?: NativePopoverPointerPosition | null;
   onGroupPreview?: () => void;
 }
+
+export type NativePopoverPointerPosition = {
+  x: number;
+  y: number;
+  inside: boolean;
+};
 
 type HoverPreviewState = {
   promptId: string;
@@ -53,6 +60,7 @@ export function PromptQuickList({
   onSelect,
   submittingPromptId = null,
   hoverResetKey = 0,
+  nativePointerPosition = null,
   onGroupPreview,
 }: PromptQuickListProps) {
   const [hoveredPromptId, setHoveredPromptId] = useState<string | null>(null);
@@ -78,6 +86,33 @@ export function PromptQuickList({
       focusedElement.blur();
     }
   }, [hoverResetKey]);
+
+  useEffect(() => {
+    if (!nativePointerPosition) return;
+    if (!nativePointerPosition.inside) {
+      hidePromptHover();
+      return;
+    }
+
+    const pointedElement = document.elementFromPoint?.(
+      nativePointerPosition.x,
+      nativePointerPosition.y
+    );
+    const option = pointedElement?.closest<HTMLButtonElement>(".prompt-quick-item");
+    if (!option || !listRef.current?.contains(option) || option.disabled) {
+      hidePromptHover();
+      return;
+    }
+
+    const prompt = prompts.find((candidate) => candidate.id === option.dataset.promptId);
+    if (!prompt) {
+      hidePromptHover();
+      return;
+    }
+
+    setHoveredPromptId(prompt.id);
+    scheduleHoverPreview(prompt, option);
+  }, [nativePointerPosition, prompts]);
 
   function clearHoverPreviewTimer() {
     if (hoverPreviewTimerRef.current !== null) {
@@ -233,6 +268,7 @@ export function PromptQuickList({
           prompts.map((prompt) => (
             <button
               key={prompt.id}
+              data-prompt-id={prompt.id}
               className={`prompt-quick-item ${
                 prompt.type === "group" ? "prompt-quick-item-group" : ""
               } ${prompt.id === hoveredPromptId ? "is-hovered" : ""}`}
