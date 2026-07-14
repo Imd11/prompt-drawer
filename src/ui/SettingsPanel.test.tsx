@@ -53,7 +53,7 @@ describe("settings panel", () => {
     expect(screen.getByRole("button", { name: "填入 + Enter" }).getAttribute(
       "aria-pressed"
     )).toBe("true");
-    expect(screen.getByRole("button", { name: "填入 + Cmd Enter" })).toBeTruthy();
+    expect(screen.queryByRole("button", { name: "填入 + Cmd Enter" })).toBeNull();
   });
 
   it("changes prompt insertion mode", () => {

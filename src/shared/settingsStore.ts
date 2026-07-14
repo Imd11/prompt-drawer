@@ -8,7 +8,7 @@ export type OverlayButtonPosition = {
   y: number;
 };
 
-export type PromptInsertionMode = "paste_only" | "paste_enter" | "paste_command_enter";
+export type PromptInsertionMode = "paste_only" | "paste_enter";
 export type AppLanguage = "zh-CN" | "en-US";
 
 export type PromptLibraryLink = {
@@ -114,12 +114,10 @@ export function createSettingsStore(adapter: SettingsAdapter) {
         visible: candidate.floatingButton?.visible === false ? false : true
       },
       promptInsertion: {
-        // Both `paste_enter` and the previous `paste_and_submit` value use Enter.
+        // Removed send modes migrate to the remaining Enter behavior.
         mode: candidate.promptInsertion?.mode === "paste_only"
           ? "paste_only"
-          : candidate.promptInsertion?.mode === "paste_command_enter"
-            ? "paste_command_enter"
-            : "paste_enter"
+          : "paste_enter"
       },
       permissions: {
         accessibilityPromptRequested: candidate.permissions?.accessibilityPromptRequested === true

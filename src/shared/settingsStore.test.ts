@@ -104,8 +104,6 @@ describe("settings store", () => {
     expect((await store.get()).promptInsertion.mode).toBe("paste_only");
     await store.setPromptInsertionMode("paste_enter");
     expect((await store.get()).promptInsertion.mode).toBe("paste_enter");
-    await store.setPromptInsertionMode("paste_command_enter");
-    expect((await store.get()).promptInsertion.mode).toBe("paste_command_enter");
   });
 
   it("normalizes old settings without prompt insertion mode", async () => {
@@ -119,6 +117,14 @@ describe("settings store", () => {
   it("migrates the legacy paste-and-submit setting to Enter", async () => {
     const store = createTestSettingsStore(
       '{"version":1,"blacklistedApps":[],"promptInsertion":{"mode":"paste_and_submit"}}'
+    );
+
+    expect((await store.get()).promptInsertion.mode).toBe("paste_enter");
+  });
+
+  it("migrates the removed command-enter setting to Enter", async () => {
+    const store = createTestSettingsStore(
+      '{"version":1,"blacklistedApps":[],"promptInsertion":{"mode":"paste_command_enter"}}'
     );
 
     expect((await store.get()).promptInsertion.mode).toBe("paste_enter");

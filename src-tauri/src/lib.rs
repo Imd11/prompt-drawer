@@ -442,8 +442,9 @@ fn authoritative_submit_key(
         })
         .map(|mode| match mode.as_str() {
             "paste_only" => platform::macos::NativeSubmitKey::None,
-            "paste_command_enter" => platform::macos::NativeSubmitKey::CommandEnter,
-            "paste_enter" | "paste_and_submit" => platform::macos::NativeSubmitKey::Enter,
+            "paste_enter" | "paste_and_submit" | "paste_command_enter" => {
+                platform::macos::NativeSubmitKey::Enter
+            }
             _ => platform::macos::NativeSubmitKey::None,
         })
         .unwrap_or(platform::macos::NativeSubmitKey::None)
@@ -3847,7 +3848,7 @@ mod last_input_target_tests {
         );
         assert_eq!(
             authoritative_submit_key(settings_for("paste_command_enter")),
-            platform::macos::NativeSubmitKey::CommandEnter
+            platform::macos::NativeSubmitKey::Enter
         );
         assert_eq!(
             authoritative_submit_key(settings_for("paste_and_submit")),

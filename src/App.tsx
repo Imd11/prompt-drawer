@@ -125,8 +125,6 @@ function submitKeyForMode(mode: PromptInsertionMode): NativeSubmitKey {
   switch (mode) {
     case "paste_only":
       return "none";
-    case "paste_command_enter":
-      return "command_enter";
     case "paste_enter":
     default:
       return "enter";

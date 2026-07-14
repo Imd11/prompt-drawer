@@ -960,7 +960,7 @@ describe("app", () => {
     });
   });
 
-  it("uses command-enter when the global setting selects it", async () => {
+  it("migrates the removed command-enter global setting to Enter", async () => {
     const { invoke } = await import("@tauri-apps/api/core");
     vi.mocked(invoke).mockImplementation(async (command: string) => {
       if (command === "paste_prompt_and_submit_to_last_target") {
@@ -1002,7 +1002,7 @@ describe("app", () => {
         "paste_prompt_and_submit_to_last_target",
         {
           body: "Command body",
-          submitKey: "command_enter",
+          submitKey: "enter",
         }
       );
     });

@@ -82,16 +82,6 @@ export function SettingsPanel({
               >
                 {t.settings.pasteEnter}
               </button>
-              <button
-                className={
-                  settings.promptInsertion.mode === "paste_command_enter" ? "is-selected" : ""
-                }
-                type="button"
-                aria-pressed={settings.promptInsertion.mode === "paste_command_enter"}
-                onClick={() => onPromptInsertionModeChange("paste_command_enter")}
-              >
-                {t.settings.pasteCommandEnter}
-              </button>
             </div>
           </div>
         </div>
