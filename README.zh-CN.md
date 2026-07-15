@@ -2,7 +2,19 @@
 
 **你的个人提示词库。**
 
-![Sleepy Cat 演示](docs/sleepy-cat-demo.gif)
+## 演示
+
+点击预览图即可播放视频。
+
+| Codex App | Codex 提示词组 |
+| :---: | :---: |
+| [![Codex App 演示](docs/previews/codex-app-demo.jpg)](docs/codex-app-demo.mp4) | [![Codex 提示词组演示](docs/previews/codex-prompt-group-demo.jpg)](docs/codex-prompt-group-demo.mp4) |
+| **Cursor App** | **Claude App** |
+| [![Cursor App 演示](docs/previews/cursor-app-demo.jpg)](docs/cursor-app-demo.mp4) | [![Claude App 演示](docs/previews/claude-app-demo.jpg)](docs/claude-app-demo.mp4) |
+| **ChatGPT 网页版** | **Gemini 网页版** |
+| [![ChatGPT 网页版演示](docs/previews/chatgpt-web-demo.jpg)](docs/chatgpt-web-demo.mp4) | [![Gemini 网页版演示](docs/previews/gemini-web-demo.jpg)](docs/gemini-web-demo.mp4) |
+| **CLI** | |
+| [![CLI 演示](docs/previews/cli-demo.jpg)](docs/cli-demo.mp4) | |
 
 **阅读语言：** [English](README.md) | **简体中文** | [हिन्दी](README.hi.md) | [Español](README.es.md) | [العربية](README.ar.md)
 

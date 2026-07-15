@@ -2,7 +2,19 @@
 
 **Tu biblioteca personal de prompts.**
 
-![Demostración de Sleepy Cat](docs/sleepy-cat-demo.gif)
+## Demostraciones
+
+Haz clic en una vista previa para reproducir el video.
+
+| Codex App | Grupos de prompts en Codex |
+| :---: | :---: |
+| [![Demostración de Codex App](docs/previews/codex-app-demo.jpg)](docs/codex-app-demo.mp4) | [![Demostración de grupos de prompts en Codex](docs/previews/codex-prompt-group-demo.jpg)](docs/codex-prompt-group-demo.mp4) |
+| **Cursor App** | **Claude App** |
+| [![Demostración de Cursor App](docs/previews/cursor-app-demo.jpg)](docs/cursor-app-demo.mp4) | [![Demostración de Claude App](docs/previews/claude-app-demo.jpg)](docs/claude-app-demo.mp4) |
+| **ChatGPT Web** | **Gemini Web** |
+| [![Demostración de ChatGPT Web](docs/previews/chatgpt-web-demo.jpg)](docs/chatgpt-web-demo.mp4) | [![Demostración de Gemini Web](docs/previews/gemini-web-demo.jpg)](docs/gemini-web-demo.mp4) |
+| **CLI** | |
+| [![Demostración de CLI](docs/previews/cli-demo.jpg)](docs/cli-demo.mp4) | |
 
 **Leer en:** [English](README.md) | [简体中文](README.zh-CN.md) | [हिन्दी](README.hi.md) | **Español** | [العربية](README.ar.md)
 

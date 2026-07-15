@@ -2,7 +2,19 @@
 
 **مكتبة prompts الشخصية الخاصة بك.**
 
-![عرض Sleepy Cat](docs/sleepy-cat-demo.gif)
+## العروض التوضيحية
+
+انقر على صورة المعاينة لتشغيل الفيديو.
+
+| Codex App | مجموعات prompts في Codex |
+| :---: | :---: |
+| [![عرض Codex App](docs/previews/codex-app-demo.jpg)](docs/codex-app-demo.mp4) | [![عرض مجموعات prompts في Codex](docs/previews/codex-prompt-group-demo.jpg)](docs/codex-prompt-group-demo.mp4) |
+| **Cursor App** | **Claude App** |
+| [![عرض Cursor App](docs/previews/cursor-app-demo.jpg)](docs/cursor-app-demo.mp4) | [![عرض Claude App](docs/previews/claude-app-demo.jpg)](docs/claude-app-demo.mp4) |
+| **ChatGPT Web** | **Gemini Web** |
+| [![عرض ChatGPT Web](docs/previews/chatgpt-web-demo.jpg)](docs/chatgpt-web-demo.mp4) | [![عرض Gemini Web](docs/previews/gemini-web-demo.jpg)](docs/gemini-web-demo.mp4) |
+| **CLI** | |
+| [![عرض CLI](docs/previews/cli-demo.jpg)](docs/cli-demo.mp4) | |
 
 **اقرأ هذا باللغة:** [English](README.md) | [简体中文](README.zh-CN.md) | [हिन्दी](README.hi.md) | [Español](README.es.md) | **العربية**
 
