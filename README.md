@@ -4,17 +4,17 @@
 
 ## Demos
 
-Click a preview to play the video.
+Previews play automatically. Click one to open the full-resolution video.
 
 | Codex App | Codex Prompt Groups |
 | :---: | :---: |
-| [![Codex App demo](docs/previews/codex-app-demo.jpg)](docs/codex-app-demo.mp4) | [![Codex prompt groups demo](docs/previews/codex-prompt-group-demo.jpg)](docs/codex-prompt-group-demo.mp4) |
+| [![Codex App demo](docs/previews/codex-app-demo.webp)](docs/codex-app-demo.mp4) | [![Codex prompt groups demo](docs/previews/codex-prompt-group-demo.webp)](docs/codex-prompt-group-demo.mp4) |
 | **Cursor App** | **Claude App** |
-| [![Cursor App demo](docs/previews/cursor-app-demo.jpg)](docs/cursor-app-demo.mp4) | [![Claude App demo](docs/previews/claude-app-demo.jpg)](docs/claude-app-demo.mp4) |
+| [![Cursor App demo](docs/previews/cursor-app-demo.webp)](docs/cursor-app-demo.mp4) | [![Claude App demo](docs/previews/claude-app-demo.webp)](docs/claude-app-demo.mp4) |
 | **ChatGPT Web** | **Gemini Web** |
-| [![ChatGPT web demo](docs/previews/chatgpt-web-demo.jpg)](docs/chatgpt-web-demo.mp4) | [![Gemini web demo](docs/previews/gemini-web-demo.jpg)](docs/gemini-web-demo.mp4) |
+| [![ChatGPT web demo](docs/previews/chatgpt-web-demo.webp)](docs/chatgpt-web-demo.mp4) | [![Gemini web demo](docs/previews/gemini-web-demo.webp)](docs/gemini-web-demo.mp4) |
 | **CLI** | |
-| [![CLI demo](docs/previews/cli-demo.jpg)](docs/cli-demo.mp4) | |
+| [![CLI demo](docs/previews/cli-demo.webp)](docs/cli-demo.mp4) | |
 
 **Read this in:** **English** | [简体中文](README.zh-CN.md) | [हिन्दी](README.hi.md) | [Español](README.es.md) | [العربية](README.ar.md)
 
