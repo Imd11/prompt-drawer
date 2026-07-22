@@ -8,7 +8,11 @@ import { getPromptContainerBodies } from "./shared/promptTypes";
 import type { AppLanguage, PromptInsertionMode, Settings } from "./shared/settingsStore";
 import { createSettingsStore } from "./shared/settingsStore";
 import { getMessages, type Messages } from "./shared/i18n";
-import { DEFAULT_CATEGORY_ID, createPromptStore } from "./shared/promptStore";
+import {
+  DEFAULT_CATEGORY_ID,
+  createPromptStore,
+  type PromptLibrarySnapshot,
+} from "./shared/promptStore";
 import { createPromptLibrarySyncStorage } from "./storage/promptLibrarySyncStorage";
 import { createTauriPromptStorage } from "./storage/tauriPromptStorage";
 import { createTauriSettingsStorage } from "./storage/tauriSettingsStorage";
@@ -300,12 +304,14 @@ export function App({
   const promptListRefreshingRef = useRef(false);
   const autosendInFlightRef = useRef(false);
   const t = getMessages(activeSettings.language);
-  const reloadPromptData = useCallback(async () => {
-    const data = await storeRef.current.getData();
+  const applyPromptData = useCallback((data: PromptLibrarySnapshot) => {
     setPrompts(data.containers);
     setCategories(data.categories);
     setActiveCategoryId(data.activeCategoryId);
   }, []);
+  const reloadPromptData = useCallback(async () => {
+    applyPromptData(await storeRef.current.getData());
+  }, [applyPromptData]);
   const resetPromptHoverPreview = useCallback(() => {
     setHoverResetKey((key) => key + 1);
   }, []);
@@ -790,13 +796,13 @@ export function App({
               emitCalicoMotion("happy", "create-group-success", 3000);
             }}
             onCombineSingles={async (input) => {
-              await storeRef.current.combineSingles(input);
-              await reloadPromptData();
+              const result = await storeRef.current.combineSingles(input);
+              applyPromptData(result.snapshot);
               emitCalicoMotion("happy", "combine-prompts-success", 3000);
             }}
             onSplitGroup={async (id) => {
-              await storeRef.current.splitGroup(id);
-              await reloadPromptData();
+              const result = await storeRef.current.splitGroup(id);
+              applyPromptData(result.snapshot);
               emitCalicoMotion("happy", "split-group-success", 3000);
             }}
             onUpdate={async (id, input) => {

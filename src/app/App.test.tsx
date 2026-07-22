@@ -1869,6 +1869,49 @@ describe("app", () => {
     expectCalicoMotion("happy");
   });
 
+  it("applies committed combine and split snapshots without a post-commit read", async () => {
+    const { readTextFile } = await import("@tauri-apps/plugin-fs");
+    await renderMainPromptManager([
+      makeContainer({
+        id: "first",
+        title: "First",
+        prompts: [{ id: "first-entry", body: "First body", order: 0 }],
+        order: 0,
+      }),
+      makeContainer({
+        id: "second",
+        title: "Second",
+        prompts: [{ id: "second-entry", body: "Second body", order: 0 }],
+        order: 1,
+      }),
+    ]);
+    const promptReadCount = () => vi.mocked(readTextFile).mock.calls.filter(
+      ([path]) => String(path).endsWith("prompts.json")
+    ).length;
+
+    const beforeCombine = promptReadCount();
+    fireEvent.click(screen.getByRole("button", { name: "选择" }));
+    fireEvent.click(screen.getByRole("checkbox", { name: "选择 First" }));
+    fireEvent.click(screen.getByRole("checkbox", { name: "选择 Second" }));
+    fireEvent.click(screen.getByRole("button", { name: "合并为群组" }));
+    fireEvent.change(screen.getByDisplayValue("新提示词组"), {
+      target: { value: "Combined" },
+    });
+    fireEvent.click(screen.getByRole("button", { name: "创建群组并删除原提示词" }));
+
+    await screen.findByText("Combined");
+    expect(promptReadCount() - beforeCombine).toBe(1);
+
+    const beforeSplit = promptReadCount();
+    fireEvent.click(screen.getByRole("button", { name: "Combined 的更多操作" }));
+    fireEvent.click(screen.getByRole("menuitem", { name: "拆分为单条" }));
+    fireEvent.click(screen.getByRole("button", { name: "确认拆分" }));
+
+    await screen.findByText("First");
+    expect(screen.getByText("Second")).toBeTruthy();
+    expect(promptReadCount() - beforeSplit).toBe(1);
+  });
+
   it("emits happy motion when deleting a prompt", async () => {
     await renderMainPromptManager([
       {

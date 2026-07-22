@@ -120,11 +120,12 @@ describe("prompt store", () => {
     const middle = await store.create({ title: "Middle", body: "middle" });
     const last = await store.create({ title: "Last", body: "last" });
 
-    const group = await store.combineSingles({
+    const result = await store.combineSingles({
       ids: [last.id, first.id],
       title: "Combined",
       deleteOriginals: true,
     });
+    const group = result.container;
 
     expect((await store.list()).map((container) => container.title)).toEqual([
       "Combined",
@@ -133,6 +134,10 @@ describe("prompt store", () => {
     expect(group.prompts.map((entry) => [entry.title, entry.body])).toEqual([
       ["Last", "last"],
       ["First", "first"],
+    ]);
+    expect(result.snapshot.containers.map((container) => container.title)).toEqual([
+      "Combined",
+      "Middle",
     ]);
     expect((await store.list()).some((container) => container.id === middle.id)).toBe(true);
   });
@@ -167,9 +172,16 @@ describe("prompt store", () => {
     });
     await store.create({ title: "After", body: "after" });
 
-    const singles = await store.splitGroup(group.id);
+    const result = await store.splitGroup(group.id);
+    const singles = result.containers;
 
     expect(singles.map((container) => container.title)).toEqual(["Analyze", "Repair"]);
+    expect(result.snapshot.containers.map((container) => container.title)).toEqual([
+      "Before",
+      "Analyze",
+      "Repair",
+      "After",
+    ]);
     expect((await store.list()).map((container) => container.title)).toEqual([
       "Before",
       "Analyze",
@@ -191,11 +203,12 @@ describe("prompt store", () => {
       sendBehavior: "paste_command_enter",
     });
 
-    const group = await store.combineSingles({
+    const combineResult = await store.combineSingles({
       ids: [second.id, first.id],
       title: "Combined",
       deleteOriginals: true,
     });
+    const group = combineResult.container;
     expect(group.sendBehavior).toBe("inherit");
 
     await store.splitGroup(group.id);
@@ -224,13 +237,17 @@ describe("prompt store", () => {
     const group = await store.createGroup({
       title: "Workflow",
       prompts: [{ body: "one" }, { body: "two" }],
+      sendBehavior: "paste_enter",
     });
 
     await store.splitGroup(group.id);
 
-    expect((await store.list()).map((container) => container.title)).toEqual([
-      "Workflow 1",
-      "Workflow 2",
+    expect((await store.list()).map((container) => ({
+      title: container.title,
+      sendBehavior: container.sendBehavior,
+    }))).toEqual([
+      { title: "Workflow 1", sendBehavior: "paste_enter" },
+      { title: "Workflow 2", sendBehavior: "paste_enter" },
     ]);
   });
 

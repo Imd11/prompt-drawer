@@ -1,5 +1,5 @@
-import { describe, expect, it } from "vitest";
-import { act, render, screen, fireEvent, waitFor } from "@testing-library/react";
+import { describe, expect, it, vi } from "vitest";
+import { act, render, screen, fireEvent, waitFor, within } from "@testing-library/react";
 import { PromptManager } from "./PromptManager";
 import { getMessages } from "../shared/i18n";
 import type { PromptCategory, PromptContainer } from "../shared/promptTypes";
@@ -171,6 +171,26 @@ describe("prompt manager", () => {
 
     expect(list).toBeTruthy();
     expect(list?.querySelectorAll(".prompt-item").length).toBe(2);
+  });
+
+  it("enables Motion reordering for every prompt container", () => {
+    renderManager();
+
+    const list = document.querySelector('[data-reorder-list="true"]');
+    const rows = Array.from(document.querySelectorAll<HTMLElement>("[data-reorder-id]"));
+
+    expect(list).toBeTruthy();
+    expect(rows.map((row) => row.dataset.reorderId)).toEqual(["1", "2"]);
+    expect(rows.every((row) => row.classList.contains("is-reorder-enabled"))).toBe(true);
+  });
+
+  it("disables row dragging while a prompt is being edited", () => {
+    renderManager();
+
+    fireEvent.click(screen.getAllByRole("button", { name: "编辑" })[0]);
+
+    const rows = Array.from(document.querySelectorAll<HTMLElement>("[data-reorder-id]"));
+    expect(rows.every((row) => !row.classList.contains("is-reorder-enabled"))).toBe(true);
   });
 
   it("renders a left category rail with the list-first manager layout", () => {
@@ -516,6 +536,10 @@ describe("prompt manager", () => {
     renderManager();
 
     expect(screen.getAllByRole("button", { name: "编辑" })).toHaveLength(2);
+    expect(screen.getByRole("button", { name: "上移 Code Review" })).toBeTruthy();
+    expect(screen.getByRole("button", { name: "下移 Code Review" })).toBeTruthy();
+    expect(screen.getByRole("button", { name: "上移 Repair Group" })).toBeTruthy();
+    expect(screen.getByRole("button", { name: "下移 Repair Group" })).toBeTruthy();
     expect(screen.getByRole("button", { name: "Code Review 的更多操作" })).toBeTruthy();
     expect(screen.getByRole("button", { name: "Repair Group 的更多操作" })).toBeTruthy();
 
@@ -591,6 +615,10 @@ describe("prompt manager", () => {
     fireEvent.click(screen.getByRole("checkbox", { name: "选择 First" }));
     fireEvent.click(screen.getByRole("checkbox", { name: "选择 Third" }));
     fireEvent.click(screen.getByRole("button", { name: "合并为群组" }));
+    expect((screen.getByRole("button", { name: "上移 First" }) as HTMLButtonElement).disabled)
+      .toBe(true);
+    expect((screen.getByRole("button", { name: "下移 Third" }) as HTMLButtonElement).disabled)
+      .toBe(true);
     fireEvent.click(screen.getByRole("button", { name: "上移 Third" }));
     fireEvent.click(screen.getByRole("checkbox", {
       name: /合并后删除原来的 2 个单条提示词/,
@@ -637,6 +665,20 @@ describe("prompt manager", () => {
 
     expect(combineCount).toBe(1);
     expect((submit as HTMLButtonElement).disabled).toBe(true);
+    expect((screen.getByDisplayValue("新提示词组") as HTMLInputElement).disabled).toBe(true);
+    expect((screen.getByRole("checkbox", {
+      name: /合并后删除原来的 2 个单条提示词/,
+    }) as HTMLInputElement).disabled).toBe(true);
+    expect((screen.getByRole("button", { name: "下移 First" }) as HTMLButtonElement).disabled)
+      .toBe(true);
+    const removeFirst = screen.getByRole("button", { name: "从合并中移除 First" });
+    expect((removeFirst as HTMLButtonElement).disabled).toBe(true);
+    const mergeDialog = screen.getByRole("dialog", { name: "合并为提示词组" });
+    expect((within(mergeDialog).getByRole("button", { name: "取消" }) as HTMLButtonElement).disabled)
+      .toBe(true);
+    fireEvent.click(removeFirst);
+    expect(mergeDialog).toBeTruthy();
+    expect(screen.getAllByText("First").length).toBeGreaterThan(0);
 
     await act(async () => {
       resolveCombine?.();
@@ -695,6 +737,32 @@ describe("prompt manager", () => {
     expect(screen.getByRole("dialog", { name: "拆分提示词组" })).toBeTruthy();
   });
 
+  it("freezes split confirmation and cancellation until persistence settles", async () => {
+    let resolveSplit: (() => void) | null = null;
+    const pendingSplit = new Promise<void>((resolve) => {
+      resolveSplit = resolve;
+    });
+    renderManager({ onSplitGroup: async () => pendingSplit });
+
+    fireEvent.click(screen.getByRole("button", { name: "Repair Group 的更多操作" }));
+    fireEvent.click(screen.getByRole("menuitem", { name: "拆分为单条" }));
+    fireEvent.click(screen.getByRole("button", { name: "确认拆分" }));
+
+    expect((screen.getByRole("button", { name: "确认拆分" }) as HTMLButtonElement).disabled)
+      .toBe(true);
+    const splitDialog = screen.getByRole("dialog", { name: "拆分提示词组" });
+    expect((within(splitDialog).getByRole("button", { name: "取消" }) as HTMLButtonElement).disabled)
+      .toBe(true);
+
+    await act(async () => {
+      resolveSplit?.();
+      await pendingSplit;
+    });
+    await waitFor(() => {
+      expect(screen.queryByRole("dialog", { name: "拆分提示词组" })).toBeNull();
+    });
+  });
+
   it("calls reorder with new order when moving down", () => {
     let reorderIds: string[] | null = null;
     renderManager({ onReorder: (ids: string[]) => { reorderIds = ids; } });
@@ -703,6 +771,28 @@ describe("prompt manager", () => {
     fireEvent.click(moveDownBtn);
 
     expect(reorderIds).toEqual(["2", "1"]);
+  });
+
+  it("restores the previous order and reports reorder persistence failures", async () => {
+    const consoleError = vi.spyOn(console, "error").mockImplementation(() => {});
+    try {
+      renderManager({
+        onReorder: async () => {
+          throw new Error("write failed");
+        },
+      });
+
+      fireEvent.click(screen.getByRole("button", { name: "下移 Code Review" }));
+
+      expect((await screen.findByRole("alert")).textContent).toContain("排序保存失败");
+      await waitFor(() => {
+        const rows = screen.getAllByRole("listitem");
+        expect(rows[0].textContent).toContain("Code Review");
+        expect(rows[1].textContent).toContain("Repair Group");
+      });
+    } finally {
+      consoleError.mockRestore();
+    }
   });
 
   it("exposes import and export actions", () => {

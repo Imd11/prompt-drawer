@@ -25,4 +25,11 @@ describe("prompt manager layout styles", () => {
     expect(hasDeclaration(".prompt-manager .prompt-list", "overflow-y: auto")).toBe(true);
     expect(hasDeclaration(".prompt-manager .prompt-list", "overscroll-behavior: contain")).toBe(true);
   });
+
+  it("raises only the actively dragged prompt above neighboring rows", () => {
+    expect(hasDeclaration(".prompt-manager .prompt-item", "position: relative")).toBe(true);
+    expect(hasDeclaration(".prompt-manager .prompt-item.is-dragging", "z-index: 4")).toBe(true);
+    expect(hasDeclaration(".prompt-manager .prompt-item.is-dragging", "will-change: transform")).toBe(true);
+    expect(hasDeclaration(".prompt-manager .prompt-item", "will-change: transform")).toBe(false);
+  });
 });

@@ -1,4 +1,12 @@
-import { useEffect, useRef, useState, type DragEvent } from "react";
+import {
+  useEffect,
+  useRef,
+  useState,
+  type DragEvent,
+  type PointerEvent as ReactPointerEvent,
+  type ReactNode,
+} from "react";
+import { Reorder, useDragControls } from "motion/react";
 import type {
   PromptCategory,
   PromptContainer,
@@ -160,6 +168,77 @@ function moveArrayItem<T>(items: T[], from: number, to: number): T[] {
   return next;
 }
 
+function sameOrder(left: string[], right: string[]): boolean {
+  return left.length === right.length && left.every((id, index) => id === right[index]);
+}
+
+function reconcilePromptIds(current: string[], prompts: PromptContainer[]): string[] {
+  const availableIds = new Set(prompts.map((prompt) => prompt.id));
+  const next = current.filter((id) => availableIds.has(id));
+  const includedIds = new Set(next);
+  for (const prompt of prompts) {
+    if (!includedIds.has(prompt.id)) next.push(prompt.id);
+  }
+  return next;
+}
+
+type PromptReorderRowProps = {
+  id: string;
+  enabled: boolean;
+  className: string;
+  onDragStart: () => void;
+  onDragEnd: () => void;
+  children: ReactNode;
+};
+
+function isInteractivePromptTarget(target: EventTarget | null): boolean {
+  return target instanceof Element && Boolean(target.closest(
+    "button, a, input, textarea, select, [contenteditable='true'], [role='menuitem']"
+  ));
+}
+
+function PromptReorderRow({
+  id,
+  enabled,
+  className,
+  onDragStart,
+  onDragEnd,
+  children,
+}: PromptReorderRowProps) {
+  const dragControls = useDragControls();
+
+  const handlePointerDown = (event: ReactPointerEvent<HTMLDivElement>) => {
+    if (!enabled || isInteractivePromptTarget(event.target)) return;
+    dragControls.start(event);
+  };
+
+  return (
+    <Reorder.Item
+      as="div"
+      value={id}
+      role="listitem"
+      data-reorder-id={id}
+      dragListener={false}
+      dragControls={dragControls}
+      dragMomentum={false}
+      dragElastic={0.04}
+      onPointerDown={handlePointerDown}
+      onDragStart={onDragStart}
+      onDragEnd={onDragEnd}
+      whileDrag={{
+        scale: 1.01,
+        boxShadow: "0 12px 26px rgba(15, 23, 42, 0.16)",
+      }}
+      transition={{
+        layout: { type: "spring", stiffness: 520, damping: 42 },
+      }}
+      className={className}
+    >
+      {children}
+    </Reorder.Item>
+  );
+}
+
 function PromptKindBadge({ prompt, messages }: { prompt: PromptContainer; messages: Messages }) {
   if (prompt.type !== "group") return null;
   const count = getPromptContainerBodies(prompt).length;
@@ -209,6 +288,12 @@ export function PromptManager({
   const [openMenuId, setOpenMenuId] = useState<string | null>(null);
   const [splitConfirmId, setSplitConfirmId] = useState<string | null>(null);
   const [draggingMergeId, setDraggingMergeId] = useState<string | null>(null);
+  const [draggingPromptId, setDraggingPromptId] = useState<string | null>(null);
+  const [orderedPromptIds, setOrderedPromptIds] = useState<string[]>(() =>
+    prompts.map((prompt) => prompt.id)
+  );
+  const [reorderPending, setReorderPending] = useState(false);
+  const [reorderError, setReorderError] = useState<string | null>(null);
   const [groupActionPending, setGroupActionPending] = useState<"combine" | "split" | null>(null);
   const [groupActionError, setGroupActionError] = useState<string | null>(null);
   const titleInputRef = useRef<HTMLInputElement | null>(null);
@@ -223,6 +308,8 @@ export function PromptManager({
   const mergeTitleInputRef = useRef<HTMLInputElement | null>(null);
   const mergeDialogOpenRef = useRef(false);
   const groupActionPendingRef = useRef(false);
+  const orderedPromptIdsRef = useRef(orderedPromptIds);
+  const reorderPendingRef = useRef(false);
 
   useEffect(() => {
     return () => {
@@ -246,7 +333,15 @@ export function PromptManager({
     setOpenMenuId(null);
     setSplitConfirmId(null);
     setGroupActionError(null);
+    setReorderError(null);
   }, [activeCategoryId]);
+
+  useEffect(() => {
+    if (draggingPromptId !== null || reorderPending) return;
+    const next = prompts.map((prompt) => prompt.id);
+    orderedPromptIdsRef.current = next;
+    setOrderedPromptIds((current) => sameOrder(current, next) ? current : next);
+  }, [draggingPromptId, prompts, reorderPending]);
 
   useEffect(() => {
     if (!openMenuId) return;
@@ -391,21 +486,53 @@ export function PromptManager({
     setEditDraft(emptyDraft());
   };
 
+  const visiblePromptIds = reconcilePromptIds(orderedPromptIds, prompts);
+  const promptById = new Map(prompts.map((prompt) => [prompt.id, prompt]));
+  const visiblePrompts = visiblePromptIds
+    .map((id) => promptById.get(id))
+    .filter((prompt): prompt is PromptContainer => Boolean(prompt));
+
+  const updatePromptOrder = (next: string[]) => {
+    orderedPromptIdsRef.current = next;
+    setOrderedPromptIds(next);
+  };
+
+  const persistPromptOrder = async (next: string[], fallback: string[]) => {
+    if (reorderPendingRef.current || sameOrder(next, fallback)) return;
+    reorderPendingRef.current = true;
+    setReorderPending(true);
+    setReorderError(null);
+    try {
+      await onReorder(next);
+    } catch (error) {
+      console.error("Failed to reorder prompts:", error);
+      orderedPromptIdsRef.current = fallback;
+      setOrderedPromptIds(fallback);
+      setReorderError(messages.manager.reorderFailed);
+    } finally {
+      reorderPendingRef.current = false;
+      setReorderPending(false);
+    }
+  };
+
   const handleMoveUp = (index: number) => {
-    if (index === 0) return;
-    const newOrder = [...prompts.map((p) => p.id)];
-    [newOrder[index - 1], newOrder[index]] = [newOrder[index], newOrder[index - 1]];
-    runSubmitOnce(() => onReorder(newOrder));
+    if (index === 0 || reorderPendingRef.current) return;
+    const fallback = prompts.map((prompt) => prompt.id);
+    const next = moveArrayItem(visiblePromptIds, index, index - 1);
+    updatePromptOrder(next);
+    void persistPromptOrder(next, fallback);
   };
 
   const handleMoveDown = (index: number) => {
-    if (index === prompts.length - 1) return;
-    const newOrder = [...prompts.map((p) => p.id)];
-    [newOrder[index], newOrder[index + 1]] = [newOrder[index + 1], newOrder[index]];
-    runSubmitOnce(() => onReorder(newOrder));
+    if (index === visiblePromptIds.length - 1 || reorderPendingRef.current) return;
+    const fallback = prompts.map((prompt) => prompt.id);
+    const next = moveArrayItem(visiblePromptIds, index, index + 1);
+    updatePromptOrder(next);
+    void persistPromptOrder(next, fallback);
   };
 
   const startSelection = () => {
+    if (groupActionPendingRef.current) return;
     setEditingId(null);
     setDeleteConfirmId(null);
     setCreatePanelOpen(false);
@@ -429,6 +556,7 @@ export function PromptManager({
   };
 
   const openMergeDialog = () => {
+    if (groupActionPendingRef.current) return;
     const selected = prompts.filter((prompt) =>
       prompt.type === "single" && selectedIds.includes(prompt.id)
     );
@@ -480,6 +608,7 @@ export function PromptManager({
   };
 
   const moveMergeItem = (sourceId: string, targetId: string) => {
+    if (groupActionPendingRef.current) return;
     const from = mergeIds.indexOf(sourceId);
     const to = mergeIds.indexOf(targetId);
     if (from === -1 || to === -1) return;
@@ -487,6 +616,7 @@ export function PromptManager({
   };
 
   const moveMergeItemBy = (index: number, offset: number) => {
+    if (groupActionPendingRef.current) return;
     const targetIndex = index + offset;
     if (targetIndex < 0 || targetIndex >= mergeIds.length) return;
     setMergeIds((ids) => moveArrayItem(ids, index, targetIndex));
@@ -508,10 +638,26 @@ export function PromptManager({
     .map((id) => prompts.find((prompt) => prompt.id === id))
     .filter((prompt): prompt is PromptContainer => Boolean(prompt));
   const splitPrompt = prompts.find((prompt) => prompt.id === splitConfirmId) ?? null;
+  const groupActionBusy = groupActionPending !== null;
+  const groupDialogOpen = mergeIds.length > 0 || splitPrompt !== null;
+  const promptReorderEnabled = visiblePrompts.length > 1
+    && editingId === null
+    && deleteConfirmId === null
+    && !selectionMode
+    && !groupDialogOpen
+    && !groupActionBusy
+    && !reorderPending;
+
+  const handlePromptDragEnd = () => {
+    const next = orderedPromptIdsRef.current;
+    const fallback = prompts.map((prompt) => prompt.id);
+    setDraggingPromptId(null);
+    void persistPromptOrder(next, fallback);
+  };
 
   return (
     <div className="prompt-manager page-stack">
-      <header className="page-header">
+      <header className="page-header" inert={groupDialogOpen}>
         <div>
           <h1>{messages.manager.title}</h1>
           <p>{messages.manager.count(totalPromptCount)}</p>
@@ -530,30 +676,33 @@ export function PromptManager({
       </header>
 
       <div className="prompt-manager-body">
-        <CategoryRail
-          categories={categories}
-          activeCategoryId={activeCategoryId}
-          counts={categoryCounts}
-          messages={{
-            title: messages.manager.categoriesTitle,
-            newCategory: messages.manager.newCategory,
-            newCategoryName: messages.manager.newCategoryName,
-            newCategoryDefaultName: messages.manager.newCategoryDefaultName,
-            categoryActions: messages.manager.categoryActions,
-            renameCategory: messages.manager.renameCategory,
-            deleteCategory: messages.manager.deleteCategory,
-            saveCategory: messages.manager.saveCategory,
-            cancelCategory: messages.manager.cancelCategory,
-          }}
-          getCategoryDisplayName={getCategoryDisplayName}
-          actionError={categoryActionError}
-          onSelect={onSelectCategory}
-          onCreate={onCreateCategory}
-          onRename={onRenameCategory}
-          onDelete={onDeleteCategory}
-        />
+        <div className="manager-dialog-background" inert={groupDialogOpen}>
+          <CategoryRail
+            categories={categories}
+            activeCategoryId={activeCategoryId}
+            counts={categoryCounts}
+            messages={{
+              title: messages.manager.categoriesTitle,
+              newCategory: messages.manager.newCategory,
+              newCategoryName: messages.manager.newCategoryName,
+              newCategoryDefaultName: messages.manager.newCategoryDefaultName,
+              categoryActions: messages.manager.categoryActions,
+              renameCategory: messages.manager.renameCategory,
+              deleteCategory: messages.manager.deleteCategory,
+              saveCategory: messages.manager.saveCategory,
+              cancelCategory: messages.manager.cancelCategory,
+            }}
+            getCategoryDisplayName={getCategoryDisplayName}
+            actionError={categoryActionError}
+            onSelect={onSelectCategory}
+            onCreate={onCreateCategory}
+            onRename={onRenameCategory}
+            onDelete={onDeleteCategory}
+          />
+        </div>
         <div className="prompt-manager-content">
           <section className="list-panel">
+            <div className="manager-dialog-background" inert={groupDialogOpen}>
             <div className="section-heading panel-heading-with-actions">
               <div>
                 <h2>{messages.manager.promptListTitle}</h2>
@@ -687,7 +836,7 @@ export function PromptManager({
                   <button
                     className="button button-primary"
                     type="button"
-                    disabled={selectedIds.length < 2}
+                    disabled={groupActionBusy || selectedIds.length < 2}
                     onClick={openMergeDialog}
                   >
                     {messages.manager.combineIntoGroup}
@@ -695,6 +844,7 @@ export function PromptManager({
                   <button
                     className="button button-secondary"
                     type="button"
+                    disabled={groupActionBusy}
                     onClick={cancelSelection}
                   >
                     {messages.manager.cancel}
@@ -702,15 +852,36 @@ export function PromptManager({
                 </div>
               </div>
             ) : null}
-            <div className="prompt-list">
+            {reorderError ? (
+              <div className="prompt-reorder-error" role="alert">
+                {reorderError}
+              </div>
+            ) : null}
+            <Reorder.Group
+              as="div"
+              axis="y"
+              values={visiblePromptIds}
+              onReorder={updatePromptOrder}
+              className="prompt-list"
+              layoutScroll
+              role="list"
+              data-reorder-list="true"
+            >
               {prompts.length === 0 ? (
                 <div className="empty-state-block">
                   {activeCategoryId ? messages.manager.emptyCategory : messages.manager.noPrompts}
                 </div>
-              ) : prompts.map((prompt, index) => (
-                <div
+              ) : visiblePrompts.map((prompt, index) => (
+                <PromptReorderRow
                   key={prompt.id}
-                  className={`prompt-item ${prompt.type === "group" ? "prompt-item-group" : ""} ${selectedIds.includes(prompt.id) ? "is-selected" : ""}`}
+                  id={prompt.id}
+                  enabled={promptReorderEnabled}
+                  onDragStart={() => {
+                    setOpenMenuId(null);
+                    setDraggingPromptId(prompt.id);
+                  }}
+                  onDragEnd={handlePromptDragEnd}
+                  className={`prompt-item ${prompt.type === "group" ? "prompt-item-group" : ""} ${selectedIds.includes(prompt.id) ? "is-selected" : ""} ${promptReorderEnabled ? "is-reorder-enabled" : ""} ${draggingPromptId === prompt.id ? "is-dragging" : ""}`}
                 >
                   {selectionMode ? (
                     <label
@@ -720,7 +891,7 @@ export function PromptManager({
                         <input
                           type="checkbox"
                           checked={selectedIds.includes(prompt.id)}
-                          disabled={prompt.type === "group"}
+                          disabled={groupActionBusy || prompt.type === "group"}
                           aria-label={messages.manager.selectPrompt(prompt.title)}
                           onChange={() => toggleSelection(prompt.id)}
                         />
@@ -871,15 +1042,17 @@ export function PromptManager({
                       <div className="prompt-actions">
                         <button
                           className="button icon-button"
+                          aria-label={messages.manager.moveCombinedPromptUp(prompt.title)}
                           onClick={() => handleMoveUp(index)}
-                          disabled={index === 0}
+                          disabled={reorderPending || index === 0}
                         >
                           ↑
                         </button>
                         <button
                           className="button icon-button"
+                          aria-label={messages.manager.moveCombinedPromptDown(prompt.title)}
                           onClick={() => handleMoveDown(index)}
-                          disabled={index === prompts.length - 1}
+                          disabled={reorderPending || index === visiblePrompts.length - 1}
                         >
                           ↓
                         </button>
@@ -902,6 +1075,7 @@ export function PromptManager({
                             aria-label={messages.manager.moreActions(prompt.title)}
                             aria-haspopup="menu"
                             aria-expanded={openMenuId === prompt.id}
+                            disabled={groupActionBusy}
                             onClick={() => setOpenMenuId(
                               openMenuId === prompt.id ? null : prompt.id
                             )}
@@ -915,6 +1089,7 @@ export function PromptManager({
                                   type="button"
                                   role="menuitem"
                                   onClick={() => {
+                                    if (groupActionPendingRef.current) return;
                                     setSplitConfirmId(prompt.id);
                                     setOpenMenuId(null);
                                     setGroupActionError(null);
@@ -940,8 +1115,9 @@ export function PromptManager({
                       </div>
                     </div>
                   )}
-                </div>
+                </PromptReorderRow>
               ))}
+            </Reorder.Group>
             </div>
             {mergeIds.length > 0 ? (
               <div
@@ -954,6 +1130,7 @@ export function PromptManager({
                   className="manager-dialog merge-dialog"
                   role="dialog"
                   aria-modal="true"
+                  aria-busy={groupActionBusy}
                   aria-labelledby="merge-dialog-title"
                   onKeyDown={(event) => {
                     if (event.key === "Escape") closeMergeDialog();
@@ -972,8 +1149,11 @@ export function PromptManager({
                     <input
                       ref={mergeTitleInputRef}
                       className="field"
+                      disabled={groupActionBusy}
                       value={mergeTitle}
-                      onChange={(event) => setMergeTitle(event.target.value)}
+                      onChange={(event) => {
+                        if (!groupActionPendingRef.current) setMergeTitle(event.target.value);
+                      }}
                     />
                   </label>
                   <div className="merge-order-section">
@@ -982,9 +1162,13 @@ export function PromptManager({
                       {mergePrompts.map((prompt, index) => (
                         <div
                           className={`merge-order-item ${draggingMergeId === prompt.id ? "is-dragging" : ""}`}
-                          draggable
+                          draggable={!groupActionBusy}
                           key={prompt.id}
                           onDragStart={(event) => {
+                            if (groupActionPendingRef.current) {
+                              event.preventDefault();
+                              return;
+                            }
                             setDraggingMergeId(prompt.id);
                             event.dataTransfer.effectAllowed = "move";
                             event.dataTransfer.setData("text/plain", prompt.id);
@@ -993,6 +1177,7 @@ export function PromptManager({
                           onDragOver={(event) => event.preventDefault()}
                           onDrop={(event) => {
                             event.preventDefault();
+                            if (groupActionPendingRef.current) return;
                             const sourceId = draggingMergeId
                               ?? event.dataTransfer.getData("text/plain");
                             moveMergeItem(sourceId, prompt.id);
@@ -1009,7 +1194,7 @@ export function PromptManager({
                             <button
                               type="button"
                               aria-label={messages.manager.moveCombinedPromptUp(prompt.title)}
-                              disabled={index === 0}
+                              disabled={groupActionBusy || index === 0}
                               onClick={() => moveMergeItemBy(index, -1)}
                             >
                               ↑
@@ -1017,7 +1202,7 @@ export function PromptManager({
                             <button
                               type="button"
                               aria-label={messages.manager.moveCombinedPromptDown(prompt.title)}
-                              disabled={index === mergePrompts.length - 1}
+                              disabled={groupActionBusy || index === mergePrompts.length - 1}
                               onClick={() => moveMergeItemBy(index, 1)}
                             >
                               ↓
@@ -1025,9 +1210,11 @@ export function PromptManager({
                             <button
                               type="button"
                               aria-label={messages.manager.removeFromCombination(prompt.title)}
-                              onClick={() => setMergeIds((ids) =>
-                                ids.filter((id) => id !== prompt.id)
-                              )}
+                              disabled={groupActionBusy}
+                              onClick={() => {
+                                if (groupActionPendingRef.current) return;
+                                setMergeIds((ids) => ids.filter((id) => id !== prompt.id));
+                              }}
                             >
                               ×
                             </button>
@@ -1039,8 +1226,13 @@ export function PromptManager({
                   <label className="merge-delete-originals">
                     <input
                       type="checkbox"
+                      disabled={groupActionBusy}
                       checked={deleteOriginals}
-                      onChange={(event) => setDeleteOriginals(event.target.checked)}
+                      onChange={(event) => {
+                        if (!groupActionPendingRef.current) {
+                          setDeleteOriginals(event.target.checked);
+                        }
+                      }}
                     />
                     <span>
                       <strong>{messages.manager.deleteOriginals(mergeIds.length)}</strong>
@@ -1056,7 +1248,7 @@ export function PromptManager({
                     <button
                       className="button button-secondary"
                       type="button"
-                      disabled={groupActionPending === "combine"}
+                      disabled={groupActionBusy}
                       onClick={closeMergeDialog}
                     >
                       {messages.manager.cancel}
@@ -1064,7 +1256,7 @@ export function PromptManager({
                     <button
                       className="button button-primary"
                       type="submit"
-                      disabled={groupActionPending === "combine"
+                      disabled={groupActionBusy
                         || mergeIds.length < 2
                         || !mergeTitle.trim()}
                     >
@@ -1087,6 +1279,7 @@ export function PromptManager({
                   className="manager-dialog split-dialog"
                   role="dialog"
                   aria-modal="true"
+                  aria-busy={groupActionBusy}
                   aria-labelledby="split-dialog-title"
                   onKeyDown={(event) => {
                     if (event.key === "Escape") closeSplitDialog();
@@ -1119,7 +1312,7 @@ export function PromptManager({
                       className="button button-secondary"
                       type="button"
                       autoFocus
-                      disabled={groupActionPending === "split"}
+                      disabled={groupActionBusy}
                       onClick={closeSplitDialog}
                     >
                       {messages.manager.cancel}
@@ -1127,7 +1320,7 @@ export function PromptManager({
                     <button
                       className="button button-primary"
                       type="button"
-                      disabled={groupActionPending === "split"}
+                      disabled={groupActionBusy}
                       onClick={() => void handleSplit(splitPrompt.id)}
                     >
                       {messages.manager.confirmSplit}

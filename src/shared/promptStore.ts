@@ -41,11 +41,23 @@ type PromptStoreDataV3 = {
 
 type PromptStoreData = PromptStoreDataV1 | PromptStoreDataV2 | PromptStoreDataV3;
 
-type NormalizedPromptStore = {
+export type PromptLibrarySnapshot = {
   categories: PromptCategory[];
   containers: PromptContainer[];
   activeCategoryId: string;
 };
+
+export type CombineSinglesResult = {
+  container: PromptContainer;
+  snapshot: PromptLibrarySnapshot;
+};
+
+export type SplitGroupResult = {
+  containers: PromptContainer[];
+  snapshot: PromptLibrarySnapshot;
+};
+
+type NormalizedPromptStore = PromptLibrarySnapshot;
 
 type RawPromptStore = {
   categories?: Partial<PromptCategory>[];
@@ -391,8 +403,10 @@ export function createPromptStore(adapter: StorageAdapter) {
     return parseStore(await adapter.read());
   }
 
-  async function save(store: NormalizedPromptStore): Promise<void> {
-    await adapter.write(serializeStore(normalizeStore(store)));
+  async function save(store: NormalizedPromptStore): Promise<PromptLibrarySnapshot> {
+    const snapshot = normalizeStore(store);
+    await adapter.write(serializeStore(snapshot));
+    return snapshot;
   }
 
   async function resolveCategoryId(
@@ -616,7 +630,7 @@ export function createPromptStore(adapter: StorageAdapter) {
       ids: string[];
       title: string;
       deleteOriginals: boolean;
-    }): Promise<PromptContainer> {
+    }): Promise<CombineSinglesResult> {
       const uniqueIds = [...new Set(input.ids)];
       if (uniqueIds.length < 2) {
         throw new Error("Select at least two prompts");
@@ -677,17 +691,20 @@ export function createPromptStore(adapter: StorageAdapter) {
         order,
         updatedAt: container.id === group.id ? container.updatedAt : now,
       }));
-      await save({
+      const snapshot = await save({
         ...store,
         containers: [
           ...store.containers.filter((container) => container.categoryId !== categoryId),
           ...normalizedCategory,
         ],
       });
-      return { ...group, order: insertIndex };
+      return {
+        container: { ...group, order: insertIndex },
+        snapshot,
+      };
     },
 
-    async splitGroup(id: string): Promise<PromptContainer[]> {
+    async splitGroup(id: string): Promise<SplitGroupResult> {
       const store = await load();
       const group = store.containers.find((container) => container.id === id);
       if (!group || group.type !== "group") {
@@ -722,16 +739,19 @@ export function createPromptStore(adapter: StorageAdapter) {
           ? container.updatedAt
           : now,
       }));
-      await save({
+      const snapshot = await save({
         ...store,
         containers: [
           ...store.containers.filter((container) => container.categoryId !== group.categoryId),
           ...normalizedCategory,
         ],
       });
-      return normalizedCategory.filter((container) =>
-        singles.some((single) => single.id === container.id)
-      );
+      return {
+        containers: normalizedCategory.filter((container) =>
+          singles.some((single) => single.id === container.id)
+        ),
+        snapshot,
+      };
     },
 
     async reorder(orderedIds: string[], categoryId?: string): Promise<void> {
