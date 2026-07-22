@@ -1,5 +1,9 @@
 import { useEffect, useRef, useState, type DragEvent } from "react";
-import type { PromptCategory, PromptContainer } from "../shared/promptTypes";
+import type {
+  PromptCategory,
+  PromptContainer,
+  PromptSendBehavior,
+} from "../shared/promptTypes";
 import {
   DEFAULT_GROUP_INTERVAL_MS,
   MAX_GROUP_INTERVAL_MS,
@@ -15,6 +19,7 @@ type EditorMode = "single" | "group";
 type DraftPrompt = {
   id?: string;
   title?: string;
+  sendBehavior?: PromptSendBehavior;
   body: string;
 };
 
@@ -47,7 +52,13 @@ interface PromptManagerProps {
   }) => void | Promise<void>;
   onCreateGroup: (input: {
     title: string;
-    prompts: Array<{ id?: string; title?: string; body: string; order: number }>;
+    prompts: Array<{
+      id?: string;
+      title?: string;
+      sendBehavior?: PromptSendBehavior;
+      body: string;
+      order: number;
+    }>;
     intervalMs: number;
   }) => void | Promise<void>;
   onUpdate: (
@@ -56,7 +67,13 @@ interface PromptManagerProps {
       title?: string;
       body?: string;
       type?: EditorMode;
-      prompts?: Array<{ id?: string; title?: string; body: string; order: number }>;
+      prompts?: Array<{
+        id?: string;
+        title?: string;
+        sendBehavior?: PromptSendBehavior;
+        body: string;
+        order: number;
+      }>;
       intervalMs?: number;
     }
   ) => void | Promise<void>;
@@ -90,6 +107,7 @@ function draftFromPrompt(prompt: PromptContainer): Draft {
       ? orderedPrompts.map((entry) => ({
           id: entry.id,
           title: entry.title,
+          sendBehavior: entry.sendBehavior,
           body: entry.body,
         }))
       : [{ body: orderedPrompts[0]?.body ?? "" }, { body: "" }],
@@ -99,7 +117,13 @@ function draftFromPrompt(prompt: PromptContainer): Draft {
 
 function cleanPrompts(
   prompts: DraftPrompt[]
-): Array<{ id?: string; title?: string; body: string; order: number }> {
+): Array<{
+  id?: string;
+  title?: string;
+  sendBehavior?: PromptSendBehavior;
+  body: string;
+  order: number;
+}> {
   return prompts
     .map((prompt) => ({ ...prompt, body: prompt.body.trim() }))
     .filter((prompt) => Boolean(prompt.body))
@@ -185,6 +209,8 @@ export function PromptManager({
   const [openMenuId, setOpenMenuId] = useState<string | null>(null);
   const [splitConfirmId, setSplitConfirmId] = useState<string | null>(null);
   const [draggingMergeId, setDraggingMergeId] = useState<string | null>(null);
+  const [groupActionPending, setGroupActionPending] = useState<"combine" | "split" | null>(null);
+  const [groupActionError, setGroupActionError] = useState<string | null>(null);
   const titleInputRef = useRef<HTMLInputElement | null>(null);
   const bodyTextareaRef = useRef<HTMLTextAreaElement | null>(null);
   const groupPromptRefs = useRef<Array<HTMLTextAreaElement | null>>([]);
@@ -196,6 +222,7 @@ export function PromptManager({
   const createToastTimerRef = useRef<number | null>(null);
   const mergeTitleInputRef = useRef<HTMLInputElement | null>(null);
   const mergeDialogOpenRef = useRef(false);
+  const groupActionPendingRef = useRef(false);
 
   useEffect(() => {
     return () => {
@@ -218,6 +245,7 @@ export function PromptManager({
     setMergeIds([]);
     setOpenMenuId(null);
     setSplitConfirmId(null);
+    setGroupActionError(null);
   }, [activeCategoryId]);
 
   useEffect(() => {
@@ -384,12 +412,14 @@ export function PromptManager({
     setOpenMenuId(null);
     setSelectionMode(true);
     setSelectedIds([]);
+    setGroupActionError(null);
   };
 
   const cancelSelection = () => {
     setSelectionMode(false);
     setSelectedIds([]);
     setMergeIds([]);
+    setGroupActionError(null);
   };
 
   const toggleSelection = (id: string) => {
@@ -406,23 +436,47 @@ export function PromptManager({
     setMergeIds(selected.map((prompt) => prompt.id));
     setMergeTitle(messages.manager.newGroupDefaultName);
     setDeleteOriginals(true);
+    setGroupActionError(null);
   };
 
   const handleCombine = async () => {
-    if (mergeIds.length < 2 || !mergeTitle.trim()) return;
-    await onCombineSingles({
-      ids: mergeIds,
-      title: mergeTitle.trim(),
-      deleteOriginals,
-    });
-    cancelSelection();
-    showCreateToast(messages.manager.groupCombined);
+    if (mergeIds.length < 2 || !mergeTitle.trim() || groupActionPendingRef.current) return;
+    groupActionPendingRef.current = true;
+    setGroupActionPending("combine");
+    setGroupActionError(null);
+    try {
+      await onCombineSingles({
+        ids: mergeIds,
+        title: mergeTitle.trim(),
+        deleteOriginals,
+      });
+      cancelSelection();
+      showCreateToast(messages.manager.groupCombined);
+    } catch (error) {
+      console.error("Failed to combine prompts:", error);
+      setGroupActionError(messages.manager.combineFailed);
+    } finally {
+      groupActionPendingRef.current = false;
+      setGroupActionPending(null);
+    }
   };
 
   const handleSplit = async (id: string) => {
-    await onSplitGroup(id);
-    setSplitConfirmId(null);
-    showCreateToast(messages.manager.groupSplit);
+    if (groupActionPendingRef.current) return;
+    groupActionPendingRef.current = true;
+    setGroupActionPending("split");
+    setGroupActionError(null);
+    try {
+      await onSplitGroup(id);
+      setSplitConfirmId(null);
+      showCreateToast(messages.manager.groupSplit);
+    } catch (error) {
+      console.error("Failed to split prompt group:", error);
+      setGroupActionError(messages.manager.splitFailed);
+    } finally {
+      groupActionPendingRef.current = false;
+      setGroupActionPending(null);
+    }
   };
 
   const moveMergeItem = (sourceId: string, targetId: string) => {
@@ -430,6 +484,24 @@ export function PromptManager({
     const to = mergeIds.indexOf(targetId);
     if (from === -1 || to === -1) return;
     setMergeIds(moveArrayItem(mergeIds, from, to));
+  };
+
+  const moveMergeItemBy = (index: number, offset: number) => {
+    const targetIndex = index + offset;
+    if (targetIndex < 0 || targetIndex >= mergeIds.length) return;
+    setMergeIds((ids) => moveArrayItem(ids, index, targetIndex));
+  };
+
+  const closeMergeDialog = () => {
+    if (groupActionPendingRef.current) return;
+    setMergeIds([]);
+    setGroupActionError(null);
+  };
+
+  const closeSplitDialog = () => {
+    if (groupActionPendingRef.current) return;
+    setSplitConfirmId(null);
+    setGroupActionError(null);
   };
 
   const mergePrompts = mergeIds
@@ -845,6 +917,7 @@ export function PromptManager({
                                   onClick={() => {
                                     setSplitConfirmId(prompt.id);
                                     setOpenMenuId(null);
+                                    setGroupActionError(null);
                                   }}
                                 >
                                   {messages.manager.splitIntoSingles}
@@ -874,7 +947,7 @@ export function PromptManager({
               <div
                 className="manager-dialog-backdrop"
                 onMouseDown={(event) => {
-                  if (event.target === event.currentTarget) setMergeIds([]);
+                  if (event.target === event.currentTarget) closeMergeDialog();
                 }}
               >
                 <form
@@ -883,11 +956,11 @@ export function PromptManager({
                   aria-modal="true"
                   aria-labelledby="merge-dialog-title"
                   onKeyDown={(event) => {
-                    if (event.key === "Escape") setMergeIds([]);
+                    if (event.key === "Escape") closeMergeDialog();
                   }}
                   onSubmit={(event) => {
                     event.preventDefault();
-                    runSubmitOnce(handleCombine);
+                    void handleCombine();
                   }}
                 >
                   <div>
@@ -932,16 +1005,33 @@ export function PromptManager({
                             <strong>{prompt.title}</strong>
                             <small>{getPromptContainerPreviewLines(prompt)[0]}</small>
                           </span>
-                          <button
-                            className="merge-remove-button"
-                            type="button"
-                            aria-label={messages.manager.removeFromCombination(prompt.title)}
-                            onClick={() => setMergeIds((ids) =>
-                              ids.filter((id) => id !== prompt.id)
-                            )}
-                          >
-                            ×
-                          </button>
+                          <span className="merge-order-actions">
+                            <button
+                              type="button"
+                              aria-label={messages.manager.moveCombinedPromptUp(prompt.title)}
+                              disabled={index === 0}
+                              onClick={() => moveMergeItemBy(index, -1)}
+                            >
+                              ↑
+                            </button>
+                            <button
+                              type="button"
+                              aria-label={messages.manager.moveCombinedPromptDown(prompt.title)}
+                              disabled={index === mergePrompts.length - 1}
+                              onClick={() => moveMergeItemBy(index, 1)}
+                            >
+                              ↓
+                            </button>
+                            <button
+                              type="button"
+                              aria-label={messages.manager.removeFromCombination(prompt.title)}
+                              onClick={() => setMergeIds((ids) =>
+                                ids.filter((id) => id !== prompt.id)
+                              )}
+                            >
+                              ×
+                            </button>
+                          </span>
                         </div>
                       ))}
                     </div>
@@ -957,18 +1047,26 @@ export function PromptManager({
                       <small>{messages.manager.deleteOriginalsDescription}</small>
                     </span>
                   </label>
+                  {groupActionError ? (
+                    <div className="manager-dialog-error" role="alert">
+                      {groupActionError}
+                    </div>
+                  ) : null}
                   <div className="manager-dialog-actions">
                     <button
                       className="button button-secondary"
                       type="button"
-                      onClick={() => setMergeIds([])}
+                      disabled={groupActionPending === "combine"}
+                      onClick={closeMergeDialog}
                     >
                       {messages.manager.cancel}
                     </button>
                     <button
                       className="button button-primary"
                       type="submit"
-                      disabled={mergeIds.length < 2 || !mergeTitle.trim()}
+                      disabled={groupActionPending === "combine"
+                        || mergeIds.length < 2
+                        || !mergeTitle.trim()}
                     >
                       {deleteOriginals
                         ? messages.manager.createGroupAndDelete
@@ -982,7 +1080,7 @@ export function PromptManager({
               <div
                 className="manager-dialog-backdrop"
                 onMouseDown={(event) => {
-                  if (event.target === event.currentTarget) setSplitConfirmId(null);
+                  if (event.target === event.currentTarget) closeSplitDialog();
                 }}
               >
                 <div
@@ -991,7 +1089,7 @@ export function PromptManager({
                   aria-modal="true"
                   aria-labelledby="split-dialog-title"
                   onKeyDown={(event) => {
-                    if (event.key === "Escape") setSplitConfirmId(null);
+                    if (event.key === "Escape") closeSplitDialog();
                   }}
                 >
                   <div>
@@ -1011,19 +1109,26 @@ export function PromptManager({
                         </div>
                       ))}
                   </div>
+                  {groupActionError ? (
+                    <div className="manager-dialog-error" role="alert">
+                      {groupActionError}
+                    </div>
+                  ) : null}
                   <div className="manager-dialog-actions">
                     <button
                       className="button button-secondary"
                       type="button"
                       autoFocus
-                      onClick={() => setSplitConfirmId(null)}
+                      disabled={groupActionPending === "split"}
+                      onClick={closeSplitDialog}
                     >
                       {messages.manager.cancel}
                     </button>
                     <button
                       className="button button-primary"
                       type="button"
-                      onClick={() => runSubmitOnce(() => handleSplit(splitPrompt.id))}
+                      disabled={groupActionPending === "split"}
+                      onClick={() => void handleSplit(splitPrompt.id)}
                     >
                       {messages.manager.confirmSplit}
                     </button>

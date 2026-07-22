@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { render, screen, fireEvent, waitFor } from "@testing-library/react";
+import { act, render, screen, fireEvent, waitFor } from "@testing-library/react";
 import { PromptManager } from "./PromptManager";
 import { getMessages } from "../shared/i18n";
 import type { PromptCategory, PromptContainer } from "../shared/promptTypes";
@@ -512,12 +512,20 @@ describe("prompt manager", () => {
     expect(deleteId).toBe("1");
   });
 
-  it("uses the same four row actions for singles and groups", () => {
-    const { container } = renderManager();
+  it("uses the same standard actions and overflow menu for singles and groups", () => {
+    renderManager();
 
-    const actionRows = [...container.querySelectorAll(".prompt-actions")];
-    expect(actionRows).toHaveLength(2);
-    expect(actionRows.map((row) => row.querySelectorAll("button").length)).toEqual([4, 4]);
+    expect(screen.getAllByRole("button", { name: "编辑" })).toHaveLength(2);
+    expect(screen.getByRole("button", { name: "Code Review 的更多操作" })).toBeTruthy();
+    expect(screen.getByRole("button", { name: "Repair Group 的更多操作" })).toBeTruthy();
+
+    fireEvent.click(screen.getByRole("button", { name: "Code Review 的更多操作" }));
+    expect(screen.getByRole("menuitem", { name: "删除" })).toBeTruthy();
+    expect(screen.queryByRole("menuitem", { name: "拆分为单条" })).toBeNull();
+
+    fireEvent.click(screen.getByRole("button", { name: "Repair Group 的更多操作" }));
+    expect(screen.getByRole("menuitem", { name: "拆分为单条" })).toBeTruthy();
+    expect(screen.getByRole("menuitem", { name: "删除" })).toBeTruthy();
   });
 
   it("combines non-adjacent single prompts with source deletion enabled by default", async () => {
@@ -561,6 +569,106 @@ describe("prompt manager", () => {
     }]));
   });
 
+  it("reorders selected prompts and keeps source singles when requested", async () => {
+    const combineCalls: Array<{
+      ids: string[];
+      title: string;
+      deleteOriginals: boolean;
+    }> = [];
+    const singles = [
+      makePrompt({ id: "1", title: "First", order: 0 }),
+      makePrompt({ id: "2", title: "Second", order: 1 }),
+      makePrompt({ id: "3", title: "Third", order: 2 }),
+    ];
+    renderManager({
+      prompts: singles,
+      categoryCounts: { [defaultCategory.id]: singles.length },
+      totalPromptCount: singles.length,
+      onCombineSingles: (input) => { combineCalls.push(input); },
+    });
+
+    fireEvent.click(screen.getByRole("button", { name: "选择" }));
+    fireEvent.click(screen.getByRole("checkbox", { name: "选择 First" }));
+    fireEvent.click(screen.getByRole("checkbox", { name: "选择 Third" }));
+    fireEvent.click(screen.getByRole("button", { name: "合并为群组" }));
+    fireEvent.click(screen.getByRole("button", { name: "上移 Third" }));
+    fireEvent.click(screen.getByRole("checkbox", {
+      name: /合并后删除原来的 2 个单条提示词/,
+    }));
+    fireEvent.change(screen.getByDisplayValue("新提示词组"), {
+      target: { value: "Combined" },
+    });
+    fireEvent.click(screen.getByRole("button", { name: "创建群组" }));
+
+    await waitFor(() => expect(combineCalls).toEqual([{
+      ids: ["3", "1"],
+      title: "Combined",
+      deleteOriginals: false,
+    }]));
+  });
+
+  it("keeps combine single-flight until persistence settles", async () => {
+    let resolveCombine: (() => void) | null = null;
+    const pendingCombine = new Promise<void>((resolve) => {
+      resolveCombine = resolve;
+    });
+    let combineCount = 0;
+    const singles = [
+      makePrompt({ id: "1", title: "First", order: 0 }),
+      makePrompt({ id: "2", title: "Second", order: 1 }),
+    ];
+    renderManager({
+      prompts: singles,
+      categoryCounts: { [defaultCategory.id]: singles.length },
+      totalPromptCount: singles.length,
+      onCombineSingles: async () => {
+        combineCount += 1;
+        await pendingCombine;
+      },
+    });
+
+    fireEvent.click(screen.getByRole("button", { name: "选择" }));
+    fireEvent.click(screen.getByRole("checkbox", { name: "选择 First" }));
+    fireEvent.click(screen.getByRole("checkbox", { name: "选择 Second" }));
+    fireEvent.click(screen.getByRole("button", { name: "合并为群组" }));
+    const submit = screen.getByRole("button", { name: "创建群组并删除原提示词" });
+    fireEvent.click(submit);
+    fireEvent.submit(submit.closest("form")!);
+
+    expect(combineCount).toBe(1);
+    expect((submit as HTMLButtonElement).disabled).toBe(true);
+
+    await act(async () => {
+      resolveCombine?.();
+      await pendingCombine;
+    });
+    await waitFor(() => {
+      expect(screen.queryByRole("dialog", { name: "合并为提示词组" })).toBeNull();
+    });
+  });
+
+  it("keeps the combine dialog open and reports persistence failures", async () => {
+    const singles = [
+      makePrompt({ id: "1", title: "First", order: 0 }),
+      makePrompt({ id: "2", title: "Second", order: 1 }),
+    ];
+    renderManager({
+      prompts: singles,
+      categoryCounts: { [defaultCategory.id]: singles.length },
+      totalPromptCount: singles.length,
+      onCombineSingles: async () => { throw new Error("write failed"); },
+    });
+
+    fireEvent.click(screen.getByRole("button", { name: "选择" }));
+    fireEvent.click(screen.getByRole("checkbox", { name: "选择 First" }));
+    fireEvent.click(screen.getByRole("checkbox", { name: "选择 Second" }));
+    fireEvent.click(screen.getByRole("button", { name: "合并为群组" }));
+    fireEvent.click(screen.getByRole("button", { name: "创建群组并删除原提示词" }));
+
+    expect((await screen.findByRole("alert")).textContent).toContain("合并失败");
+    expect(screen.getByRole("dialog", { name: "合并为提示词组" })).toBeTruthy();
+  });
+
   it("splits a group from the same row menu used by single prompts", async () => {
     const splitIds: string[] = [];
     renderManager({ onSplitGroup: (id) => { splitIds.push(id); } });
@@ -572,6 +680,19 @@ describe("prompt manager", () => {
     fireEvent.click(screen.getByRole("button", { name: "确认拆分" }));
 
     await waitFor(() => expect(splitIds).toEqual(["2"]));
+  });
+
+  it("keeps the split dialog open and reports persistence failures", async () => {
+    renderManager({
+      onSplitGroup: async () => { throw new Error("write failed"); },
+    });
+
+    fireEvent.click(screen.getByRole("button", { name: "Repair Group 的更多操作" }));
+    fireEvent.click(screen.getByRole("menuitem", { name: "拆分为单条" }));
+    fireEvent.click(screen.getByRole("button", { name: "确认拆分" }));
+
+    expect((await screen.findByRole("alert")).textContent).toContain("拆分失败");
+    expect(screen.getByRole("dialog", { name: "拆分提示词组" })).toBeTruthy();
   });
 
   it("calls reorder with new order when moving down", () => {

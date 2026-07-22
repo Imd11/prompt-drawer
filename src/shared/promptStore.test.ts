@@ -178,6 +178,47 @@ describe("prompt store", () => {
     ]);
   });
 
+  it("restores titles, bodies, order, and legacy behavior after combine and split", async () => {
+    const store = createTestStore();
+    const first = await store.create({
+      title: "First",
+      body: "first body",
+      sendBehavior: "paste_only",
+    });
+    const second = await store.create({
+      title: "Second",
+      body: "second body",
+      sendBehavior: "paste_command_enter",
+    });
+
+    const group = await store.combineSingles({
+      ids: [second.id, first.id],
+      title: "Combined",
+      deleteOriginals: true,
+    });
+    expect(group.sendBehavior).toBe("inherit");
+
+    await store.splitGroup(group.id);
+    const restored = await store.list();
+
+    expect(restored.map((container) => ({
+      title: container.title,
+      body: container.prompts[0].body,
+      sendBehavior: container.sendBehavior,
+    }))).toEqual([
+      {
+        title: "Second",
+        body: "second body",
+        sendBehavior: "paste_command_enter",
+      },
+      {
+        title: "First",
+        body: "first body",
+        sendBehavior: "paste_only",
+      },
+    ]);
+  });
+
   it("generates stable titles when splitting a legacy group without entry titles", async () => {
     const store = createTestStore();
     const group = await store.createGroup({

@@ -90,25 +90,28 @@ function entryFromBody(
   body: string,
   order: number,
   id = generateId("entry"),
-  title?: string
+  title?: string,
+  sendBehavior?: PromptContainerInput["sendBehavior"]
 ): PromptEntry {
   return {
     id,
     ...(title?.trim() ? { title: title.trim() } : {}),
+    ...(sendBehavior ? { sendBehavior: normalizePromptSendBehavior(sendBehavior) } : {}),
     body: body.trim(),
     order,
   };
 }
 
 function normalizeEntries(
-  prompts: Array<{ id?: string; title?: string; body: string; order?: number }>
+  prompts: PromptContainerInput["prompts"]
 ): PromptEntry[] {
   return prompts
     .map((prompt, index) => entryFromBody(
       prompt.body,
       prompt.order ?? index,
       prompt.id,
-      prompt.title
+      prompt.title,
+      prompt.sendBehavior
     ))
     .filter((prompt) => prompt.body.length > 0)
     .sort((a, b) => a.order - b.order)
@@ -169,6 +172,7 @@ function containerToInput(container: PromptContainer | LegacyPromptContainer): P
     prompts: sortEntries(container.prompts).map((prompt) => ({
       id: prompt.id,
       title: prompt.title,
+      sendBehavior: prompt.sendBehavior,
       body: prompt.body,
       order: prompt.order,
     })),
@@ -529,7 +533,7 @@ export function createPromptStore(adapter: StorageAdapter) {
 
     async createGroup(input: {
       title: string;
-      prompts: Array<{ id?: string; title?: string; body: string; order?: number }>;
+      prompts: PromptContainerInput["prompts"];
       intervalMs?: number;
       sendBehavior?: PromptContainerInput["sendBehavior"];
       categoryId?: string;
@@ -566,7 +570,7 @@ export function createPromptStore(adapter: StorageAdapter) {
         title?: string;
         body?: string;
         type?: "single" | "group";
-        prompts?: Array<{ id?: string; title?: string; body: string; order?: number }>;
+        prompts?: PromptContainerInput["prompts"];
         intervalMs?: number;
         sendBehavior?: PromptContainerInput["sendBehavior"];
       }
@@ -642,6 +646,7 @@ export function createPromptStore(adapter: StorageAdapter) {
           sendBehavior,
           prompts: singles.map((container) => ({
             title: container.title,
+            sendBehavior: container.sendBehavior,
             body: sortEntries(container.prompts)[0].body,
           })),
           intervalMs: DEFAULT_GROUP_INTERVAL_MS,
@@ -695,7 +700,7 @@ export function createPromptStore(adapter: StorageAdapter) {
         {
           title: entry.title?.trim() || `${group.title} ${index + 1}`,
           type: "single",
-          sendBehavior: group.sendBehavior,
+          sendBehavior: entry.sendBehavior ?? group.sendBehavior,
           prompts: [{ body: entry.body }],
           intervalMs: DEFAULT_GROUP_INTERVAL_MS,
           categoryId: group.categoryId,
