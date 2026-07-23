@@ -1438,13 +1438,16 @@ button {
 
 .prompt-manager .prompt-item.is-reorder-enabled {
   cursor: grab;
+  /* Resident on purpose: dragListener={false} turns off Motion's built-in
+     user-select:none (framer-motion use-props), so we must supply it ourselves
+     or the browser anchors a text selection while dragging. */
+  user-select: none;
 }
 
 .prompt-manager .prompt-item.is-reorder-enabled:active,
 .prompt-manager .prompt-item.is-dragging {
   z-index: 4;
   cursor: grabbing;
-  user-select: none;
   will-change: transform;
   background: var(--pp-surface);
   border: 1px solid var(--pp-border-strong);
