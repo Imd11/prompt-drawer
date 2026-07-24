@@ -211,6 +211,11 @@ pub fn current_target_window_identity(_pid: u32) -> Option<TargetWindowIdentity>
     None
 }
 
+/// Public wrapper mirroring the macOS helper. Non-macOS builds treat no bundle as a browser.
+pub fn target_bundle_is_supported_browser(_bundle_id: &str) -> bool {
+    false
+}
+
 pub fn active_browser_page_url(_pid: u32, _bundle_id: &str) -> Option<String> {
     None
 }
