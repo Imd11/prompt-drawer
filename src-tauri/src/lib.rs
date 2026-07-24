@@ -1321,6 +1321,58 @@ impl PromptPickSessionState {
         true
     }
 
+    /// Fill a missing window identity for the current session. Parallel to
+    /// `set_page_url_if_current`. Does NOT overwrite an already-captured window.
+    pub fn set_window_if_current(&self, session_id: u64, window: TargetWindowIdentity) -> bool {
+        let mut state = self
+            .0
+            .inner
+            .lock()
+            .expect("prompt pick session lock poisoned");
+        if state.active_session_id != session_id || state.consumed {
+            return false;
+        }
+        let Some(identity) = state.identity.as_mut() else {
+            return false;
+        };
+        if identity.window.is_none() {
+            identity.window = Some(window);
+        }
+        true
+    }
+
+    /// True when `session_id` is no longer the active, unconsumed session.
+    /// Used by the background refresh loop to stop as soon as the user picks.
+    pub fn is_consumed(&self, session_id: u64) -> bool {
+        let state = self
+            .0
+            .inner
+            .lock()
+            .expect("prompt pick session lock poisoned");
+        state.active_session_id != session_id || state.consumed
+    }
+
+    /// True when the captured identity has everything needed to send accurately:
+    /// window present, and (page_url present OR the target is not a browser).
+    /// Returns `true` for a stale/consumed session so the loop exits promptly.
+    pub fn target_capture_complete(&self, session_id: u64) -> bool {
+        let state = self
+            .0
+            .inner
+            .lock()
+            .expect("prompt pick session lock poisoned");
+        if state.active_session_id != session_id || state.consumed {
+            return true;
+        }
+        let Some(identity) = &state.identity else {
+            return false;
+        };
+        let window_ready = identity.window.is_some();
+        let page_url_ready = identity.page_url.is_some()
+            || !platform::macos::target_bundle_is_supported_browser(&identity.application.bundle_id);
+        window_ready && page_url_ready
+    }
+
     pub fn clear(&self) {
         let mut state = self
             .0
@@ -3328,6 +3380,118 @@ mod last_input_target_tests {
 
         state.begin_if_new(8);
         assert!(state.get().is_none());
+    }
+
+    #[test]
+    fn session_is_consumed_reflects_active_session_and_consumed_flag() {
+        let state = PromptPickSessionState::default();
+        state.begin(7);
+        assert!(!state.is_consumed(7));
+        assert!(state.is_consumed(8)); // stale session
+
+        let _ = state.take(); // consumed
+        assert!(state.is_consumed(7));
+    }
+
+    #[test]
+    fn set_window_if_current_only_fills_a_missing_window() {
+        let state = PromptPickSessionState::default();
+        state.begin(11);
+        state.set_captured_if_current(
+            11,
+            prompt_target("Chrome", "com.google.Chrome", Some(42)),
+            captured_identity("com.google.Chrome", std::process::id()),
+        );
+        assert!(state.captured_identity().unwrap().window.is_none());
+
+        let first = TargetWindowIdentity {
+            owner_pid: 42,
+            frame: CandidateInput {
+                x: 10.0,
+                y: 20.0,
+                width: 1200.0,
+                height: 800.0,
+            },
+            role: Some("AXWindow".to_string()),
+            title_hash: Some("first".to_string()),
+            cg_window_id: None,
+        };
+        let second = TargetWindowIdentity {
+            owner_pid: 42,
+            frame: CandidateInput {
+                x: 500.0,
+                y: 600.0,
+                width: 1000.0,
+                height: 700.0,
+            },
+            role: Some("AXWindow".to_string()),
+            title_hash: Some("second".to_string()),
+            cg_window_id: None,
+        };
+
+        assert!(state.set_window_if_current(11, first.clone()));
+        assert_eq!(state.captured_identity().unwrap().window.as_ref(), Some(&first));
+        assert!(state.set_window_if_current(11, second));
+        assert_eq!(state.captured_identity().unwrap().window.as_ref(), Some(&first));
+    }
+
+    #[test]
+    fn target_capture_complete_requires_window_and_browser_page_url() {
+        let state = PromptPickSessionState::default();
+        state.begin(12);
+        assert!(!state.target_capture_complete(12));
+
+        state.set_captured_if_current(
+            12,
+            prompt_target("Chrome", "com.google.Chrome", Some(42)),
+            captured_identity("com.google.Chrome", std::process::id()),
+        );
+        assert!(!state.target_capture_complete(12));
+
+        let window = TargetWindowIdentity {
+            owner_pid: 42,
+            frame: CandidateInput {
+                x: 10.0,
+                y: 20.0,
+                width: 1200.0,
+                height: 800.0,
+            },
+            role: Some("AXWindow".to_string()),
+            title_hash: Some("complete".to_string()),
+            cg_window_id: None,
+        };
+        assert!(state.set_window_if_current(12, window));
+        assert!(!state.target_capture_complete(12));
+
+        assert!(state.set_page_url_if_current(
+            12,
+            "com.google.Chrome",
+            "https://chatgpt.com/c/123".to_string(),
+        ));
+        assert!(state.target_capture_complete(12));
+
+        // Non-browser apps do not require page_url.
+        state.begin(13);
+        let mut codex = captured_identity("com.openai.codex", std::process::id());
+        codex.window = Some(TargetWindowIdentity {
+            owner_pid: 42,
+            frame: CandidateInput {
+                x: 1.0,
+                y: 2.0,
+                width: 800.0,
+                height: 600.0,
+            },
+            role: Some("AXWindow".to_string()),
+            title_hash: None,
+            cg_window_id: None,
+        });
+        state.set_captured_if_current(
+            13,
+            prompt_target("Codex", "com.openai.codex", Some(42)),
+            codex,
+        );
+        assert!(state.target_capture_complete(13));
+        assert!(state.target_capture_complete(99)); // stale session exits promptly
     }
 
     #[test]

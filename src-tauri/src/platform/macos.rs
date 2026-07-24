@@ -22,6 +22,12 @@ use input_profiles::{
     input_capability_profile, input_capability_profile_for_page, is_supported_browser,
     FocusAcquisitionPolicy, InputCapabilityProfile, PasteVerificationPolicy,
 };
+
+/// Public wrapper so callers outside `platform::macos` can ask whether a bundle id
+/// is a supported browser (used to decide whether page_url is part of capture completeness).
+pub fn target_bundle_is_supported_browser(bundle_id: &str) -> bool {
+    is_supported_browser(bundle_id)
+}
 use process_group::{discover_trusted_candidate_processes, TrustedProcess};
 use serde::Serialize;
 use std::collections::{hash_map::DefaultHasher, VecDeque};
