@@ -677,16 +677,67 @@ fn start_prompt_pick_session_capture(
     recent_state: crate::LastInputTargetState,
 ) {
     tauri::async_runtime::spawn(async move {
-        let capture_state = session_state.clone();
         let result = tauri::async_runtime::spawn_blocking(move || {
-            crate::capture_prompt_pick_session_target(&capture_state, &recent_state, session_id)
+            // One full capture to establish identity and recent_state (runs
+            // current_input_target() exactly once).
+            crate::capture_prompt_pick_session_target(&session_state, &recent_state, session_id);
+            // Lightweight refresh: re-read only the cheap missing pieces until the
+            // identity is complete or the user picks. No current_input_target() and
+            // no session-reset on retries.
+            run_prompt_pick_session_capture_loop(session_id, &session_state, std::thread::sleep);
+            session_state.finish_capture(session_id);
         })
         .await;
-        session_state.finish_capture(session_id);
         if let Err(error) = result {
             eprintln!("Prompt pick session task failed: {error}");
         }
     });
+}
+
+/// Bounded refresh loop. Stops as soon as the captured identity is complete, the
+/// session is consumed, or MAX_ATTEMPTS is reached. Each iteration re-reads only
+/// the cheap missing fields (window, page_url) — never the full input traversal.
+fn run_prompt_pick_session_capture_loop(
+    session_id: u64,
+    session_state: &crate::PromptPickSessionState,
+    mut sleep: impl FnMut(std::time::Duration),
+) {
+    const MAX_ATTEMPTS: u32 = 10;
+    const PACING: std::time::Duration = std::time::Duration::from_millis(250);
+
+    for attempt in 0..MAX_ATTEMPTS {
+        if session_state.target_capture_complete(session_id) {
+            break;
+        }
+        if session_state.is_consumed(session_id) {
+            break;
+        }
+        refresh_prompt_pick_session_capture(session_id, session_state);
+        if attempt + 1 < MAX_ATTEMPTS {
+            sleep(PACING);
+        }
+    }
+}
+
+/// Re-read only the cheap, possibly-missing pieces for the frozen target and
+/// merge them via the existing guarded setters.
+fn refresh_prompt_pick_session_capture(
+    session_id: u64,
+    session_state: &crate::PromptPickSessionState,
+) {
+    let Some(target) = session_state.get() else {
+        return;
+    };
+    let Some(pid) = target.pid else {
+        return;
+    };
+    let bundle_id = target.app.bundle_id.clone();
+    if let Some(window) = crate::platform::macos::current_target_window_identity(pid) {
+        session_state.set_window_if_current(session_id, window);
+    }
+    if let Some(page_url) = crate::platform::macos::active_browser_page_url(pid, &bundle_id) {
+        session_state.set_page_url_if_current(session_id, &bundle_id, page_url);
+    }
 }
 
 fn build_prompt_button_window(
@@ -1650,6 +1701,64 @@ mod tests {
         assert!(capture_source.contains("capture_prompt_pick_session_target"));
         assert!(capture_source.contains("spawn_blocking"));
         assert!(capture_source.contains("finish_capture"));
+        assert!(capture_source.contains("run_prompt_pick_session_capture_loop"));
+        assert!(capture_source.contains("refresh_prompt_pick_session_capture"));
+        assert!(capture_source.contains("current_target_window_identity"));
+        assert!(capture_source.contains("active_browser_page_url"));
+        assert!(!capture_source.contains("begin_if_new"));
+        // Full input traversal only once (the initial capture), not inside the refresh loop body.
+        let refresh_start = capture_source
+            .find("fn refresh_prompt_pick_session_capture")
+            .expect("refresh helper should exist");
+        let refresh_source = &capture_source[refresh_start..];
+        assert!(!refresh_source.contains("current_input_target"));
+        assert!(!refresh_source.contains("capture_prompt_pick_session_target"));
+    }
+
+    #[test]
+    fn capture_refresh_loop_exits_when_session_is_consumed() {
+        // Contract lock for the lightweight retry loop: no real AX needed; a consumed
+        // session must stop the loop early instead of burning MAX_ATTEMPTS.
+        let session_state = crate::PromptPickSessionState::default();
+        let session_id = 42u64;
+        session_state.begin(session_id);
+
+        let mut sleep_count = 0u32;
+        run_prompt_pick_session_capture_loop(session_id, &session_state, |_| {
+            sleep_count += 1;
+            if sleep_count == 1 {
+                let _ = session_state.take();
+            }
+        });
+
+        assert!(session_state.is_consumed(session_id));
+        assert!(
+            sleep_count >= 1 && sleep_count < 10,
+            "loop should exit soon after consume, got {sleep_count} sleeps"
+        );
+    }
+
+    #[test]
+    fn start_prompt_pick_session_capture_does_not_block_and_signals_finish() {
+        // The loop spawns and must not run heavy work inline. Real AX behavior is
+        // covered by the manual QA matrix; here we lock: spawn is near-instant and
+        // a consumed session resolves wait_for_capture quickly.
+        // Uses a regular #[test] (not #[tokio::test]) — tokio macros/rt aren't
+        // declared in this crate; tauri::async_runtime provides the runtime.
+        let session_state = crate::PromptPickSessionState::default();
+        let recent_state = crate::LastInputTargetState::default();
+        let session_id = 42;
+        session_state.begin(session_id);
+        session_state.mark_capture_pending(session_id);
+
+        let started = std::time::Instant::now();
+        start_prompt_pick_session_capture(session_id, session_state.clone(), recent_state);
+        assert!(started.elapsed() < std::time::Duration::from_millis(50));
+
+        std::thread::sleep(std::time::Duration::from_millis(150));
+        let _ = session_state.take(); // consumed → loop exits → finish_capture fires
+        let ready = session_state.wait_for_capture(std::time::Duration::from_millis(500));
+        assert!(ready);
     }
 
     #[test]
